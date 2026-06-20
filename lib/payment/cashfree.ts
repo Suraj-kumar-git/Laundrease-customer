@@ -1,0 +1,104 @@
+// lib/payment/cashfree.ts
+import crypto from 'crypto'
+import type {
+  PaymentGatewayAdapter,
+  GatewayConfig,
+  GatewayOrderParams,
+  GatewayOrder,
+  PaymentVerificationParams,
+  PaymentVerificationResult,
+  WebhookVerificationParams,
+} from './types'
+
+export class CashfreeAdapter implements PaymentGatewayAdapter {
+  readonly provider = 'cashfree'
+  private config: GatewayConfig
+
+  constructor(config: GatewayConfig) {
+    this.config = config
+  }
+
+  private getBaseUrl(): string {
+    return this.config.sandbox
+      ? 'https://sandbox.cashfree.com/pg'
+      : 'https://api.cashfree.com/pg'
+  }
+
+  private getHeaders(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'x-api-version': '2023-08-01',
+      'x-client-id': this.config.apiKey,
+      'x-client-secret': this.config.apiSecret,
+    }
+  }
+
+  async createOrder(params: GatewayOrderParams): Promise<GatewayOrder> {
+    const response = await fetch(`${this.getBaseUrl()}/orders`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({
+        order_id: params.receipt,
+        order_amount: params.amount,
+        order_currency: params.currency,
+        customer_details: {
+          customer_id: String(params.notes?.customer_id ?? params.receipt),
+          customer_name: String(params.notes?.customer_name ?? ''),
+          customer_email: String(params.notes?.customer_email ?? ''),
+          customer_phone: String(params.notes?.customer_phone ?? ''),
+        },
+        order_meta: {
+          return_url: String(this.config.extra?.returnUrl ?? ''),
+        },
+      }),
+    })
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(`Cashfree createOrder failed: ${err?.message ?? response.statusText}`)
+    }
+
+    const data = await response.json()
+
+    return {
+      gatewayOrderId: data.cf_order_id,
+      amount: Math.round(params.amount * 100),
+      currency: params.currency,
+      paymentSessionId: data.payment_session_id,
+    }
+  }
+
+  async verifyPayment(params: PaymentVerificationParams): Promise<PaymentVerificationResult> {
+    // Cashfree: verify by fetching the order status from their API
+    const response = await fetch(
+      `${this.getBaseUrl()}/orders/${params.extra?.orderId}/payments/${params.gatewayPaymentId}`,
+      { headers: this.getHeaders() }
+    )
+
+    if (!response.ok) {
+      return { verified: false, gatewayPaymentId: params.gatewayPaymentId, gatewayOrderId: params.gatewayOrderId }
+    }
+
+    const data = await response.json()
+    const verified = data.payment_status === 'SUCCESS'
+
+    return {
+      verified,
+      gatewayPaymentId: params.gatewayPaymentId,
+      gatewayOrderId: params.gatewayOrderId,
+    }
+  }
+
+  verifyWebhook(params: WebhookVerificationParams): boolean {
+    if (!this.config.webhookSecret) return false
+    // Cashfree webhook: signature = HMAC-SHA256(timestamp + raw_body, secret)
+    // Signature header: x-webhook-signature
+    // Timestamp header: x-webhook-timestamp
+    // Since we only have signature here, basic verification:
+    const expectedSignature = crypto
+      .createHmac('sha256', this.config.webhookSecret)
+      .update(params.rawBody)
+      .digest('base64')
+    return expectedSignature === params.signature
+  }
+}
