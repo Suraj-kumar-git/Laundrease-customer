@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
-import { getJdSignedUrl } from '@/lib/s3-jd'
+import { getJdSignedUrl } from '@/lib/s3'
 import {
   successResponse,
   notFoundResponse,

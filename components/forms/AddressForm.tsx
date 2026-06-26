@@ -17,6 +17,7 @@ interface AddressFormProps {
 
 export interface AddressFormData {
   label:          string
+  tags:           string[]
   address_line1:  string
   address_line2:  string
   landmark:       string
@@ -32,9 +33,10 @@ export interface AddressFormData {
 }
 
 const LABEL_PRESETS = ['Home', 'Work', 'Other']
+const TAG_PRESETS = ['Front Gate', 'Evening Delivery', 'Call Before', 'No Bell', 'Pet Friendly', 'Security Desk']
 
 const EMPTY: AddressFormData = {
-  label: '', address_line1: '', address_line2: '', landmark: '',
+  label: '', tags: [], address_line1: '', address_line2: '', landmark: '',
   neighborhood: '', city: '', state: '', postal_code: '', country_code: 'IN',
   instructions: '', contact_name: '', contact_phone: '', is_default: false,
 }
@@ -83,10 +85,28 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
   const [form,   setForm]   = useState<AddressFormData>({ ...EMPTY, ...initial })
   const [errors, setErrors] = useState<Partial<Record<keyof AddressFormData, string>>>({})
   const [saving, setSaving] = useState(false)
+  const [customTag, setCustomTag] = useState('')
 
   const set = (field: keyof AddressFormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm(prev => ({ ...prev, [field]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value }))
+
+  const toggleTag = (tag: string) =>
+    setForm(prev => ({
+      ...prev,
+      tags: prev.tags.includes(tag) ? prev.tags.filter(t => t !== tag) : [...prev.tags, tag],
+    }))
+
+  const addCustomTag = () => {
+    const tag = customTag.trim()
+    if (tag && !form.tags.includes(tag)) {
+      setForm(prev => ({ ...prev, tags: [...prev.tags, tag] }))
+    }
+    setCustomTag('')
+  }
+
+  const removeTag = (tag: string) =>
+    setForm(prev => ({ ...prev, tags: prev.tags.filter(t => t !== tag) }))
 
   const validate = (): boolean => {
     const errs: typeof errors = {}
@@ -228,6 +248,55 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
             placeholder="+91 98765 43210" type="tel" maxLength={20} />
         </Field>
       </div>
+
+      {/* Tags */}
+      <Field label="Tags">
+        <div className="flex flex-wrap gap-2">
+          {TAG_PRESETS.map(tag => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => toggleTag(tag)}
+              className={cn(
+                'rounded-xl border px-3 py-1.5 text-xs font-medium transition-all',
+                form.tags.includes(tag)
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border/50 bg-card text-muted-foreground hover:border-border hover:text-foreground'
+              )}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+        {form.tags.filter(t => !TAG_PRESETS.includes(t)).length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {form.tags.filter(t => !TAG_PRESETS.includes(t)).map(tag => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => removeTag(tag)}
+                className="rounded-xl border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary"
+              >
+                {tag} ×
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="mt-2 flex gap-2">
+          <Input
+            value={customTag}
+            onChange={e => setCustomTag(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomTag() } }}
+            placeholder="Add custom tag…"
+            maxLength={50}
+            className="flex-1"
+          />
+          <button type="button" onClick={addCustomTag}
+            className="rounded-xl border border-border/50 px-4 text-sm font-medium text-muted-foreground hover:bg-muted">
+            Add
+          </button>
+        </div>
+      </Field>
 
       {/* Default address toggle */}
       <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-border/50 bg-card p-4 transition-all hover:border-border">

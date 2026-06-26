@@ -3,13 +3,19 @@
 import { useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import {
-  Search, MapPin, ChevronRight, Plus, Minus,
+  Search, MapPin, Plus, Minus,
   Zap, Clock, ShoppingBag, Trash2, ArrowRight,
   CheckCircle2, AlertCircle, Loader2, RefreshCw,
-  Info, Star,
+  Info, Star, Home, Globe, Store, ArrowLeftRight,
 } from 'lucide-react'
 import { FooterPageLayout, PageSection } from '@/components/layout/footer-page-layout'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/components/auth-provider'
+import { useCart } from '@/components/cart-provider'
+import { ProviderPicker, type PickableProvider } from './components/ProviderPicker'
+import { MyAddressStep } from './components/MyAddressStep'
+import { ProductIcon } from '@/components/customer/ProductIcon'
+import { resolveProductIconSrc } from '@/lib/product-icons'
 import type {
   AreaPricingData, ServiceWithProducts, PricingProductType,
   CartLineItem, PricingModel, ServiceCategory,
@@ -19,16 +25,6 @@ import { CATEGORY_LABELS, SERVICE_CATEGORY_LABELS } from '@/types/pricing'
 // ---- Helpers ------------------------------------------------
 function formatINR(amount: number) {
   return `₹${amount.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
-}
-
-function calcLineTotal(
-  item: Pick<CartLineItem, 'pricing_model' | 'unit_price' | 'quantity' | 'weight_kg' | 'is_express' | 'express_multiplier'>
-) {
-  const base =
-    item.pricing_model === 'per_kg'
-      ? item.unit_price * item.weight_kg
-      : item.unit_price * item.quantity
-  return item.is_express ? base * item.express_multiplier : base
 }
 
 function makeLineItemKey(productTypeId: number, serviceId: number) {
@@ -229,10 +225,21 @@ function ItemRow({
           : 'border-border/40 bg-card hover:border-border'
       )}
     >
-      <span className="text-2xl">{product.icon}</span>
+      <ProductIcon
+        src={resolveProductIconSrc(product.name)}
+        fallbackEmoji={product.icon}
+        alt={product.name}
+        size={40}
+        className="shrink-0 rounded-lg"
+      />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-foreground truncate">{product.name}</p>
-        <p className="text-xs text-muted-foreground">{priceLabel}</p>
+        <p className="text-xs text-muted-foreground">
+          {product.mrp && product.mrp > product.unit_price && (
+            <span className="line-through mr-1">{formatINR(product.mrp)}</span>
+          )}
+          {priceLabel}
+        </p>
       </div>
 
       {!inCart ? (
@@ -308,12 +315,16 @@ function SummaryPanel({
   onToggleExpress,
   areaData,
   onClear,
+  onPlaceOrder,
+  placing,
 }: {
   cartItems: CartLineItem[]
   isExpress: boolean
   onToggleExpress: () => void
   areaData: AreaPricingData
   onClear: () => void
+  onPlaceOrder: () => void
+  placing: boolean
 }) {
   const total = cartItems.reduce((sum, item) => sum + item.line_total, 0)
   const itemCount = cartItems.reduce(
@@ -448,13 +459,14 @@ function SummaryPanel({
             </p>
 
             <div className="mt-4 space-y-2">
-              <Link
-                href="/customer/auth/register"
-                className="flex items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
+              <button
+                onClick={onPlaceOrder}
+                disabled={placing}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 disabled:opacity-60"
               >
-                Sign Up & Book Now
+                {placing ? 'Placing...' : 'Place Order'}
                 <ArrowRight className="h-4 w-4" />
-              </Link>
+              </button>
               <Link
                 href="/quick-pickup"
                 className="flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
@@ -471,13 +483,30 @@ function SummaryPanel({
 }
 
 // ---- Main calculator ----------------------------------------
-function PricingCalculator({ areaData, onReset }: { areaData: AreaPricingData; onReset: () => void }) {
+function PricingCalculator({
+  areaData, onReset, onSwitchProvider, onUseBaseRates,
+}: {
+  areaData: AreaPricingData
+  onReset: () => void
+  // Shown when currently on base rates — lets the visitor pick a specific
+  // provider to see exact pricing instead.
+  onSwitchProvider?: () => void
+  // Shown when currently viewing a specific provider's rates — switches
+  // back to platform base rates for the same area.
+  onUseBaseRates?: () => void
+}) {
   const [activeServiceId, setActiveServiceId] = useState<number>(
     areaData.services[0]?.service.id ?? 0
   )
   const [activeCategory, setActiveCategory] = useState<string>('all')
-  const [cartItems, setCartItems] = useState<Map<string, CartLineItem>>(new Map())
-  const [isExpress, setIsExpress] = useState(false)
+  const cart = useCart()
+  const { isExpress } = cart
+
+  const cartItemsByKey = useMemo(() => {
+    const map = new Map<string, CartLineItem>()
+    for (const item of cart.items) map.set(makeLineItemKey(item.product_type_id, item.service_id), item)
+    return map
+  }, [cart.items])
 
   const activeService = areaData.services.find((s) => s.service.id === activeServiceId)
 
@@ -499,96 +528,45 @@ function PricingCalculator({ areaData, onReset }: { areaData: AreaPricingData; o
 
   const handleAdd = useCallback(
     (product: PricingProductType, serviceId: number, serviceName: string, expressMultiplier: number) => {
-      const key = makeLineItemKey(product.id, serviceId)
-      setCartItems((prev) => {
-        const next = new Map(prev)
-        const quantity = 1
-        const weight_kg = 1
-        const line_total = calcLineTotal({
-          pricing_model: product.pricing_model,
-          unit_price: product.unit_price,
-          quantity,
-          weight_kg,
-          is_express: isExpress,
-          express_multiplier: expressMultiplier,
-        })
-        next.set(key, {
-          product_type_id: product.id,
-          product_type_name: product.name,
-          pricing_model: product.pricing_model,
-          icon: product.icon,
-          service_id: serviceId,
-          service_name: serviceName,
-          unit_price: product.unit_price,
-          quantity,
-          weight_kg,
-          is_express: isExpress,
-          express_multiplier: expressMultiplier,
-          line_total,
-        })
-        return next
+      cart.addItem({
+        product_type_id: product.id,
+        product_type_name: product.name,
+        pricing_model: product.pricing_model,
+        icon: product.icon,
+        service_id: serviceId,
+        service_name: serviceName,
+        unit_price: product.unit_price,
+        mrp: product.mrp ?? null,
+        quantity: 1,
+        weight_kg: 1,
+        express_multiplier: expressMultiplier,
       })
     },
-    [isExpress]
+    [cart]
   )
 
-  const handleUpdate = useCallback(
-    (key: string, field: 'quantity' | 'weight_kg', value: number) => {
-      setCartItems((prev) => {
-        const next = new Map(prev)
-        const item = next.get(key)
-        if (!item) return prev
-        const updated = { ...item, [field]: value }
-        updated.line_total = calcLineTotal(updated)
-        next.set(key, updated)
-        return next
-      })
-    },
-    []
-  )
-
-  const handleRemove = useCallback((key: string) => {
-    setCartItems((prev) => {
-      const next = new Map(prev)
-      next.delete(key)
-      return next
-    })
-  }, [])
-
-  // Recalculate all totals when express toggled
-  const handleToggleExpress = useCallback(() => {
-    setIsExpress((prev) => {
-      const next = !prev
-      setCartItems((items) => {
-        const updated = new Map(items)
-        updated.forEach((item, key) => {
-          const updatedItem = { ...item, is_express: next }
-          updatedItem.line_total = calcLineTotal(updatedItem)
-          updated.set(key, updatedItem)
-        })
-        return updated
-      })
-      return next
-    })
-  }, [])
-
-  const cartArray = Array.from(cartItems.values())
+  const handleUpdate = cart.updateItem
+  const handleRemove = cart.removeItem
+  const handleToggleExpress = cart.toggleExpress
+  const cartArray = cart.items
 
   return (
     <div>
-      {/* Area info bar */}
-      <div className="mb-6 flex items-center justify-between rounded-xl border border-border/50 bg-card px-4 py-3">
-        <div className="flex items-center gap-2 text-sm">
+      {/* Area / provider info bar */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/50 bg-card px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
           <MapPin className="h-4 w-4 text-primary" />
           <span className="font-medium text-foreground">
-            {areaData.city || areaData.pincode}
+            {areaData.provider ? areaData.provider.name : (areaData.city || areaData.pincode)}
           </span>
           {areaData.pincode && areaData.city && (
-            <span className="text-muted-foreground">· {areaData.pincode}</span>
+            <span className="text-muted-foreground">· {areaData.city}</span>
           )}
-          <span className="text-xs text-muted-foreground">
-            · {areaData.provider_count} provider{areaData.provider_count !== 1 ? 's' : ''}
-          </span>
+          {!areaData.provider && (
+            <span className="text-xs text-muted-foreground">
+              · {areaData.provider_count} provider{areaData.provider_count !== 1 ? 's' : ''}
+            </span>
+          )}
         </div>
         <button
           onClick={onReset}
@@ -596,6 +574,32 @@ function PricingCalculator({ areaData, onReset }: { areaData: AreaPricingData; o
         >
           <RefreshCw className="h-3.5 w-3.5" /> Change area
         </button>
+      </div>
+
+      <div className="mb-6 flex items-center gap-2 rounded-xl border border-primary/15 bg-primary/5 px-4 py-2.5 text-xs">
+        {areaData.provider ? (
+          <>
+            <Store className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span className="flex-1 text-foreground">
+              Showing exact rates for <span className="font-semibold">{areaData.provider.name}</span>
+            </span>
+            {onUseBaseRates && (
+              <button onClick={onUseBaseRates} className="flex items-center gap-1 font-semibold text-primary hover:underline">
+                <ArrowLeftRight className="h-3 w-3" /> Use base rates
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+            <Globe className="h-3.5 w-3.5 shrink-0 text-primary" />
+            <span className="flex-1 text-foreground">Showing platform base rates for this area</span>
+            {onSwitchProvider && (
+              <button onClick={onSwitchProvider} className="flex items-center gap-1 font-semibold text-primary hover:underline">
+                <ArrowLeftRight className="h-3 w-3" /> See exact pricing from a provider
+              </button>
+            )}
+          </>
+        )}
       </div>
 
       <div className="grid gap-8 lg:grid-cols-3">
@@ -684,7 +688,7 @@ function PricingCalculator({ areaData, onReset }: { areaData: AreaPricingData; o
                   serviceName={activeService.service.name}
                   expressMultiplier={activeService.service.express_multiplier}
                   isExpressEnabled={isExpress}
-                  cartItem={cartItems.get(makeLineItemKey(product.id, activeService.service.id))}
+                  cartItem={cartItemsByKey.get(makeLineItemKey(product.id, activeService.service.id))}
                   onAdd={handleAdd}
                   onUpdate={handleUpdate}
                   onRemove={handleRemove}
@@ -701,7 +705,9 @@ function PricingCalculator({ areaData, onReset }: { areaData: AreaPricingData; o
             isExpress={isExpress}
             onToggleExpress={handleToggleExpress}
             areaData={areaData}
-            onClear={() => setCartItems(new Map())}
+            onClear={cart.clear}
+            onPlaceOrder={cart.placeOrder}
+            placing={cart.placing}
           />
 
           {/* Pricing note */}
@@ -722,43 +728,188 @@ function PricingCalculator({ areaData, onReset }: { areaData: AreaPricingData; o
 }
 
 // ---- Page ---------------------------------------------------
+
+type PricingContext = { pincode?: string; city?: string }
+
 export default function PricingCalculatorPage() {
+  const { user } = useAuth()
+
+  // 'pick_path'    — choose "my address" (auth only) vs "search any area"
+  // 'my_address'   — pick a saved address (auth only)
+  // 'area_search'  — pincode/city input (anyone)
+  // 'pick_provider'— choose a specific provider for exact pricing
+  // 'calculator'   — showing AreaPricingData (base or provider-specific)
+  const [step, setStep] = useState<'pick_path' | 'my_address' | 'area_search' | 'pick_provider' | 'calculator'>(
+    user ? 'pick_path' : 'area_search'
+  )
+  const [pricingContext, setPricingContext] = useState<PricingContext>({})
+  const [providers, setProviders] = useState<PickableProvider[]>([])
+  const [providersLoading, setProvidersLoading] = useState(false)
+  const [allowSkip, setAllowSkip] = useState(true)
   const [areaData, setAreaData] = useState<AreaPricingData | null>(null)
+
+  function resetAll() {
+    setAreaData(null)
+    setPricingContext({})
+    setProviders([])
+    setStep(user ? 'pick_path' : 'area_search')
+  }
+
+  // Area search resolved (covered) — store the base-rate result immediately
+  // so "skip" has something to show, then offer to narrow to one provider.
+  async function handleAreaResult(data: AreaPricingData) {
+    setPricingContext({ pincode: data.pincode || undefined, city: data.city || undefined })
+    setAreaData(data)
+    await loadProviders({ pincode: data.pincode || undefined, city: data.city || undefined })
+    setAllowSkip(true)
+    setStep('pick_provider')
+  }
+
+  async function handleAddressSelected(address: { postal_code: string; city: string }) {
+    setPricingContext({ pincode: address.postal_code, city: address.city })
+    await loadProviders({ pincode: address.postal_code, city: address.city })
+    setAllowSkip(false)
+    setStep('pick_provider')
+  }
+
+  async function loadProviders(ctx: PricingContext) {
+    setProvidersLoading(true)
+    try {
+      const param = ctx.pincode ? `location=${ctx.pincode}` : `location=${encodeURIComponent(ctx.city ?? '')}`
+      const res = await fetch(`/api/customer/laundry-providers/search?${param}`)
+      const json = await res.json()
+      if (json.success) {
+        setProviders(json.data.providers.map((p: any) => ({
+          id: p.id,
+          name: p.business_name,
+          subtitle: p.business_address ?? p.city ?? '',
+          rating: p.rating,
+          ratingCount: p.rating_count,
+          minPriceKg: p.min_price_kg,
+        })))
+      } else {
+        setProviders([])
+      }
+    } catch {
+      setProviders([])
+    } finally {
+      setProvidersLoading(false)
+    }
+  }
+
+  async function selectProvider(providerId: number) {
+    setProvidersLoading(true)
+    try {
+      const res = await fetch(`/api/customer/public/pricing/services-by-area?provider_id=${providerId}`)
+      const json = await res.json()
+      if (json.success && json.data.covered) {
+        setAreaData(json.data)
+        setStep('calculator')
+      }
+    } finally {
+      setProvidersLoading(false)
+    }
+  }
+
+  function skipToBaseRates() {
+    // areaData already holds the base-rate result from handleAreaResult
+    setStep('calculator')
+  }
+
+  async function switchToBaseRates() {
+    const param = pricingContext.pincode
+      ? `pincode=${pricingContext.pincode}`
+      : `city=${encodeURIComponent(pricingContext.city ?? '')}`
+    const res = await fetch(`/api/customer/public/pricing/services-by-area?${param}`)
+    const json = await res.json()
+    if (json.success) setAreaData(json.data)
+  }
+
+  async function switchToProviderPicker() {
+    await loadProviders(pricingContext)
+    setAllowSkip(true)
+    setStep('pick_provider')
+  }
 
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'Pricing Calculator' }]}>
-      {/* Hero */}
+      {/* Hero — compact */}
       <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
-        <div className="pointer-events-none absolute -top-40 -right-40 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-        <PageSection className="relative py-16 md:py-20">
-          <div className="max-w-3xl">
-            <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
+        <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+        <PageSection className="relative py-8 md:py-10">
+          <div className="max-w-2xl">
+            <span className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-primary">
               <Star className="h-3 w-3" />
               Transparent Pricing
             </span>
-            <h1 className="mt-2 text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl">
+            <h1 className="mt-1 text-2xl font-bold leading-tight tracking-tight text-foreground sm:text-3xl">
               Calculate Your Laundry Cost
             </h1>
-            <p className="mt-4 text-lg text-muted-foreground leading-relaxed">
-              Enter your pincode to see available services and get an instant estimate — no sign-up needed.
+            <p className="mt-1.5 text-sm text-muted-foreground">
+              See available services and get an instant estimate for your area
             </p>
           </div>
         </PageSection>
       </div>
 
       <PageSection>
-        {!areaData ? (
-          <AreaSearchStep onResult={setAreaData} />
-        ) : (
+        {step === 'pick_path' && (
+          <div className="mx-auto max-w-md">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <button
+                onClick={() => setStep('my_address')}
+                className="flex flex-col items-center gap-2 rounded-2xl border border-border/50 bg-card p-6 text-center transition-all hover:border-primary/40 hover:bg-primary/5"
+              >
+                <Home className="h-6 w-6 text-primary" />
+                <span className="text-sm font-semibold text-foreground">Use my saved address</span>
+                <span className="text-xs text-muted-foreground">See exact rates near you</span>
+              </button>
+              <button
+                onClick={() => setStep('area_search')}
+                className="flex flex-col items-center gap-2 rounded-2xl border border-border/50 bg-card p-6 text-center transition-all hover:border-primary/40 hover:bg-primary/5"
+              >
+                <Globe className="h-6 w-6 text-primary" />
+                <span className="text-sm font-semibold text-foreground">Search any location</span>
+                <span className="text-xs text-muted-foreground">Check pricing anywhere</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 'my_address' && (
+          <MyAddressStep
+            onAddressSelected={handleAddressSelected}
+            onBack={() => setStep(user ? 'pick_path' : 'area_search')}
+          />
+        )}
+
+        {step === 'area_search' && (
+          <AreaSearchStep onResult={handleAreaResult} />
+        )}
+
+        {step === 'pick_provider' && (
+          <ProviderPicker
+            providers={providers}
+            loading={providersLoading}
+            allowSkip={allowSkip}
+            onSelect={selectProvider}
+            onSkip={allowSkip ? skipToBaseRates : undefined}
+            onBack={() => setStep(user ? 'pick_path' : 'area_search')}
+          />
+        )}
+
+        {step === 'calculator' && areaData && (
           <PricingCalculator
             areaData={areaData}
-            onReset={() => setAreaData(null)}
+            onReset={resetAll}
+            onSwitchProvider={switchToProviderPicker}
+            onUseBaseRates={areaData.provider ? switchToBaseRates : undefined}
           />
         )}
       </PageSection>
 
       {/* How pricing works */}
-      {!areaData && (
+      {step !== 'calculator' && (
         <div className="border-t border-border/50 bg-muted/20">
           <PageSection tight>
             <h2 className="mb-8 text-2xl font-bold text-foreground text-center">

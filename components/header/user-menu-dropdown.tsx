@@ -7,7 +7,7 @@ import Image from "next/image"
 import {
   User, LogIn, ChevronDown, UserPlus, Store, Truck,
   Gift, HelpCircle, Download, LogOut, ShoppingBag,
-  MapPin, Wallet, Settings, Star, ChevronRight,
+  MapPin, Wallet, Settings, Star, ChevronRight, LifeBuoy,
 } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { cn } from "@/lib/utils"
@@ -56,8 +56,9 @@ const AUTH_ITEMS = [
   {
     group: 'Preferences',
     items: [
+      { label: 'My Tickets', href: '/customer/support', icon: LifeBuoy },
       { label: 'Settings', href: '/customer/settings', icon: Settings },
-      { label: 'Help Center', href: '/help-center', icon: HelpCircle },
+      { label: 'Help Center', href: '/customer/help-center', icon: HelpCircle },
     ],
   },
 ]

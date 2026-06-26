@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -11,9 +11,11 @@ import {
   Calculator,
   Layers,
   Truck,
-  MessagesSquare
+  MessagesSquare,
+  LifeBuoy,
 } from 'lucide-react'
 import { useAuth } from '@/components/auth-provider'
+import { useCart } from '@/components/cart-provider'
 import { cn } from '@/lib/utils'
 import Image from "next/image"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -57,29 +59,6 @@ const Logo = ({ logoUrl, className = "" }: { logoUrl?: string; className?: strin
     )
 }
 
-// ---- Cart badge count ---------------------------------------
-function useCartCount(isLoggedIn: boolean) {
-  const [count, setCount] = useState(0)
-
-  const refresh = useCallback(async () => {
-    if (!isLoggedIn) { setCount(0); return }
-    try {
-      const res  = await fetch('/api/customer/cart/summary', { credentials: 'include' })
-      const json = await res.json()
-      if (json.success) setCount(json.data?.item_count ?? 0)
-    } catch { /* silent */ }
-  }, [isLoggedIn])
-
-  // This makes API calls each 30s.
-  useEffect(() => {
-    refresh()
-    const id = setInterval(refresh, 30000)
-    return () => clearInterval(id)
-  }, [refresh])
-
-  return { count, refresh }
-}
-
 // ---- Remove import of Theme toggle to use the below one only for light or dark-------------------------------------------
 // function ThemeToggle() {
 //   const { theme, setTheme } = useTheme()
@@ -100,8 +79,7 @@ function useCartCount(isLoggedIn: boolean) {
 
 // ---- Cart icon with badge -----------------------------------
 export function CartBadge({ onClick }: { onClick: () => void }) {
-  const { user } = useAuth()
-  const { count } = useCartCount(!!user)
+  const { itemCount: count } = useCart()
 
   return (
     <button
@@ -149,7 +127,8 @@ function DesktopUserMenu({ user, onLogout }: { user: any; onLogout: () => void }
     { icon: Gift,      label: 'Refer & Earn',  href: '/customer/refer-and-earn' },
     { icon: MapPin,    label: 'Addresses',     href: '/customer/addresses' },
     { icon: Settings,  label: 'Settings',      href: '/customer/settings' },
-    { icon: HelpCircle,label: 'Help Center',   href: '/help-center' },
+    { icon: LifeBuoy,  label: 'My Tickets',    href: '/customer/support' },
+    { icon: HelpCircle,label: 'Help Center',   href: '/customer/help-center' },
     { icon: MessagesSquare, label: 'Feedback', href: '/customer/feedback'  },
   ]
 
@@ -263,6 +242,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
     { href: '/customer/refer-and-earn', label: 'Refer & Earn', icon: Gift },
     { href: '/customer/settings',     label: 'Settings',    icon: Settings },
     { href: '/customer/feedback',     label: 'Feedback', icon: MessagesSquare },
+    { href: '/customer/support',      label: 'My Tickets', icon: LifeBuoy },
     { href: '/customer/help-center',  label: 'Help Center', icon: HelpCircle },
   ]
 
@@ -271,7 +251,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
     { href: '/customer/pricing-calculator', label: 'Pricing', icon: Calculator, },
     { href: '/customer/quick-pickup', label: 'Quick Pickup', icon: Truck, },
     { href: '/customer/faq', label: 'FAQ', icon: HelpCircle, },
-    { href: '/customer/help-center',            label: 'Help Center',icon: HelpCircle },
+    { href: '/customer/help-center', label: 'Help Center',icon: HelpCircle },
   ]
 
   const DIVIDER_AFTER = 3 // after index 3 (Addresses), show a divider
@@ -345,8 +325,8 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
           <div className="flex items-center gap-1">
             <ThemeToggle />
 
-            {/* Cart â€” only when logged in */}
-            {user && <CartBadge onClick={onCartClick} />}
+            {/* Cart — visible to guests too, since items can be added before signing in */}
+            <CartBadge onClick={onCartClick} />
 
             {/* Desktop: user menu or login CTA */}
             <div className="hidden md:flex items-center gap-2">

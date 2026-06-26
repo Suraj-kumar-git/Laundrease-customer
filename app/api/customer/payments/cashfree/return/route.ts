@@ -11,7 +11,9 @@ function getCustomerBaseUrl(): string {
 }
 
 function buildRedirect(path: string): NextResponse {
-  return NextResponse.redirect(new URL(path, getCustomerBaseUrl()))
+  // 303 — Cashfree's return can arrive as a POST; force the follow-up
+  // request to be a GET instead of preserving POST (see PayU success route).
+  return NextResponse.redirect(new URL(path, getCustomerBaseUrl()), 303)
 }
 
 async function extractCallbackPayload(req: NextRequest): Promise<Record<string, string>> {
@@ -68,7 +70,7 @@ async function handle(req: NextRequest) {
 
     if (!merchantTxnId || !providerPaymentId) {
       return buildRedirect(
-        `/checkout?payment=failed&provider=cashfree&txnid=${encodeURIComponent(merchantTxnId)}&reason=${encodeURIComponent('missing_callback_params')}`
+        `/customer/orders/payment/failure?reason=${encodeURIComponent('missing_callback_params')}`
       )
     }
 
@@ -91,23 +93,21 @@ async function handle(req: NextRequest) {
 
     if (paymentLookup.rowCount === 0) {
       return buildRedirect(
-        `/checkout?payment=failed&provider=cashfree&txnid=${encodeURIComponent(merchantTxnId)}&reason=${encodeURIComponent('payment_not_found')}`
+        `/customer/orders/payment/failure?reason=${encodeURIComponent('payment_not_found')}`
       )
     }
 
     const payment = paymentLookup.rows[0]
 
     if (payment.status === 'completed') {
-      return buildRedirect(
-        `/order/success?provider=cashfree&txnid=${encodeURIComponent(merchantTxnId)}&payment_id=${encodeURIComponent(providerPaymentId)}`
-      )
+      return buildRedirect(`/customer/orders/payment/success?order_id=${payment.order_id}`)
     }
 
     const gatewayInfo = await getActiveGateway()
 
     if (!gatewayInfo || gatewayInfo.provider !== 'cashfree') {
       return buildRedirect(
-        `/checkout?payment=failed&provider=cashfree&txnid=${encodeURIComponent(merchantTxnId)}&reason=${encodeURIComponent('cashfree_not_active')}`
+        `/customer/orders/payment/failure?order_id=${payment.order_id ?? ''}&reason=${encodeURIComponent('cashfree_not_active')}`
       )
     }
 
@@ -122,6 +122,8 @@ async function handle(req: NextRequest) {
 
     const paymentStatus = result.verified ? 'completed' : 'failed'
     const orderPaymentStatus = result.verified ? 'paid' : 'failed'
+    const completedAt = result.verified ? new Date() : null
+    const failedAt     = result.verified ? null : new Date()
 
     const responsePayload = {
       callback_source: 'cashfree_return',
@@ -166,11 +168,7 @@ async function handle(req: NextRequest) {
            completed_at,
            failed_at
          )
-         VALUES (
-           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb,
-           CASE WHEN $10 = 'completed' THEN NOW() ELSE NULL END,
-           CASE WHEN $10 = 'failed' THEN NOW() ELSE NULL END
-         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
          ON CONFLICT (merchant_txn_id)
          DO UPDATE SET
            gateway_config_id = EXCLUDED.gateway_config_id,
@@ -182,12 +180,12 @@ async function handle(req: NextRequest) {
            response_payload = COALESCE(payment_gateway_transactions.response_payload, '{}'::jsonb) || EXCLUDED.response_payload,
            completed_at = CASE
              WHEN EXCLUDED.status = 'completed' AND payment_gateway_transactions.completed_at IS NULL
-             THEN NOW()
+             THEN EXCLUDED.completed_at
              ELSE payment_gateway_transactions.completed_at
            END,
            failed_at = CASE
              WHEN EXCLUDED.status = 'failed' AND payment_gateway_transactions.failed_at IS NULL
-             THEN NOW()
+             THEN EXCLUDED.failed_at
              ELSE payment_gateway_transactions.failed_at
            END,
            updated_at = NOW()`,
@@ -203,6 +201,8 @@ async function handle(req: NextRequest) {
           payment.currency || 'INR',
           paymentStatus,
           JSON.stringify(responsePayload),
+          completedAt,
+          failedAt,
         ]
       )
 
@@ -219,18 +219,16 @@ async function handle(req: NextRequest) {
 
     if (!result.verified) {
       return buildRedirect(
-        `/checkout?payment=failed&provider=cashfree&txnid=${encodeURIComponent(merchantTxnId)}&reason=${encodeURIComponent('verification_failed')}`
+        `/customer/orders/payment/failure?order_id=${payment.order_id ?? ''}&reason=${encodeURIComponent('verification_failed')}`
       )
     }
 
-    return buildRedirect(
-      `/order/success?provider=cashfree&txnid=${encodeURIComponent(merchantTxnId)}&payment_id=${encodeURIComponent(providerPaymentId)}`
-    )
+    return buildRedirect(`/customer/orders/payment/success?order_id=${payment.order_id}`)
   } catch (error) {
     console.error('[Cashfree return]', error)
 
     return buildRedirect(
-      `/checkout?payment=failed&provider=cashfree&reason=${encodeURIComponent('unexpected_error')}`
+      `/customer/orders/payment/failure?reason=${encodeURIComponent('unexpected_error')}`
     )
   }
 }

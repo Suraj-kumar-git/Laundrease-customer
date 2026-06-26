@@ -2,12 +2,14 @@ import type React from "react"
 import { Inter } from "next/font/google"
 import Link from "next/link"
 import Image from "next/image"
-import { Bell, Menu, Search, ShoppingCart } from "lucide-react"
+import { Bell, Menu, Search, ShoppingCart, MapPin } from "lucide-react"
+import { query } from "@/lib/db"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/components/auth-provider"
+import { CartProvider } from "@/components/cart-provider"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Toaster } from "@/components/ui/toaster"
@@ -41,14 +43,45 @@ const Logo = ({ logoUrl, className = "" }: { logoUrl?: string; className?: strin
   )
 }
 
-export default function RootLayout({
+async function getFooterConfig() {
+  try {
+    const { rows } = await query(
+      `SELECT key, value FROM platform_config
+       WHERE key IN ('social_instagram', 'social_facebook', 'social_twitter', 'business_address')`
+    )
+    const config: Record<string, string | null> = {}
+    for (const row of rows) config[row.key] = row.value
+
+    return {
+      social: {
+        instagram: config.social_instagram || 'https://instagram.com/laundrease.in',
+        facebook:  config.social_facebook  || 'https://www.facebook.com/laundreasein',
+        x:         config.social_twitter   || 'https://x.com/laundreasein',
+      },
+      address: config.business_address || null,
+    }
+  } catch (error) {
+    console.error('[customer/layout] Failed to load footer config:', error)
+    return {
+      social: {
+        instagram: 'https://instagram.com/laundrease.in',
+        facebook:  'https://www.facebook.com/laundreasein',
+        x:         'https://x.com/laundreasein',
+      },
+      address: null,
+    }
+  }
+}
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
   // In the future, you can fetch logoUrl from an API here
   // const logoUrl = await fetchLogoFromApi()
-  
+  const { social, address } = await getFooterConfig()
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
@@ -63,6 +96,7 @@ export default function RootLayout({
         /> */}
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <AuthProvider>
+            <CartProvider>
             <div className="flex min-h-screen flex-col">
               {/* HeaderWithCart is a client component that manages the CartSheet state */}
             <HeaderWithCart />
@@ -75,7 +109,10 @@ export default function RootLayout({
                     </Link>
                     <div className="flex gap-4">
                       <Link
-                        href="https://x.com/laundreasein"
+                        href={social.x}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="X (formerly Twitter)"
                         className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                       >
                         <svg
@@ -83,17 +120,16 @@ export default function RootLayout({
                           width="20"
                           height="20"
                           viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
+                          fill="currentColor"
                         >
-                          <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"></path>
+                          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                         </svg>
                       </Link>
                       <Link
-                        href="https://www.facebook.com/laundreasein"
+                        href={social.facebook}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Facebook"
                         className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                       >
                         <svg
@@ -111,7 +147,10 @@ export default function RootLayout({
                         </svg>
                       </Link>
                       <Link
-                        href="https://instagram.com/laundrease.in"
+                        href={social.instagram}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Instagram"
                         className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                       >
                         <svg
@@ -132,7 +171,7 @@ export default function RootLayout({
                       </Link>
                     </div>
                   </div>
-                  <div className="grid gap-8 md:grid-cols-4">
+                  <div className={`grid gap-8 md:grid-cols-2 ${address ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
                     <div>
                       <h3 className="mb-4 text-lg font-bold">Company</h3>
                       <ul className="space-y-2">
@@ -200,6 +239,15 @@ export default function RootLayout({
                       </p>
                       <NewsletterForm />
                     </div>
+                    {address && (
+                      <div>
+                        <h3 className="mb-4 text-lg font-bold">Address</h3>
+                        <p className="flex items-start gap-2 text-sm text-muted-foreground">
+                          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                          <span>{address}</span>
+                        </p>
+                      </div>
+                    )}
                   </div>
                   <div className="mt-12 border-t border-border pt-8 text-center text-sm text-muted-foreground">
                     <p>© 2026 Laundrease. All rights reserved.</p>
@@ -208,6 +256,7 @@ export default function RootLayout({
               </footer>
             </div>
             <Toaster />
+            </CartProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

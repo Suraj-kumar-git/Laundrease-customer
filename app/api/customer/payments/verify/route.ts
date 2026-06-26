@@ -88,7 +88,8 @@ export async function POST(req: NextRequest) {
              transaction_id = $1,
              method_details = $2,
              updated_at = NOW()
-         WHERE order_id = $3`,
+         WHERE order_id = $3 AND provider <> 'cod' AND provider <> 'wallet'
+           AND status IN ('initiated', 'failed')`,
         [
           body.gateway_payment_id,
           JSON.stringify({

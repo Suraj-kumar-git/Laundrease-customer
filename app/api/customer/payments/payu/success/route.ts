@@ -11,7 +11,10 @@ function getCustomerBaseUrl(): string {
 }
 
 function buildRedirect(path: string): NextResponse {
-  return NextResponse.redirect(new URL(path, getCustomerBaseUrl()))
+  // 303 (not the default 307) — this callback arrives as a POST from PayU's
+  // hosted page, and a 307 would preserve POST on the follow-up request to
+  // our own page route. Post/Redirect/Get: force the browser to GET instead.
+  return NextResponse.redirect(new URL(path, getCustomerBaseUrl()), 303)
 }
 
 export async function POST(req: NextRequest) {
@@ -34,13 +37,13 @@ export async function POST(req: NextRequest) {
     const udf5 = String(form.get('udf5') || '')
 
     if (!txnid) {
-      return buildRedirect('/checkout?payment=failed&provider=payu&reason=missing_txnid')
+      return buildRedirect('/customer/orders/payment/failure?reason=missing_txnid')
     }
 
     const gatewayInfo = await getActiveGateway()
 
     if (!gatewayInfo || gatewayInfo.provider !== 'payu') {
-      return buildRedirect(`/checkout?payment=failed&provider=payu&txnid=${encodeURIComponent(txnid)}&reason=payu_not_active`)
+      return buildRedirect(`/customer/orders/payment/failure?reason=payu_not_active`)
     }
 
     const verification = await gatewayInfo.adapter.verifyPayment({
@@ -65,11 +68,13 @@ export async function POST(req: NextRequest) {
 
     const gatewayResponse = JSON.stringify(Object.fromEntries(form.entries()))
 
+    let orderId: number | null = null
+
     await transaction(async (client) => {
       const paymentResult = await client.query(
-        `SELECT id, order_id, status
-         FROM payments
-         WHERE merchant_txn_id = $1
+        `SELECT p.id, p.order_id, p.status, p.amount, p.currency, p.gateway_config_id
+         FROM payments p
+         WHERE p.merchant_txn_id = $1
          LIMIT 1`,
         [txnid]
       )
@@ -79,7 +84,11 @@ export async function POST(req: NextRequest) {
       }
 
       const payment = paymentResult.rows[0]
+      orderId = payment.order_id
       const isVerifiedSuccess = verification.verified
+      const paymentStatus = isVerifiedSuccess ? 'completed' : 'failed'
+      const completedAt = isVerifiedSuccess ? new Date() : null
+      const failedAt     = isVerifiedSuccess ? null : new Date()
 
       await client.query(
         `UPDATE payments
@@ -89,10 +98,44 @@ export async function POST(req: NextRequest) {
              updated_at = NOW()
          WHERE merchant_txn_id = $4`,
         [
-          isVerifiedSuccess ? 'completed' : 'failed',
+          paymentStatus,
           mihpayid || null,
           gatewayResponse,
           txnid,
+        ]
+      )
+
+      await client.query(
+        `INSERT INTO payment_gateway_transactions (
+           payment_id, gateway_config_id, provider, merchant_txn_id,
+           provider_order_id, provider_payment_id, provider_txn_id,
+           amount, currency, status, response_payload,
+           completed_at, failed_at
+         )
+         VALUES ($1, $2, 'payu', $3, $3, $4, $4, $5, $6, $7, $8::jsonb, $9, $10)
+         ON CONFLICT (merchant_txn_id) DO UPDATE SET
+           provider_payment_id = EXCLUDED.provider_payment_id,
+           provider_txn_id     = EXCLUDED.provider_txn_id,
+           status              = EXCLUDED.status,
+           response_payload    = COALESCE(payment_gateway_transactions.response_payload, '{}'::jsonb) || EXCLUDED.response_payload,
+           completed_at = CASE
+             WHEN EXCLUDED.status = 'completed' AND payment_gateway_transactions.completed_at IS NULL
+             THEN EXCLUDED.completed_at ELSE payment_gateway_transactions.completed_at END,
+           failed_at = CASE
+             WHEN EXCLUDED.status = 'failed' AND payment_gateway_transactions.failed_at IS NULL
+             THEN EXCLUDED.failed_at ELSE payment_gateway_transactions.failed_at END,
+           updated_at = NOW()`,
+        [
+          payment.id,
+          payment.gateway_config_id,
+          txnid,
+          mihpayid || null,
+          payment.amount,
+          payment.currency || 'INR',
+          paymentStatus,
+          gatewayResponse,
+          completedAt,
+          failedAt,
         ]
       )
 
@@ -111,14 +154,15 @@ export async function POST(req: NextRequest) {
     })
 
     if (verification.verified) {
-      return buildRedirect(`/order/success?provider=payu&txnid=${encodeURIComponent(txnid)}&payment_id=${encodeURIComponent(mihpayid)}`)
+      return buildRedirect(`/customer/orders/payment/success?order_id=${orderId}`)
     }
 
-    return buildRedirect(`/checkout?payment=failed&provider=payu&txnid=${encodeURIComponent(txnid)}&reason=verification_failed`)
+    return buildRedirect(`/customer/orders/payment/failure?order_id=${orderId}&reason=verification_failed`)
   } catch (error) {
     console.error('[POST /api/customer/payments/payu/success]', error)
     return NextResponse.redirect(
-      new URL('/checkout?payment=failed&provider=payu&reason=server_error', process.env.NEXT_PUBLIC_CUSTOMER_URL!)
+      new URL('/customer/orders/payment/failure?reason=server_error', process.env.NEXT_PUBLIC_CUSTOMER_URL!),
+      303
     )
   }
 }
