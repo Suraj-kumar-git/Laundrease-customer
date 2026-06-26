@@ -8,6 +8,7 @@ import {
 interface AddressBody {
   id?:            number     // required for PUT/DELETE
   label:          string
+  tags?:          string[]
   address_line1:  string
   address_line2?: string
   landmark?:      string
@@ -79,13 +80,13 @@ export async function POST(req: NextRequest) {
 
       const ins = await client.query(
         `INSERT INTO customer_addresses (
-           customer_profile_id, label, address_line1, address_line2,
+           customer_profile_id, label, tags, address_line1, address_line2,
            landmark, neighborhood, city, state, postal_code, country_code,
            instructions, contact_name, contact_phone, is_default, position
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
          RETURNING *`,
         [
-          profileId, body.label, body.address_line1, body.address_line2 ?? null,
+          profileId, body.label, body.tags ?? [], body.address_line1, body.address_line2 ?? null,
           body.landmark ?? null, body.neighborhood ?? null, body.city,
           body.state ?? null, body.postal_code ?? null, body.country_code,
           body.instructions ?? null, body.contact_name ?? null,
@@ -141,15 +142,15 @@ export async function PUT(req: NextRequest) {
 
       const upd = await client.query(
         `UPDATE customer_addresses SET
-           label         = $1, address_line1 = $2, address_line2  = $3,
-           landmark      = $4, neighborhood  = $5, city           = $6,
-           state         = $7, postal_code   = $8, country_code   = $9,
-           instructions  = $10, contact_name = $11, contact_phone = $12,
-           is_default    = $13, updated_at   = NOW()
-         WHERE id = $14
+           label         = $1, tags          = $2, address_line1 = $3, address_line2  = $4,
+           landmark      = $5, neighborhood  = $6, city           = $7,
+           state         = $8, postal_code   = $9, country_code   = $10,
+           instructions  = $11, contact_name = $12, contact_phone = $13,
+           is_default    = $14, updated_at   = NOW()
+         WHERE id = $15
          RETURNING *`,
         [
-          body.label, body.address_line1, body.address_line2 ?? null,
+          body.label, body.tags ?? [], body.address_line1, body.address_line2 ?? null,
           body.landmark ?? null, body.neighborhood ?? null, body.city,
           body.state ?? null, body.postal_code ?? null, body.country_code ?? 'IN',
           body.instructions ?? null, body.contact_name ?? null,

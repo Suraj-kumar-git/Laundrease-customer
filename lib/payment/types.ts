@@ -41,6 +41,32 @@ export interface WebhookVerificationParams {
   provider: string
 }
 
+export interface RefundParams {
+  gatewayOrderId:   string  // PayU: txnid. Cashfree: cf_order_id (merchant order id also works).
+  gatewayPaymentId: string  // PayU: mihpayid. Cashfree: cf_payment_id.
+  merchantRefundId: string  // our own unique id for this refund attempt
+  amount:           number  // INR
+}
+
+export interface RefundResult {
+  // 'completed' is rare on initiation — most gateways return 'processing' and confirm async.
+  status:           'processing' | 'completed' | 'failed'
+  gatewayRefundId:  string | null
+  rawResponse:      Record<string, unknown>
+  failureReason?:   string
+}
+
+export interface RefundStatusParams {
+  gatewayOrderId:    string
+  merchantRefundId:  string
+  gatewayRefundId:   string | null
+}
+
+export interface RefundStatusResult {
+  status:       'processing' | 'completed' | 'failed'
+  rawResponse:  Record<string, unknown>
+}
+
 /**
  * Common interface all payment gateway adapters must implement.
  */
@@ -55,6 +81,12 @@ export interface PaymentGatewayAdapter {
 
   /** Verify webhook signature. */
   verifyWebhook(params: WebhookVerificationParams): boolean
+
+  /** Initiate a refund to the original payment method. Not all adapters implement this. */
+  initiateRefund?(params: RefundParams): Promise<RefundResult>
+
+  /** Poll the gateway for a refund's current status. Not all adapters implement this. */
+  checkRefundStatus?(params: RefundStatusParams): Promise<RefundStatusResult>
 }
 
 export interface GatewayConfig {

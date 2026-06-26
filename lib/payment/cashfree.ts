@@ -8,6 +8,10 @@ import type {
   PaymentVerificationParams,
   PaymentVerificationResult,
   WebhookVerificationParams,
+  RefundParams,
+  RefundResult,
+  RefundStatusParams,
+  RefundStatusResult,
 } from './types'
 
 export class CashfreeAdapter implements PaymentGatewayAdapter {
@@ -100,5 +104,51 @@ export class CashfreeAdapter implements PaymentGatewayAdapter {
       .update(params.rawBody)
       .digest('base64')
     return expectedSignature === params.signature
+  }
+
+  // Cashfree refunds key off the *order* id, not the payment id.
+  async initiateRefund(params: RefundParams): Promise<RefundResult> {
+    const response = await fetch(`${this.getBaseUrl()}/orders/${params.gatewayOrderId}/refunds`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({
+        refund_amount: params.amount,
+        refund_id:     params.merchantRefundId,
+        refund_note:   'Order cancellation refund',
+      }),
+    })
+
+    const data = await response.json().catch(() => ({}))
+
+    if (!response.ok) {
+      return {
+        status: 'failed',
+        gatewayRefundId: null,
+        rawResponse: data,
+        failureReason: String(data?.message ?? 'Cashfree refund request failed'),
+      }
+    }
+
+    const status = data.refund_status === 'SUCCESS' ? 'completed'
+      : data.refund_status === 'FAILED' ? 'failed'
+      : 'processing'
+
+    return { status, gatewayRefundId: String(data.cf_refund_id ?? params.merchantRefundId), rawResponse: data }
+  }
+
+  async checkRefundStatus(params: RefundStatusParams): Promise<RefundStatusResult> {
+    const response = await fetch(
+      `${this.getBaseUrl()}/orders/${params.gatewayOrderId}/refunds/${params.merchantRefundId}`,
+      { headers: this.getHeaders() }
+    )
+    const data = await response.json().catch(() => ({}))
+
+    if (!response.ok) return { status: 'processing', rawResponse: data }
+
+    const status = data.refund_status === 'SUCCESS' ? 'completed'
+      : data.refund_status === 'FAILED' ? 'failed'
+      : 'processing'
+
+    return { status, rawResponse: data }
   }
 }

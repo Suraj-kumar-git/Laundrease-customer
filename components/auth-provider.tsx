@@ -4,6 +4,14 @@ import type React from "react"
 import { createContext, useCallback, useContext, useEffect, useState } from "react"
 
 const role = process.env.ROLE || null;
+// Silent access-token refresh is wired up for the customer build only —
+// other roles (admin/laundry/delivery/support) keep the old behavior of
+// just logging out on a real 401, no refresh attempt.
+const isCustomer = role === "customer"
+// How often to proactively rotate the access token while the customer app
+// stays open in a tab, so a long-lived browsing session never hits a real
+// expiry mid-use. Comfortably under ACCESS_TOKEN_EXPIRY (7d default).
+const SILENT_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
 type LoginPayload = {
   email?: string
   phone?: string
@@ -15,7 +23,7 @@ export type User = {
   email:         string
   phone?:        string
   avatar?:       string
-  role:          "customer"
+  role:          "customer" | "admin" | "delivery" | "laundry" | "support"
   isVerified:    boolean
   phoneVerified: boolean
 } | null
@@ -51,6 +59,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user,      setUser]      = useState<User>(null)
   const [isLoading, setIsLoading] = useState(true)
 
+  // Plain (non-logout-on-failure) refresh attempt — used internally by
+  // checkAuth's retry-after-401 and the periodic silent refresh below.
+  // Returns whether the access token was successfully rotated.
+  const tryRefresh = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/${role}/auth/refresh-token`, { method: "POST", credentials: "include" })
+      return res.ok
+    } catch {
+      return false
+    }
+  }, [])
+
   useEffect(() => {
     const checkAuth = async () => {
       // Optimistic: render header immediately with stored data
@@ -61,7 +81,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Authoritative: always verify with server and sync verification flags
       try {
-        const res = await fetch(`/api/${role}/auth/me`, { credentials: "include" })
+        let res = await fetch(`/api/${role}/auth/me`, { credentials: "include" })
+
+        // Customer-only: the access token may simply have expired while the
+        // (still-valid) refresh token sat untouched — try a silent refresh
+        // and re-check once before treating this as a real logout.
+        if (!res.ok && (res.status === 401 || res.status === 403) && isCustomer) {
+          const refreshed = await tryRefresh()
+          if (refreshed) {
+            res = await fetch(`/api/${role}/auth/me`, { credentials: "include" })
+          }
+        }
+
         if (res.ok) {
           const data = await res.json()
           if (data.success && data.data?.user) {
@@ -69,28 +100,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(serverUser)
             localStorage.setItem("user", JSON.stringify(serverUser))
           }
-        } else {
-          // Token invalid or expired
+        } else if (res.status === 401 || res.status === 403) {
+          // Genuinely unauthenticated — token invalid/expired/revoked
+          // (and, for customers, the refresh attempt above didn't help either)
           localStorage.removeItem("user")
           setUser(null)
         }
+        // Any other status (500, 502, 503, etc.) is a server/infra hiccup, not
+        // proof the session is invalid — keep the optimistic state so a
+        // transient DB/server error doesn't silently log the user out.
       } catch { /* network error — keep optimistic state until next load */ }
       finally { setIsLoading(false) }
     }
     checkAuth()
-  }, [])
+  }, [tryRefresh])
+
+  // Customer-only: proactively rotate the access token on a fixed interval
+  // while the user is logged in and the tab stays open, so a long browsing
+  // session never runs into a real mid-use expiry. Other roles don't get
+  // this — they keep the original "just re-check on next load" behavior.
+  useEffect(() => {
+    if (!isCustomer || !user) return
+    const interval = setInterval(() => { tryRefresh() }, SILENT_REFRESH_INTERVAL_MS)
+    return () => clearInterval(interval)
+  }, [user, tryRefresh])
 
   const refreshAccessToken = useCallback(async (): Promise<boolean> => {
-    try {
-      const res = await fetch(`/api/${role}/auth/refresh-token`, { method: "POST", credentials: "include" })
-      if (!res.ok) throw new Error("Refresh failed")
-      return true
-    } catch {
+    const ok = await tryRefresh()
+    if (!ok) {
       setUser(null)
       localStorage.removeItem("user")
-      return false
     }
-  }, [])
+    return ok
+  }, [tryRefresh])
 
   const login = async ({ email, phone, password }: LoginPayload) => {
     setIsLoading(true)

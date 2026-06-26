@@ -53,7 +53,8 @@ export interface KgService {
   service_name: string
   category: string
   description: string | null
-  price_per_kg: number          // provider override > base price
+  price_per_kg: number          // provider override > base price (selling price)
+  mrp_per_kg?: number | null    // provider-set MRP — strikethrough display only
   is_express_available: boolean
   express_multiplier: number
   turnaround_hours: number
@@ -67,19 +68,23 @@ export interface UnitProduct {
   icon: string
   service_id: number
   service_name: string
-  unit_price: number            // provider override > base price
+  unit_price: number            // provider override > base price (selling price)
+  mrp?: number | null           // provider-set MRP — strikethrough display only
   is_express_available: boolean
   express_multiplier: number
 }
 
 // A selected per-kg line item
 export interface SelectedService {
-  product_type_id: string | number
+  // null for per_kg items — they aren't tied to a single garment type;
+  // the backend resolves the shared "mixed load" product type instead.
+  product_type_id: number | null
   express_multiplier: number
   service_id: number
   service_name: string
   weight_kg: number
   unit_price: number
+  mrp?: number | null
   is_express: boolean
   line_total: number
   quantity: number

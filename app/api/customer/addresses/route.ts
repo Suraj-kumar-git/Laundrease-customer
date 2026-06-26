@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
       SELECT
         id,
         label,
+        tags,
         address_line1,
         address_line2,
         landmark,

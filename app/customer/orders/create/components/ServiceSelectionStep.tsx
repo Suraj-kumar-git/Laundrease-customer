@@ -13,6 +13,8 @@ import {
 import { cn } from '@/lib/utils'
 import { KgService, UnitProduct } from '@/types/order-types'
 import { LaundryProvider, SelectedService } from '../../types'
+import { ProductIcon } from '@/components/customer/ProductIcon'
+import { resolveProductIconSrc } from '@/lib/product-icons'
 
 interface ServiceSelectionStepProps {
   provider: LaundryProvider
@@ -140,87 +142,82 @@ function KgTab({
     )
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       <p className="text-xs text-muted-foreground">~5 garments per kg</p>
-      {services.map(svc => {
-        const sel = selections.get(svc.service_id)
-        const isSelected = !!sel
-        const effectivePrice = svc.price_per_kg * (isExpressGlobal && svc.is_express_available ? svc.express_multiplier : 1)
-        const lineTotal = isSelected ? Math.round(effectivePrice * sel.weight_kg * 100) / 100 : 0
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+        {services.map(svc => {
+          const sel = selections.get(svc.service_id)
+          const isSelected = !!sel
+          const effectivePrice = svc.price_per_kg * (isExpressGlobal && svc.is_express_available ? svc.express_multiplier : 1)
+          const lineTotal = isSelected ? Math.round(effectivePrice * sel.weight_kg * 100) / 100 : 0
 
-        return (
-          <div key={svc.service_id} className={cn(
-            'rounded-2xl border p-4 transition-all',
-            isSelected ? 'border-primary/40 bg-primary/5 shadow-sm' : 'border-border/50 bg-card'
-          )}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-start gap-3">
+          return (
+            <div key={svc.service_id} className={cn(
+              'flex flex-col gap-2 rounded-xl border p-3 transition-colors',
+              isSelected ? 'border-primary/40 bg-primary/5' : 'border-border/50 bg-card'
+            )}>
+              <div className="flex items-center gap-2.5">
                 <div className={cn(
-                  'mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors',
+                  'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors',
                   isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
                 )}>
-                  <Droplets className="h-5 w-5" />
+                  <Droplets className="h-4.5 w-4.5" />
                 </div>
-                <div>
-                  <p className="font-semibold text-foreground">{svc.service_name}</p>
-                  {svc.description && <p className="mt-0.5 text-xs text-muted-foreground">{svc.description}</p>}
-                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                      {formatINR(svc.price_per_kg)}/kg
-                      {isExpressGlobal && svc.is_express_available && (
-                        <span className="ml-1 text-amber-600"> → {formatINR(effectivePrice)}/kg</span>
-                      )}
-                    </span>
-                    <span className="text-xs text-muted-foreground">{svc.turnaround_hours}h</span>
-                  </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{svc.service_name}</p>
+                  <p className="text-[11px] text-muted-foreground">{svc.turnaround_hours}h turnaround</p>
                 </div>
+                {isSelected && (
+                  <button type="button" onClick={() => onChange(svc.service_id, 'remove', null)}
+                    className="shrink-0 rounded-lg p-1 text-muted-foreground/60 hover:text-destructive">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
+
+              <p className="text-xs text-muted-foreground">
+                {svc.mrp_per_kg && svc.mrp_per_kg > svc.price_per_kg && (
+                  <span className="line-through mr-1">{formatINR(svc.mrp_per_kg)}</span>
+                )}
+                {formatINR(svc.price_per_kg)}/kg
+                {isExpressGlobal && svc.is_express_available && (
+                  <span className="ml-1 text-amber-600"> → {formatINR(effectivePrice)}/kg</span>
+                )}
+                {svc.mrp_per_kg && svc.mrp_per_kg > svc.price_per_kg && (
+                  <span className="ml-1 text-green-600 dark:text-green-400 font-medium">
+                    {Math.round((1 - svc.price_per_kg / svc.mrp_per_kg) * 100)}% off
+                  </span>
+                )}
+              </p>
+
               {!isSelected ? (
                 <button type="button" onClick={() => onChange(svc.service_id, 'weight_kg', 1)}
-                  className="shrink-0 rounded-xl border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary hover:text-primary-foreground">
-                  + Add
+                  className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 text-xs font-semibold text-primary hover:bg-primary hover:text-primary-foreground">
+                  <Plus className="h-3.5 w-3.5" /> Add
                 </button>
               ) : (
-                <button type="button" onClick={() => onChange(svc.service_id, 'remove', null)}
-                  className="shrink-0 rounded-lg p-1.5 text-muted-foreground/60 hover:text-destructive">
-                  <Trash2 className="h-4 w-4" />
-                </button>
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  <div className="flex items-center gap-1">
+                    <button type="button"
+                      onClick={() => onChange(svc.service_id, 'weight_kg', Math.max(0.5, sel.weight_kg - 0.5))}
+                      disabled={sel.weight_kg <= 0.5}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/50 bg-card text-muted-foreground hover:border-primary/40 hover:text-primary disabled:opacity-40">
+                      <Minus className="h-3 w-3" />
+                    </button>
+                    <span className="w-12 text-center text-sm font-bold text-foreground">{sel.weight_kg}kg</span>
+                    <button type="button"
+                      onClick={() => onChange(svc.service_id, 'weight_kg', sel.weight_kg + 0.5)}
+                      className="flex h-7 w-7 items-center justify-center rounded-lg border border-border/50 bg-card text-muted-foreground hover:border-primary/40 hover:text-primary">
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <span className="text-right text-sm font-semibold text-primary">{formatINR(lineTotal)}</span>
+                </div>
               )}
             </div>
-            <AnimatePresence>
-              {isSelected && sel && (
-                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }} className="mt-4 space-y-3">
-                  <div className="h-px bg-border/40" />
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                      <Scale className="h-4 w-4 text-muted-foreground" /> Weight
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button type="button"
-                        onClick={() => onChange(svc.service_id, 'weight_kg', Math.max(0.5, sel.weight_kg - 0.5))}
-                        disabled={sel.weight_kg <= 0.5}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 bg-card text-muted-foreground hover:border-primary/40 hover:text-primary disabled:opacity-40">
-                        <Minus className="h-3.5 w-3.5" />
-                      </button>
-                      <span className="w-16 text-center text-sm font-bold text-foreground">{sel.weight_kg} kg</span>
-                      <button type="button"
-                        onClick={() => onChange(svc.service_id, 'weight_kg', sel.weight_kg + 0.5)}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/50 bg-card text-muted-foreground hover:border-primary/40 hover:text-primary">
-                        <Plus className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between pt-1">
-                    <span className="text-xs text-muted-foreground">Line total</span>
-                    <span className="text-base font-bold text-primary">{formatINR(lineTotal)}</span>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -361,7 +358,7 @@ function UnitTab({
             </span>
             <span className="ml-2 text-[10px] text-muted-foreground/60">({items.length} items)</span>
           </div>
-          <div className="divide-y divide-border/30">
+          <div className="grid grid-cols-1 gap-2.5 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {items.map(product => {
               const key = unitKey(product)
               const sel = selections.get(key)
@@ -371,24 +368,43 @@ function UnitTab({
 
               return (
                 <div key={key} className={cn(
-                  'flex items-center gap-3 px-4 py-3 transition-colors',
-                  isSelected && 'bg-primary/3'
+                  'flex flex-col gap-2 rounded-xl border p-3 transition-colors',
+                  isSelected ? 'border-primary/40 bg-primary/5' : 'border-border/50 bg-card'
                 )}>
-                  <span className="text-xl">{product.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="truncate text-sm font-medium text-foreground">{product.product_type_name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {product.service_name} · {formatINR(product.unit_price)}/pc
-                      {isExpressGlobal && product.is_express_available && (
-                        <span className="ml-1 text-amber-600"> → {formatINR(effectivePrice)}/pc</span>
-                      )}
-                    </p>
+                  <div className="flex items-center gap-2.5">
+                    <ProductIcon
+                      src={resolveProductIconSrc(product.product_type_name)}
+                      fallbackEmoji={product.icon}
+                      alt={product.product_type_name}
+                      size={36}
+                      className="shrink-0 rounded-lg"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-foreground">{product.product_type_name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{product.service_name}</p>
+                    </div>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
+
+                  <p className="text-xs text-muted-foreground">
+                    {product.mrp && product.mrp > product.unit_price && (
+                      <span className="line-through mr-1">{formatINR(product.mrp)}</span>
+                    )}
+                    {formatINR(product.unit_price)}/pc
+                    {isExpressGlobal && product.is_express_available && (
+                      <span className="ml-1 text-amber-600"> → {formatINR(effectivePrice)}/pc</span>
+                    )}
+                    {product.mrp && product.mrp > product.unit_price && (
+                      <span className="ml-1 text-green-600 dark:text-green-400 font-medium">
+                        {Math.round((1 - product.unit_price / product.mrp) * 100)}% off
+                      </span>
+                    )}
+                  </p>
+
+                  <div className="flex items-center justify-between gap-2 pt-0.5">
                     {!isSelected ? (
                       <button type="button" onClick={() => onChange(key, 'quantity', 1, product)}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground">
-                        <Plus className="h-4 w-4" />
+                        className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 text-xs font-semibold text-primary hover:bg-primary hover:text-primary-foreground">
+                        <Plus className="h-3.5 w-3.5" /> Add
                       </button>
                     ) : (
                       <>
@@ -408,7 +424,7 @@ function UnitTab({
                             <Plus className="h-3 w-3" />
                           </button>
                         </div>
-                        <span className="w-16 text-right text-sm font-semibold text-primary">
+                        <span className="text-right text-sm font-semibold text-primary">
                           {formatINR(lineTotal)}
                         </span>
                       </>
@@ -487,9 +503,9 @@ export function ServiceSelectionStep({
       const m = isExpressGlobal && svc.is_express_available ? svc.express_multiplier : 1
       result.push({
         type: 'per_kg', service_id: serviceId, service_name: svc.service_name,
-        weight_kg: sel.weight_kg, unit_price: svc.price_per_kg, is_express: isExpressGlobal && svc.is_express_available,
+        weight_kg: sel.weight_kg, unit_price: svc.price_per_kg, mrp: svc.mrp_per_kg ?? null, is_express: isExpressGlobal && svc.is_express_available,
         express_multiplier: svc.express_multiplier, line_total: Math.round(svc.price_per_kg * sel.weight_kg * m * 100) / 100,
-        product_type_id: '',
+        product_type_id: null,
         quantity: 0,
         product_type_name: '',
         icon: undefined
@@ -503,7 +519,7 @@ export function ServiceSelectionStep({
       result.push({
         type: 'per_unit', product_type_id: ptId, product_type_name: product.product_type_name,
         icon: product.icon, service_id: svcId, service_name: product.service_name, quantity: sel.quantity,
-        unit_price: product.unit_price, is_express: isExpressGlobal && product.is_express_available,
+        unit_price: product.unit_price, mrp: product.mrp ?? null, is_express: isExpressGlobal && product.is_express_available,
         express_multiplier: product.express_multiplier, line_total: Math.round(product.unit_price * sel.quantity * m * 100) / 100,
         weight_kg: 0
       })

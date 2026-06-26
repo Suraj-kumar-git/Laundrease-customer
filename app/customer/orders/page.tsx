@@ -301,7 +301,7 @@ function PageContent() {
 
   return (
     <>
-      <div className="container mx-auto max-w-2xl px-4 py-6">
+      <div className="container mx-auto max-w-5xl px-4 py-6">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
@@ -367,16 +367,18 @@ function PageContent() {
           </div>
         ) : (
           <div className="space-y-3">
-            <AnimatePresence>
-              {orders.map(order => (
-                <OrderCard
-                  key={order.id}
-                  order={order}
-                  onRateClick={handleRateClick}
-                  reviewedRating={reviewedMap[order.id]}
-                />
-              ))}
-            </AnimatePresence>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <AnimatePresence>
+                {orders.map(order => (
+                  <OrderCard
+                    key={order.id}
+                    order={order}
+                    onRateClick={handleRateClick}
+                    reviewedRating={reviewedMap[order.id]}
+                  />
+                ))}
+              </AnimatePresence>
+            </div>
 
             {hasMore && (
               <div className="flex justify-center pt-2">
