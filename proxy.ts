@@ -10,6 +10,7 @@ const PROTECTED_ROUTES = [
   '/customer/profile',
   '/customer/refer-and-earn',
   '/customer/settings',
+  '/customer/support',
 ]
  
 const PUBLIC_URLs = [
@@ -31,6 +32,10 @@ const PUBLIC_URLs = [
   '/customer/auth/register',
   '/customer/auth/reset-password/*',
   '/customer/auth/verify',
+  '/api/customer/laundry-providers/search',
+  '/api/customer/payments/payu/success',
+  '/api/customer/payments/payu/failure',
+  '/api/customer/payments/cashfree/return',
 ]
  
 // API routes that don't require authentication

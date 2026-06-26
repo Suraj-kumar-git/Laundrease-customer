@@ -2,6 +2,7 @@
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
 import { successResponse, errorResponse, serverErrorResponse } from '@/lib/api-response'
+import { PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL } from '@/lib/subscription'
 
 // GET /api/customer/laundry-providers/search
 // Query params: ?location=411045 (pincode or city)
@@ -15,6 +16,14 @@ export async function GET(req: NextRequest) {
 
   try {
     const isPincode = /^\d{5,6}$/.test(location)
+
+    const minPriceKgExpr = `(
+      SELECT MIN(COALESCE(ps.price_per_kg_override, ps.price_override, s.price_per_kg, s.base_price))
+      FROM provider_services ps
+      JOIN services s ON s.id = ps.service_id
+      WHERE ps.provider_id = lp.id
+        AND s.price_per_kg IS NOT NULL
+    )`
 
     const result = await query(
       isPincode
@@ -31,23 +40,27 @@ export async function GET(req: NextRequest) {
              lp.certifications,
              lp.services_offered,
              lp.operating_hours,
-             lp.is_verified
+             lp.is_verified,
+             ${minPriceKgExpr} AS min_price_kg
            FROM laundry_profiles lp
            JOIN provider_service_areas psa ON psa.provider_id = lp.id
            WHERE lp.status = 'active'
              AND lp.is_verified = TRUE
+             AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}
              AND psa.is_active = TRUE
              AND psa.postal_code = $1
            ORDER BY lp.rating DESC, lp.business_name ASC`
         : `SELECT
-             id, business_name, business_address, city, postal_code,
-             service_area, rating, rating_count, capacity,
-             certifications, services_offered, operating_hours, is_verified
-           FROM laundry_profiles
-           WHERE status = 'active'
-             AND is_verified = TRUE
-             AND city ILIKE $1
-           ORDER BY rating DESC, business_name ASC`,
+             lp.id, lp.business_name, lp.business_address, lp.city, lp.postal_code,
+             lp.service_area, lp.rating, lp.rating_count, lp.capacity,
+             lp.certifications, lp.services_offered, lp.operating_hours, lp.is_verified,
+             ${minPriceKgExpr} AS min_price_kg
+           FROM laundry_profiles lp
+           WHERE lp.status = 'active'
+             AND lp.is_verified = TRUE
+             AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}
+             AND lp.city ILIKE $1
+           ORDER BY lp.rating DESC, lp.business_name ASC`,
       [isPincode ? location : `%${location}%`]
     )
 
@@ -66,6 +79,7 @@ export async function GET(req: NextRequest) {
         services_offered: r.services_offered ?? [],
         operating_hours: r.operating_hours ?? {},
         is_verified: r.is_verified,
+        min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
       })),
     })
   } catch (error) {

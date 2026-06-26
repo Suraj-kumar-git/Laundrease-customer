@@ -56,12 +56,15 @@ export interface Service {
 }
  
 export interface SelectedService {
-  product_type_id: string | number
+  // null for per_kg items — they aren't tied to a single garment type;
+  // the backend resolves the shared "mixed load" product type instead.
+  product_type_id: number | null
   express_multiplier: number
   service_id: number
   service_name: string
   weight_kg: number
   unit_price: number
+  mrp?: number | null
   is_express: boolean
   line_total: number
   quantity: number

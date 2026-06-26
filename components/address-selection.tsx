@@ -27,7 +27,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { Address, AddressSelectionProps } from '@/types/address'
+import { Address } from '@/types/address'
+import { AddressSelectionProps } from '@/types/address-selection-props'
  
 export default function AddressSelection({
   userId,

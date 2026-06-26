@@ -4,9 +4,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import {
-  ArrowRight, ShieldCheck, Zap, Droplets, Calendar,
-  Star, Check, ChevronLeft, ChevronRight, MapPin, Loader2,
+  ArrowRight, ShieldCheck, ShieldAlert, Zap, Droplets, Calendar,
+  Star, ChevronLeft, ChevronRight, MapPin, Loader2,
   WashingMachine, Shirt, Flame, Package, AlertCircle,
+  Wallet, Users, Gift, Camera, Sparkles,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -201,22 +202,73 @@ function Stars({ rating }: { rating: number }) {
   )
 }
 
+// ---- Hero illustration (inline SVG placeholder — swap for real art later) ----
+function HeroIllustration() {
+  return (
+    <svg viewBox="0 0 360 360" className="h-full w-full drop-shadow-2xl">
+      <defs>
+        <linearGradient id="machineBody" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
+          <stop offset="100%" stopColor="#f3e8ff" stopOpacity="0.85" />
+        </linearGradient>
+        <linearGradient id="drumGlass" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#7c3aed" />
+          <stop offset="100%" stopColor="#db2777" />
+        </linearGradient>
+      </defs>
+
+      {/* Soft glow backdrop */}
+      <circle cx="180" cy="190" r="150" fill="#ffffff" opacity="0.08" />
+
+      {/* Washing machine body */}
+      <rect x="60" y="70" width="240" height="230" rx="28" fill="url(#machineBody)" />
+      {/* Control strip */}
+      <rect x="90" y="92" width="180" height="16" rx="8" fill="#a855f7" opacity="0.5" />
+      <circle cx="100" cy="100" r="4" fill="#db2777" />
+      <circle cx="118" cy="100" r="4" fill="#f59e0b" />
+      <circle cx="136" cy="100" r="4" fill="#10b981" />
+
+      {/* Drum / porthole */}
+      <circle cx="180" cy="205" r="86" fill="url(#drumGlass)" />
+      <circle cx="180" cy="205" r="86" fill="none" stroke="#ffffff" strokeOpacity="0.6" strokeWidth="6" />
+      <circle cx="180" cy="205" r="68" fill="none" stroke="#ffffff" strokeOpacity="0.35" strokeWidth="3" />
+
+      {/* Floating clothes inside drum */}
+      <g opacity="0.95">
+        <rect x="148" y="178" width="32" height="40" rx="8" fill="#fde68a" transform="rotate(-12 164 198)" />
+        <rect x="178" y="200" width="28" height="34" rx="7" fill="#bbf7d0" transform="rotate(18 192 217)" />
+        <circle cx="155" cy="232" r="10" fill="#fecdd3" />
+      </g>
+
+      {/* Bubbles rising out of the machine */}
+      <circle cx="120" cy="60" r="7" fill="#ffffff" opacity="0.7" />
+      <circle cx="245" cy="48" r="10" fill="#ffffff" opacity="0.6" />
+      <circle cx="270" cy="80" r="5" fill="#ffffff" opacity="0.8" />
+      <circle cx="95" cy="40" r="4" fill="#ffffff" opacity="0.6" />
+
+      {/* Legs */}
+      <rect x="78" y="298" width="16" height="14" rx="3" fill="#ffffff" opacity="0.8" />
+      <rect x="266" y="298" width="16" height="14" rx="3" fill="#ffffff" opacity="0.8" />
+    </svg>
+  )
+}
+
 // ---- Provider card -----------------------------------------------------------
 function ProviderCard({ p }: { p: Provider }) {
   return (
     <Link href={`/customer/orders/create?provider=${p.id}`} className="block h-full">
-      <div className="group h-full overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg hover:border-primary/20">
-        <div className="relative h-44 overflow-hidden bg-gradient-to-br from-primary/10 to-violet-600/10">
+      <div className="group h-full overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-primary/30">
+        <div className="relative h-44 overflow-hidden bg-gradient-to-br from-violet-500/20 via-fuchsia-500/15 to-amber-400/20">
           {p.image ? (
             <img src={p.image} alt={p.name} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
           ) : (
             <div className="flex h-full items-center justify-center">
-              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/10 text-3xl font-bold text-primary">
+              <div className="flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-fuchsia-600 text-3xl font-bold text-white shadow-lg">
                 {p.name.charAt(0)}
               </div>
             </div>
           )}
-          <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-emerald-500 px-2.5 py-0.5 text-[11px] font-semibold text-white">
+          <div className="absolute bottom-2 left-2 flex items-center gap-1 rounded-full bg-emerald-500 px-2.5 py-0.5 text-[11px] font-semibold text-white shadow">
             <ShieldCheck className="h-3 w-3" /> Verified
           </div>
           {p.distance_km !== null && (
@@ -237,7 +289,7 @@ function ProviderCard({ p }: { p: Provider }) {
           {p.city && <p className="mb-2 flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> {p.city}</p>}
           <div className="flex items-center justify-between">
             {p.min_price_kg && <span className="text-sm font-bold text-primary">from {formatPrice(p.min_price_kg)}</span>}
-            <span className="ml-auto rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">Book Now →</span>
+            <span className="ml-auto rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-2.5 py-1 text-xs font-semibold text-white">Book Now →</span>
           </div>
         </div>
       </div>
@@ -255,7 +307,7 @@ function TestimonialCard({ t }: { t: Testimonial }) {
       <div className="mt-5 flex items-center gap-3">
         {t.avatar_url
           ? <img src={t.avatar_url} alt={t.display_name} className="h-10 w-10 rounded-full object-cover" />
-          : <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-purple-600 text-xs font-bold text-white">{initials}</div>
+          : <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-600 text-xs font-bold text-white">{initials}</div>
         }
         <div className="min-w-0">
           <p className="text-sm font-semibold text-foreground truncate">{t.display_name}</p>
@@ -271,7 +323,7 @@ function TestimonialCard({ t }: { t: Testimonial }) {
 
 // ---- Static data -------------------------------------------------------------
 const WHY_CARDS = [
-  { title: 'On-Time Guarantee',     description: "Pickup within 2 hours, delivery in 24 hours or it's free.",              icon: ShieldCheck,   gradient: 'from-violet-500 to-purple-600', bg: 'bg-violet-50 dark:bg-violet-950/30',   text: 'text-violet-600'  },
+  { title: 'On-Time Guarantee',     description: "Pickup within 2 hours, delivery in 24 hours or it's free.",              icon: ShieldCheck,   gradient: 'from-violet-500 to-fuchsia-600', bg: 'bg-violet-50 dark:bg-violet-950/30',   text: 'text-violet-600'  },
   { title: 'Hotel-Quality Clean',   description: 'Professional washing, ironing, and folding every time — guaranteed.',     icon: WashingMachine,gradient: 'from-emerald-500 to-teal-600',   bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-600' },
   { title: 'Transparent Pricing',   description: 'No hidden fees, no surprises — clear per-kg and per-item rates upfront.',  icon: Zap,           gradient: 'from-amber-500 to-orange-500',  bg: 'bg-amber-50 dark:bg-amber-950/30',    text: 'text-amber-600'   },
   { title: 'Eco-Friendly Process',  description: 'Water-efficient cleaning, biodegradable detergents, reusable packaging.',  icon: Droplets,      gradient: 'from-teal-500 to-cyan-600',     bg: 'bg-teal-50 dark:bg-teal-950/30',     text: 'text-teal-600'    },
@@ -279,11 +331,16 @@ const WHY_CARDS = [
   { title: 'Express 8-Hour Service',description: 'Need clothes fast? Our express service cleans and delivers in 8 hours.',   icon: Flame,         gradient: 'from-rose-500 to-red-600',      bg: 'bg-rose-50 dark:bg-rose-950/30',     text: 'text-rose-600'    },
 ]
 
-const MOMENTS = [
-  { title: 'Stain Rescue',          description: "Your favourite kurta got that stubborn food stain right before family dinner? We specialise in deep stain removal — your clothes come back looking brand new.",                              icon: Droplets, gradient: 'from-blue-500 to-cyan-600'     },
-  { title: 'Busy Life Saver',       description: 'Weekends planned with friends, no time for laundry piles? Schedule pickup in 2 taps, get stress-free fresh clothes delivered while you enjoy your plans.',                                   icon: Calendar, gradient: 'from-emerald-500 to-teal-600'  },
-  { title: 'Party Wear Perfection', description: "Your special party lehenga needs that crisp dry-clean finish? Professional dry cleaning with gentle care for your occasion wear — ready when you are.",                                      icon: Shirt,    gradient: 'from-purple-500 to-violet-600' },
-  { title: 'Heirloom Revival',      description: "Mumma's wedding lehenga locked in folds, but you want to wear it for your big day? Expert steaming brings treasured memories back to life, perfectly.",                                      icon: Package,  gradient: 'from-rose-500 to-pink-600'     },
+const PROTECTION_POINTS = [
+  { title: 'Snap & Report',     description: 'Item damaged, lost, or stolen? Report it with photos within 72 hours of delivery — right from your order page.', icon: Camera,      gradient: 'from-rose-500 to-orange-500'   },
+  { title: 'Fair, Capped Payout', description: "Compensation up to 10x the item's cleaning charge, so payouts stay fair for everyone.",                          icon: ShieldAlert, gradient: 'from-violet-500 to-fuchsia-600' },
+  { title: 'Instant Wallet Credit', description: 'Once approved, compensation lands straight in your Laundrease wallet — no waiting on bank transfers.',         icon: Wallet,      gradient: 'from-emerald-500 to-teal-600'  },
+]
+
+const REWARDS_CARDS = [
+  { title: 'Laundrease Wallet', description: 'Refunds, cashback, and claim payouts land instantly in your wallet — use it on any future order.', icon: Wallet, gradient: 'from-emerald-500 to-teal-600' },
+  { title: 'Refer & Earn',      description: 'Invite friends to Laundrease. When they place their first order, you both get wallet credit.',      icon: Users,  gradient: 'from-blue-500 to-indigo-600'  },
+  { title: 'Loyalty Points',    description: 'Every order earns you loyalty points — redeem them for discounts on your future bookings.',           icon: Gift,   gradient: 'from-amber-500 to-orange-500' },
 ]
 
 const BUBBLES = [
@@ -308,7 +365,7 @@ function useLocation() {
     if (!navigator.geolocation) { setDenied(true); return }
     setAsking(true)
     navigator.geolocation.getCurrentPosition(
-      pos => { setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setAsking(false) },
+      pos => { setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setDenied(false); setAsking(false) },
       ()  => { setDenied(true); setAsking(false) },
       { timeout: 8000 }
     )
@@ -349,124 +406,87 @@ export default function HomePage() {
   ]
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex min-h-screen flex-col overflow-x-hidden">
 
       {/* ---- HERO ---- */}
-      <section className="relative min-h-[92vh] overflow-hidden flex items-center">
-        <div className="absolute inset-0">
-          <img src="/Desktop-Hero.jpg" alt="" aria-hidden
-            className="h-full w-full object-cover object-center"
-            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
-        </div>
-        <div className="absolute inset-0" />
-        {/* <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
+      <section className="relative overflow-hidden bg-gradient-to-br from-violet-600 via-fuchsia-600 to-orange-400">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
           {BUBBLES.map((b, i) => (
             <div key={i} className="absolute rounded-full bg-white/20"
               style={{ width: `${b.w}px`, height: `${b.h}px`, top: `${b.top}%`, left: `${b.left}%`,
                 animation: `float ${b.dur}s ease-in-out infinite`, animationDelay: `${b.delay}s` }} />
           ))}
-        </div> */}
-        <div className="container relative mx-auto px-4 py-20 md:py-28 text-center">
-          {/* <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-1.5 text-sm font-medium text-white/90 backdrop-blur-sm mb-6 border border-white/20">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-            Serving Pimpri-Chinchwad &amp; Pune
-          </div>
-          <h1 className="mb-6 text-4xl font-extrabold tracking-tight text-white sm:text-5xl md:text-6xl lg:text-7xl">
-            Laundry,{' '}
-            <span className="bg-gradient-to-r from-violet-200 to-purple-200 bg-clip-text text-transparent">Done Right.</span>
-            <br className="hidden md:block" />{' '}Delivered to Your Door.
-          </h1>
-          <p className="mx-auto mb-10 max-w-2xl text-lg text-white/80 md:text-xl leading-relaxed">
-            Schedule pickup from your doorstep. Get fresh, folded clothes back in 24 hours. No hassle — just clean clothes.
-          </p> */}
-          <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <Link href="/customer/auth/register">
-              <Button size="lg" className="group bg-white text-violet-700 hover:bg-white/90 shadow-lg shadow-violet-900/30 px-8">
-                Get Started Free <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-              </Button>
-            </Link>
-            <Link href="/customer/quick-pickup">
-              <Button size="lg" variant="outline" className="border-white/40 text-white bg-white/10 hover:bg-white/20 px-8 backdrop-blur-sm">
-                Schedule a Quick Pickup
-              </Button>
-            </Link>
-          </div>
-          {/* <div className="mt-12 flex flex-wrap items-center justify-center gap-6 text-sm text-white/70">
-            {['✓ First order 20% off', '✓ No hidden fees', '✓ Money-back guarantee', '✓ 24/7 support'].map(item => (
-              <span key={item} className="font-medium">{item}</span>
-            ))}
-          </div> */}
         </div>
-        {/* <div className="absolute bottom-0 left-0 right-0">
+
+        <div className="container relative mx-auto grid grid-cols-1 items-center gap-10 px-4 py-20 md:grid-cols-2 md:py-28">
+          <div className="text-center md:text-left">
+            <h1 className="mb-6 text-4xl font-extrabold tracking-tight text-white sm:text-5xl md:text-6xl">
+              Laundry,{' '}
+              <span className="bg-gradient-to-r from-amber-200 to-yellow-100 bg-clip-text text-transparent">Done Right.</span>
+              <br />Delivered to Your Door.
+            </h1>
+            <p className="mx-auto mb-8 max-w-xl text-lg text-white/85 md:mx-0 leading-relaxed">
+              Schedule pickup from your doorstep. Get fresh, folded clothes back in 24 hours — protected by our garment guarantee.
+            </p>
+
+            <div className="flex flex-col items-center justify-center gap-4 sm:flex-row md:justify-start">
+              <Link href="/customer/auth/register">
+                <Button size="lg" className="group bg-white text-violet-700 hover:bg-white/90 shadow-lg shadow-violet-900/30 px-8 transition-all duration-300 hover:scale-105 hover:shadow-xl">
+                  Get Started Free <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-300 group-hover:translate-x-1.5" />
+                </Button>
+              </Link>
+              <Link href="/customer/quick-pickup">
+                <Button size="lg" variant="outline" className="group border-white/40 text-white bg-white/10 hover:bg-white/20 px-8 backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-white/10">
+                  Schedule a Quick Pickup <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-300 group-hover:translate-x-1.5" />
+                </Button>
+              </Link>
+            </div>
+            <div className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-4 md:max-w-md">
+              {STATS.map((stat, i) => (
+                <div key={i} className="text-center md:text-left">
+                  <p className="text-2xl font-extrabold text-white tabular-nums">{loading ? '—' : stat.value}</p>
+                  <p className="text-xs font-medium text-white/70">{stat.label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="hidden md:flex items-center justify-center">
+            <div className="w-full max-w-sm animate-[float_8s_ease-in-out_infinite]">
+              <HeroIllustration />
+            </div>
+          </div>
+
+          {/* Mobile service icon row */}
+          <div className="grid grid-cols-4 gap-3 md:hidden">
+            {[
+              { label: 'Washing',           icon: WashingMachine },
+              { label: 'Dry Cleaning',      icon: Shirt           },
+              { label: 'Steam Ironing',     icon: Flame           },
+              { label: 'Pickup & Delivery', icon: Package         },
+            ].map(({ label, icon: Icon }) => (
+              <div key={label} className="flex flex-col items-center gap-2">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 text-white backdrop-blur-sm">
+                  <Icon className="h-5 w-5" />
+                </div>
+                <span className="text-[11px] font-medium leading-tight text-white/80 text-center">{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="absolute bottom-0 left-0 right-0">
           <svg viewBox="0 0 1440 80" className="w-full text-background fill-current" preserveAspectRatio="none">
             <path d="M0,40 C360,80 1080,0 1440,40 L1440,80 L0,80 Z" />
           </svg>
-        </div> */}
-      </section>
-
-      {/* ---- WHY CHOOSE US ---- */}
-      <section className="container mx-auto px-6 py-20">
-        <div className="mb-10 text-center">
-          <Badge className="mb-3">Why Choose Us</Badge>
-          <h2 className="text-3xl font-bold tracking-tight md:text-4xl">Why Laundrease Stands Out</h2>
-          <p className="mt-3 mx-auto max-w-xl text-muted-foreground">We combine professional quality with the convenience of a tap.</p>
-        </div>
-        <Carousel>
-          {WHY_CARDS.map((card, i) => {
-            const Icon = card.icon
-            return (
-              <div key={i} className="h-full rounded-2xl border border-border/50 bg-card overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                <div className={`h-1 bg-gradient-to-r ${card.gradient}`} />
-                <div className="p-6">
-                  <div className={cn('mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl', card.bg, card.text)}>
-                    <Icon className="h-6 w-6" />
-                  </div>
-                  <h3 className="mb-2 text-base font-bold text-foreground">{card.title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{card.description}</p>
-                </div>
-              </div>
-            )
-          })}
-        </Carousel>
-      </section>
-
-      {/* ---- REAL LIFE MOMENTS ---- */}
-      <section className="bg-gradient-to-br from-blue-50 to-violet-50 py-20 dark:from-slate-900/30 dark:to-violet-900/20">
-        <div className="container mx-auto px-6">
-          <div className="mb-10 text-center">
-            <Badge className="mb-3 bg-gradient-to-r from-blue-500 to-violet-500 text-white border-0">Real Life Moments</Badge>
-            <h2 className="text-3xl font-bold tracking-tight md:text-4xl">Real Problems. Real Solutions.</h2>
-            <p className="mt-3 mx-auto max-w-xl text-muted-foreground">From stubborn stains to special occasion stress — we handle it.</p>
-          </div>
-          <Carousel>
-            {MOMENTS.map((m, i) => {
-              const Icon = m.icon
-              return (
-                <div key={i} className="flex flex-col rounded-2xl overflow-hidden border border-border/50 bg-card shadow-sm h-full">
-                  <div className={`flex flex-col items-center justify-center gap-3 bg-gradient-to-br ${m.gradient} p-8 text-white`}>
-                    <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20">
-                      <Icon className="h-7 w-7" />
-                    </div>
-                    <h3 className="text-lg font-bold text-center">{m.title}</h3>
-                  </div>
-                  <div className="flex flex-1 flex-col p-5">
-                    <p className="flex-1 text-sm text-muted-foreground leading-relaxed italic">&ldquo;{m.description}&rdquo;</p>
-                    <Link href="/customer/quick-pickup" className="mt-4 inline-flex items-center text-sm font-semibold text-primary hover:underline">
-                      Book Now <ChevronRight className="ml-1 h-4 w-4" />
-                    </Link>
-                  </div>
-                </div>
-              )
-            })}
-          </Carousel>
         </div>
       </section>
 
       {/* ---- PROVIDERS NEAR YOU ---- */}
-      <section className="py-20">
+      <section className="bg-gradient-to-br from-violet-50 to-fuchsia-50 py-20 dark:from-slate-900/30 dark:to-violet-900/20">
         <div className="container mx-auto px-6">
           <div className="mb-10 text-center">
-            <Badge className="mb-3">Featured</Badge>
+            <Badge className="mb-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0">Featured</Badge>
             <h2 className="text-3xl font-bold tracking-tight md:text-4xl">Laundry Providers Near You</h2>
             <p className="mt-3 mx-auto max-w-xl text-muted-foreground">
               {data?.location_used ? 'Showing providers closest to your location' : 'Top-rated verified laundry partners'}
@@ -490,7 +510,7 @@ export default function HomePage() {
           )}
           {data && data.providers.length === 0 && (
             <p className="py-12 text-center text-sm text-muted-foreground">
-              {data.location_used ? 'No verified providers found within 15 km.' : 'No providers available yet. Check back soon!'}
+              {data.location_used ? 'No verified providers found within 8 km.' : 'No providers available yet. Check back soon!'}
             </p>
           )}
           {data && data.providers.length > 0 && (
@@ -498,7 +518,7 @@ export default function HomePage() {
           )}
           <div className="mt-10 text-center">
             <Link href="/customer/services">
-              <Button size="lg" className="bg-primary text-white hover:bg-primary/90 shadow-md shadow-primary/20">
+              <Button size="lg" className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:opacity-90 shadow-md shadow-violet-500/20">
                 View All Providers <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </Link>
@@ -507,55 +527,99 @@ export default function HomePage() {
       </section>
 
       {/* ---- HOW IT WORKS ---- */}
-      <section className="bg-muted/30 dark:bg-muted/10 py-20">
-        <div className="container mx-auto px-6">
-          <div className="mb-12 text-center">
-            <Badge className="mb-3">Process</Badge>
-            <h2 className="text-3xl font-bold tracking-tight md:text-4xl">How It Works</h2>
-            <p className="mt-3 mx-auto max-w-xl text-muted-foreground">Our simple 4-step process makes laundry safe and easy.</p>
-          </div>
-          <div className="relative mx-auto max-w-3xl">
-            <div className="absolute left-6 top-0 h-full w-0.5 bg-gradient-to-b from-violet-600 to-purple-600 md:left-1/2 md:-ml-px" />
-            <div className="space-y-10 md:space-y-14">
-              {[
-                { title: 'Create Your Account',  desc: 'Sign up and verify your identity in minutes.'                    },
-                { title: 'Schedule Pickup',      desc: 'Select clothes, choose a time slot, confirm pickup.'             },
-                { title: 'We Clean & Fold',      desc: 'Professional wash, dry, iron, and neat packaging.'               },
-                { title: 'Delivery at Your Door',desc: 'Track live status and get clothes back to your doorstep.'        },
-              ].map((step, i) => (
-                <div key={i} className="relative flex items-start gap-5 md:gap-0">
-                  <div className="flex items-start gap-4 md:hidden">
-                    <div className="relative z-10 flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-purple-600 text-white shadow-lg">
-                      <span className="text-base font-bold">{i + 1}</span>
-                    </div>
-                    <div className="pt-1">
-                      <h3 className="mb-1 text-lg font-bold">{step.title}</h3>
-                      <p className="text-sm text-muted-foreground">{step.desc}</p>
-                    </div>
-                  </div>
-                  <div className="hidden md:flex w-full items-start">
-                    <div className={cn('w-5/12 pr-8', i % 2 === 0 ? 'text-right' : 'opacity-0')}>
-                      {i % 2 === 0 && <div><h3 className="mb-1 text-lg font-bold">{step.title}</h3><p className="text-sm text-muted-foreground">{step.desc}</p></div>}
-                    </div>
-                    <div className="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-purple-600 text-white shadow-lg ring-4 ring-background">
-                      <span className="text-sm font-bold">{i + 1}</span>
-                    </div>
-                    <div className={cn('w-5/12 pl-8', i % 2 === 1 ? 'text-left' : 'opacity-0')}>
-                      {i % 2 === 1 && <div><h3 className="mb-1 text-lg font-bold">{step.title}</h3><p className="text-sm text-muted-foreground">{step.desc}</p></div>}
-                    </div>
-                  </div>
+      <section className="container mx-auto px-6 py-20">
+        <div className="mb-12 text-center">
+          <Badge className="mb-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0">Process</Badge>
+          <h2 className="text-3xl font-bold tracking-tight md:text-4xl">How It Works</h2>
+          <p className="mt-3 mx-auto max-w-xl text-muted-foreground">Our simple 4-step process makes laundry safe and easy.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          {[
+            { title: 'Create Your Account',   desc: 'Sign up and verify your identity in minutes.',             icon: Sparkles,       gradient: 'from-violet-500 to-fuchsia-600' },
+            { title: 'Schedule Pickup',        desc: 'Select clothes, choose a time slot, confirm pickup.',      icon: Calendar,       gradient: 'from-blue-500 to-cyan-600'      },
+            { title: 'We Clean & Fold',        desc: 'Professional wash, dry, iron, and neat packaging.',        icon: WashingMachine, gradient: 'from-emerald-500 to-teal-600'   },
+            { title: 'Delivery at Your Door',  desc: 'Track live status and get clothes back to your doorstep.', icon: Package,        gradient: 'from-amber-500 to-orange-500'   },
+          ].map((step, i) => {
+            const Icon = step.icon
+            return (
+              <div key={i} className="relative rounded-2xl border border-border/50 bg-card p-6 shadow-sm">
+                <div className={cn('mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-md', step.gradient)}>
+                  <Icon className="h-6 w-6" />
                 </div>
-              ))}
-            </div>
+                <div className="absolute right-5 top-5 text-4xl font-extrabold text-muted-foreground/10">{i + 1}</div>
+                <h3 className="mb-1 text-base font-bold text-foreground">{step.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{step.desc}</p>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
+      {/* ---- ITEM PROTECTION / GARMENT GUARANTEE ---- */}
+      <section className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-violet-950 to-fuchsia-950 py-20 text-white">
+        <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
+          {BUBBLES.slice(0, 6).map((b, i) => (
+            <div key={i} className="absolute rounded-full bg-white/10"
+              style={{ width: `${b.w * 1.3}px`, height: `${b.h * 1.3}px`, top: `${b.top}%`, left: `${b.left}%`,
+                animation: `float ${b.dur + 3}s ease-in-out infinite`, animationDelay: `${b.delay}s` }} />
+          ))}
+        </div>
+        <div className="container relative mx-auto px-6">
+          <div className="mb-12 text-center">
+            <Badge className="mb-3 bg-white/10 text-white border-white/20 backdrop-blur-sm">Garment Guarantee</Badge>
+            <h2 className="text-3xl font-bold tracking-tight md:text-4xl">Your Clothes Are Protected</h2>
+            <p className="mt-3 mx-auto max-w-xl text-white/70">
+              If an item is damaged, lost, or stolen while in our care, you&apos;re covered — no fine print, no runaround.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+            {PROTECTION_POINTS.map((p, i) => {
+              const Icon = p.icon
+              return (
+                <div key={i} className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+                  <div className={cn('mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg', p.gradient)}>
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <h3 className="mb-2 text-base font-bold">{p.title}</h3>
+                  <p className="text-sm text-white/70 leading-relaxed">{p.description}</p>
+                </div>
+              )
+            })}
           </div>
         </div>
       </section>
 
+      {/* ---- SAVE MORE: WALLET / REFERRAL / LOYALTY ---- */}
+      <section className="container mx-auto px-6 py-20">
+        <div className="mb-10 text-center">
+          <Badge className="mb-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white border-0">Save More</Badge>
+          <h2 className="text-3xl font-bold tracking-tight md:text-4xl">More Ways to Save</h2>
+          <p className="mt-3 mx-auto max-w-xl text-muted-foreground">Wallet credits, referral rewards, and loyalty points — all built in.</p>
+        </div>
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+          {REWARDS_CARDS.map((card, i) => {
+            const Icon = card.icon
+            return (
+              <div key={i} className="h-full rounded-2xl border border-border/50 bg-card overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                <div className={`h-1 bg-gradient-to-r ${card.gradient}`} />
+                <div className="p-6">
+                  <div className={cn('mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-md', card.gradient)}>
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <h3 className="mb-2 text-base font-bold text-foreground">{card.title}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{card.description}</p>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </section>
+
       {/* ---- TESTIMONIALS ---- */}
-      <section className="py-20">
+      <section className="bg-muted/30 dark:bg-muted/10 py-20">
         <div className="container mx-auto px-6">
           <div className="mb-10 text-center">
-            <Badge className="mb-3">Testimonials</Badge>
+            <Badge className="mb-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0">Testimonials</Badge>
             <h2 className="text-3xl font-bold tracking-tight md:text-4xl">What Our Customers Say</h2>
             <p className="mt-3 mx-auto max-w-xl text-muted-foreground">Trusted by thousands of households across Pune.</p>
           </div>
@@ -566,58 +630,41 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* ---- STATS ---- */}
-      <section className="bg-muted/30 dark:bg-muted/10 py-20">
-        <div className="container mx-auto px-6">
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-            {STATS.map((stat, i) => (
-              <div key={i} className="flex flex-col items-center rounded-2xl border border-border/50 bg-card p-7 text-center shadow-sm">
-                <span className="mb-3 text-4xl">{stat.icon}</span>
-                <span className="text-3xl font-extrabold text-primary tabular-nums">{loading ? '—' : stat.value}</span>
-                <span className="mt-1 text-sm font-semibold text-foreground">{stat.label}</span>
-                <span className="mt-0.5 text-xs text-muted-foreground">{stat.sub}</span>
-              </div>
-            ))}
-          </div>
+      {/* ---- WHY CHOOSE US ---- */}
+      <section className="container mx-auto px-6 py-20">
+        <div className="mb-10 text-center">
+          <Badge className="mb-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0">Why Choose Us</Badge>
+          <h2 className="text-3xl font-bold tracking-tight md:text-4xl">Why Laundrease Stands Out</h2>
+          <p className="mt-3 mx-auto max-w-xl text-muted-foreground">We combine professional quality with the convenience of a tap.</p>
         </div>
+        <Carousel>
+          {WHY_CARDS.map((card, i) => {
+            const Icon = card.icon
+            return (
+              <div key={i} className="h-full rounded-2xl border border-border/50 bg-card overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+                <div className={`h-1 bg-gradient-to-r ${card.gradient}`} />
+                <div className="p-6">
+                  <div className={cn('mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl', card.bg, card.text)}>
+                    <Icon className="h-6 w-6" />
+                  </div>
+                  <h3 className="mb-2 text-base font-bold text-foreground">{card.title}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{card.description}</p>
+                </div>
+              </div>
+            )
+          })}
+        </Carousel>
       </section>
 
-      {/* ---- CTA ---- */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-violet-600 via-indigo-700 to-purple-800 py-24 text-white dark:from-violet-950 dark:via-indigo-950 dark:to-purple-950">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
-          {BUBBLES.slice(0, 8).map((b, i) => (
-            <div key={i} className="absolute rounded-full bg-white/15"
-              style={{ width: `${b.w * 1.5}px`, height: `${b.h * 1.5}px`, top: `${b.top}%`, left: `${b.left}%`,
-                animation: `float ${b.dur + 2}s ease-in-out infinite`, animationDelay: `${b.delay}s` }} />
-          ))}
-        </div>
-        <div className="container relative mx-auto px-6 text-center">
-          <Badge className="mb-5 bg-white/10 text-white border-white/20 backdrop-blur-sm">Get Started Today</Badge>
-          <h2 className="mb-5 text-3xl font-bold md:text-5xl">Ready for Effortless Laundry?</h2>
-          <p className="mx-auto mb-10 max-w-xl text-lg text-white/80 leading-relaxed">
-            Join thousands of happy customers. First order gets 20% off + free pickup &amp; delivery!
-          </p>
-          <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
-            <Link href="/customer/auth/register">
-              <Button size="lg" className="bg-white text-violet-700 hover:bg-white/90 shadow-lg px-8">
-                Create Your Account <ArrowRight className="ml-2 h-4 w-4" />
-              </Button>
-            </Link>
-            <Link href="/customer/quick-pickup">
-              <Button size="lg" variant="outline" className="border-white/40 text-white bg-white/10 hover:bg-white/20 px-8">
-                Schedule Quick Pickup
-              </Button>
-            </Link>
-          </div>
-          <div className="mt-12 flex flex-wrap items-center justify-center gap-6">
-            {['No hidden fees', 'Secure transactions', '24/7 support', 'Money-back guarantee'].map(item => (
-              <div key={item} className="flex items-center gap-2 text-sm text-white/80">
-                <Check className="h-4 w-4 text-emerald-400 shrink-0" /> {item}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      {/* ---- MOBILE FLOATING QUICK PICKUP BUTTON ---- */}
+      <Link
+        href="/customer/quick-pickup"
+        className="fixed right-4 top-16 z-30 flex items-center gap-1.5 rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg shadow-violet-600/30 animate-bounce md:hidden"
+      >
+        <span className="absolute inset-0 -z-10 rounded-full bg-fuchsia-500 animate-ping opacity-40" />
+        <Zap className="h-3.5 w-3.5" />
+        Quick Pickup
+      </Link>
 
     </div>
   )

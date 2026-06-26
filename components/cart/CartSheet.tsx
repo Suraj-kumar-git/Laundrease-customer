@@ -13,6 +13,8 @@ import {
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
+import { useCart } from '@/components/cart-provider'
+import { serverItemsToCartLineItems } from '@/lib/cart-store'
 
 interface CartItem {
   cart_item_id:      number
@@ -64,6 +66,14 @@ function timeAgo(iso: string) {
 export function CartSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router   = useRouter()
   const { user } = useAuth()
+  const {
+    syncing: cartSyncing,
+    items:    guestItems,
+    subtotal: guestSubtotal,
+    clear:    clearGuestCart,
+    syncFromServer,
+    placeOrder,
+  } = useCart()
   const [cart,     setCart]     = useState<CartData | null>(null)
   const [items,    setItems]    = useState<CartItem[]>([])
   const [loading,  setLoading]  = useState(false)
@@ -78,18 +88,29 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
       if (json.success) {
         setCart(json.data?.cart ?? null)
         setItems(json.data?.items ?? [])
+        // Reconcile the guest-cart cache (and header badge) to the server's
+        // truth every time the signed-in sheet loads — closes the gap where
+        // a stale local cache kept showing items after they'd been cleared
+        // server-side (e.g. right after placing an order).
+        syncFromServer(serverItemsToCartLineItems(json.data?.items ?? []))
       }
     } catch { /* silent */ }
     finally { setLoading(false) }
-  }, [user])
+  }, [user, syncFromServer])
 
-  useEffect(() => { if (open) fetchCart() }, [open, fetchCart])
+  // Wait for the post-login guest→server sync to finish before fetching —
+  // otherwise this can read the cart before items have been pushed and
+  // incorrectly show "cart is empty".
+  useEffect(() => { if (open && !cartSyncing) fetchCart() }, [open, cartSyncing, fetchCart])
 
   const handleClearCart = async () => {
     setClearing(true)
     try {
       await fetch('/api/customer/cart', { method: 'DELETE', credentials: 'include' })
       setCart(null); setItems([])
+      // Keep the local guest-cart cache (and header badge) in sync — it can
+      // hold stale pre-login items that the server-side delete above never touches.
+      clearGuestCart()
     } catch { /* silent */ }
     finally { setClearing(false) }
   }
@@ -106,6 +127,20 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
     acc[item.service_name].push(item)
     return acc
   }, {})
+
+  // Guest (unauthenticated) cart — read straight from the local session cart,
+  // no server round-trip. Grouped the same way as the signed-in view.
+  const guestGrouped = guestItems.reduce<Record<string, typeof guestItems>>((acc, item) => {
+    acc[item.service_name] = acc[item.service_name] ?? []
+    acc[item.service_name].push(item)
+    return acc
+  }, {})
+
+  // Guests can see their cart, but placing an order requires signing in.
+  const handleGuestProceed = () => {
+    onClose()
+    placeOrder()
+  }
 
   return (
     <AnimatePresence>
@@ -146,19 +181,66 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
 
             {/* Body */}
             <div className="flex-1 overflow-y-auto">
-              {loading ? (
+              {loading || (user && cartSyncing) ? (
                 <div className="flex items-center justify-center py-16">
                   <Loader2 className="h-6 w-6 animate-spin text-primary" />
                 </div>
               ) : !user ? (
-                <div className="flex flex-col items-center gap-4 px-5 py-16 text-center">
-                  <ShoppingBag className="h-12 w-12 text-muted-foreground/30" />
-                  <p className="text-sm text-muted-foreground">Sign in to view your cart</p>
-                  <button onClick={() => { onClose(); router.push('/customer/auth/login') }}
-                    className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground">
-                    Sign In
-                  </button>
-                </div>
+                guestItems.length === 0 ? (
+                  <div className="flex flex-col items-center gap-4 px-5 py-16 text-center">
+                    <ShoppingBag className="h-12 w-12 text-muted-foreground/30" />
+                    <div>
+                      <p className="font-medium text-foreground">Cart is empty</p>
+                      <p className="mt-1 text-sm text-muted-foreground">Start a new order to add services</p>
+                    </div>
+                    <button onClick={() => { onClose(); router.push('/customer/orders/create') }}
+                      className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground">
+                      Browse Services
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4 p-4">
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-700 dark:text-amber-400">
+                      You&apos;re browsing as a guest — sign in when you&apos;re ready to place this order.
+                    </div>
+
+                    {Object.entries(guestGrouped).map(([serviceName, serviceItems]) => (
+                      <div key={serviceName} className="overflow-hidden rounded-xl border border-border/50 bg-card">
+                        <div className="border-b border-border/40 bg-muted/30 px-4 py-2">
+                          <p className="text-xs font-semibold text-muted-foreground">{serviceName}</p>
+                        </div>
+                        <div className="divide-y divide-border/30">
+                          {serviceItems.map(item => (
+                            <div key={`${item.product_type_id}-${item.service_id}`} className="flex items-center gap-3 px-4 py-3">
+                              <span className="text-lg">{item.icon ?? '🧺'}</span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-medium text-foreground">{item.product_type_name}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {item.pricing_model === 'per_kg' ? `${item.weight_kg} kg` : `×${item.quantity}`}
+                                  {item.is_express && <span className="ml-1 text-amber-600">· Express</span>}
+                                </p>
+                              </div>
+                              <span className="shrink-0 text-right text-sm">
+                                {item.mrp && item.mrp > item.unit_price && (
+                                  <span className="block text-xs text-muted-foreground line-through">
+                                    {formatINR(item.mrp * (item.pricing_model === 'per_kg' ? item.weight_kg : item.quantity))}
+                                  </span>
+                                )}
+                                <span className="font-semibold text-foreground">{formatINR(item.line_total)}</span>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+
+                    <button onClick={clearGuestCart}
+                      className="flex w-full items-center justify-center gap-2 rounded-xl border border-destructive/30 py-2.5 text-sm font-medium text-destructive hover:bg-destructive/10">
+                      <Trash2 className="h-4 w-4" />
+                      Clear Cart
+                    </button>
+                  </div>
+                )
               ) : !cart || items.length === 0 ? (
                 <div className="flex flex-col items-center gap-4 px-5 py-16 text-center">
                   <ShoppingBag className="h-12 w-12 text-muted-foreground/30" />
@@ -238,6 +320,22 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
             </div>
 
             {/* Footer CTA */}
+            {!user && guestItems.length > 0 && (
+              <div className="border-t border-border/50 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-muted-foreground">Subtotal</span>
+                  <span className="text-lg font-bold text-foreground">{formatINR(guestSubtotal)}</span>
+                </div>
+                <button onClick={handleGuestProceed}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-3.5 text-sm font-bold text-primary-foreground shadow-md shadow-primary/20 hover:bg-primary/90">
+                  Sign In to Continue
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+                <p className="text-center text-xs text-muted-foreground">
+                  You&apos;ll need to sign in to place this order
+                </p>
+              </div>
+            )}
             {cart && items.length > 0 && (
               <div className="border-t border-border/50 p-4 space-y-3">
                 <div className="flex items-center justify-between">

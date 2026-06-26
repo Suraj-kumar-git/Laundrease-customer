@@ -5,6 +5,7 @@
 
 import { NextRequest } from 'next/server'
 import { query, transaction } from '@/lib/db'
+import { getMixedLoadProductTypeId } from '@/lib/product-types'
 import {
   successResponse, errorResponse, serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
@@ -159,6 +160,10 @@ export async function POST(req: NextRequest) {
     pickup_date?:      string | null
     pickup_time_slot?: string | null
     is_express?:       boolean
+    // When true, clears provider_id/address_id — used when pushing a guest cart
+    // that was never bound to a specific provider, so the resume flow restarts
+    // at "choose provider" instead of trusting stale region-specific selections.
+    reset_provider?:   boolean
   }
   try { body = await req.json() } catch { return errorResponse('Invalid body', 400) }
 
@@ -204,13 +209,17 @@ export async function POST(req: NextRequest) {
       let   pi                = 1
 
       if (body.current_step      != null) { updates.push(`current_step = $${pi++}`);     vals.push(body.current_step) }
-      if (body.provider_id       != null) { updates.push(`provider_id = $${pi++}`);      vals.push(body.provider_id) }
-      if (body.address_id        != null) { updates.push(`address_id = $${pi++}`);       vals.push(body.address_id) }
+      if (body.reset_provider) {
+        updates.push(`provider_id = NULL`, `address_id = NULL`)
+      } else {
+        if (body.provider_id != null) { updates.push(`provider_id = $${pi++}`); vals.push(body.provider_id) }
+        if (body.address_id  != null) { updates.push(`address_id = $${pi++}`);  vals.push(body.address_id) }
+      }
       if (body.pickup_date       != null) { updates.push(`pickup_date = $${pi++}`);      vals.push(body.pickup_date) }
       if (body.pickup_time_slot  != null) { updates.push(`pickup_time_slot = $${pi++}`); vals.push(body.pickup_time_slot) }
       if (body.is_express        != null) { updates.push(`is_express = $${pi++}`);       vals.push(body.is_express) }
 
-      if (vals.length > 0) {
+      if (vals.length > 0 || body.reset_provider) {
         vals.push(cartId)
         await client.query(
           `UPDATE shopping_carts SET ${updates.join(', ')} WHERE id = $${pi}`,
@@ -222,12 +231,18 @@ export async function POST(req: NextRequest) {
       if (body.selected_services && body.selected_services.length > 0) {
         await client.query(`DELETE FROM cart_items WHERE cart_id = $1`, [cartId])
 
+        // Per-kg items aren't tied to a specific garment — resolve the
+        // shared "Regular Laundry (Mixed)" product type once up front
+        // rather than trusting whatever (or nothing) the client sent.
+        const hasKgItem = body.selected_services.some(item => item.type === 'per_kg')
+        const mixedLoadProductTypeId = hasKgItem ? await getMixedLoadProductTypeId(client) : null
+
         for (const item of body.selected_services) {
           if (item.type === 'per_kg') {
             const ci = await client.query(
               `INSERT INTO cart_items (cart_id, product_type_id, quantity, weight_kg)
-               VALUES ($1, 1, 1, $2) RETURNING id`,
-              [cartId, item.weight_kg]
+               VALUES ($1, $2, 1, $3) RETURNING id`,
+              [cartId, mixedLoadProductTypeId, item.weight_kg]
             )
             await client.query(
               `INSERT INTO cart_item_services

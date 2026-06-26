@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
 import { hashPassword, verifyPassword } from '@/lib/auth'
-import { uploadProfilePhoto, deleteProfilePhoto } from '@/lib/s3-profile'
+import { uploadProfilePhoto, deleteProfilePhoto } from '@/lib/s3'
 import {
   successResponse,
   errorResponse,

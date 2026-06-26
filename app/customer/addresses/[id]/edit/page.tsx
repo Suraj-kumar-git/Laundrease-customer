@@ -32,7 +32,7 @@ export default function EditAddressPage() {
   }, [id])
 
   return (
-    <div className="container mx-auto max-w-xl px-4 py-6">
+    <div className="container mx-auto max-w-2xl px-4 py-6">
       {/* Header */}
       <div className="mb-6">
         <Link
@@ -65,6 +65,7 @@ export default function EditAddressPage() {
           addressId={Number(id)}
           initial={{
             label:          address.label ?? '',
+            tags:           address.tags ?? [],
             address_line1:  address.address_line1 ?? '',
             address_line2:  address.address_line2 ?? '',
             landmark:       address.landmark ?? '',

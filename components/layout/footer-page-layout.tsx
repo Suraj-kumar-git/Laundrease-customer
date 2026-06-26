@@ -81,7 +81,7 @@ export function PageSection({
     <section
       className={cn(
         'mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8',
-        tight ? 'py-12 md:py-16' : 'py-16 md:py-24',
+        tight ? 'py-12 md:py-16' : 'py-16 md:py-14',
         className
       )}
     >

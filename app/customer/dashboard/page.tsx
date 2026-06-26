@@ -941,6 +941,7 @@ export default function CustomerDashboard() {
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Support</p>
                 <div className="space-y-1">
                   {[
+                    { href: '/customer/support',  label: 'My Tickets'    },
                     { href: '/help-center',       label: 'Help Center'   },
                     { href: '/safety-center',     label: 'Safety Center' },
                     { href: '/customer/settings', label: 'Settings'      },

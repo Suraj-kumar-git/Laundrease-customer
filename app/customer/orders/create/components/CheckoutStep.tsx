@@ -3,17 +3,20 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import {
   MapPin, Store, Calendar, Package, Receipt, Tag, CreditCard,
   Wallet, Banknote, Check, X, Loader2,
-  Shield, ChevronDown, ChevronUp, AlertCircle, Zap, Edit3, Lock,
+  Shield, ChevronDown, ChevronUp, AlertCircle, Zap, Edit3, Lock, Truck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { SelectedService } from '../../types'
 import { AppliedCoupon, GatewayInfo, OrderFlowState } from '@/types/order-types'
+import { ProductIcon } from '@/components/customer/ProductIcon'
+import { resolveProductIconSrc } from '@/lib/product-icons'
 
 interface CheckoutStepProps {
   orderState:             OrderFlowState
   onCouponApply:          (coupon: AppliedCoupon | null) => void
   onSpecialInstructions:  (val: string) => void
   onExpressToggle:        (isExpress: boolean, updatedServices: SelectedService[]) => void
+  onEditServices:         () => void
   onSubmit:               (paymentMethod: string, walletAmount: number) => Promise<void>
   isSubmitting:           boolean
 }
@@ -29,32 +32,6 @@ interface AvailableCoupon {
   eligible: boolean; ineligible_reason: string | null
 }
 
-function loadScript(src: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined') return resolve()
-    if (document.querySelector(`script[src="${src}"]`)) return resolve()
-    const s = document.createElement('script')
-    s.src = src
-    s.async = true
-    s.onload = () => resolve()
-    s.onerror = () => reject(new Error(`Failed to load ${src}`))
-    document.body.appendChild(s)
-  })
-}
-
-async function ensureProviderScripts(sandbox = false) {
-  // Option A: load scripts dynamically when needed
-  // Razorpay checkout
-  if (!(window as any).Razorpay) {
-    await loadScript('https://checkout.razorpay.com/v1/checkout.js');
-  }
-  // Cashfree UI SDK (use prod or sandbox URL depending on provider docs or version)
-  if (!(window as any).Cashfree) {
-    // You can change to sandbox URL if needed; this URL is the common SDK path
-    await loadScript('https://sdk.cashfree.com/js/ui/2.0.0/cashfree.prod.js');
-  }
-}
-
 function formatINR(n: number) {
   return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 }
@@ -64,31 +41,24 @@ function formatDate(d: string) {
   })
 }
 
-function redirectToGateway(actionUrl: string, fields: Record<string, string>) {
-  const form = document.createElement('form')
-  form.method = 'POST'
-  form.action = actionUrl
-
-  Object.entries(fields).forEach(([key, value]) => {
-    const input = document.createElement('input')
-    input.type = 'hidden'
-    input.name = key
-    input.value = value
-    form.appendChild(input)
-  })
-
-  document.body.appendChild(form)
-  form.submit()
-}
-
 export function CheckoutStep({
-  orderState, onCouponApply, onSpecialInstructions, onExpressToggle, onSubmit, isSubmitting,
+  orderState, onCouponApply, onSpecialInstructions, onExpressToggle, onEditServices, onSubmit, isSubmitting,
 }: CheckoutStepProps) {
   const currentIsExpress    = orderState.selected_services.some(s => s.is_express)
   const hasAnyExpressCapable= orderState.selected_services.some(s => s.express_multiplier > 1)
 
   const subtotal = useMemo(
     () => orderState.selected_services.reduce((s, i) => s + i.line_total, 0),
+    [orderState.selected_services]
+  )
+
+  // Display-only — total MRP discount across line items, never used in checkout math
+  const totalMrpSavings = useMemo(
+    () => orderState.selected_services.reduce((s, i) => {
+      if (!i.mrp || i.mrp <= i.unit_price) return s
+      const qty = i.type === 'per_kg' ? i.weight_kg : i.quantity
+      return s + (i.mrp - i.unit_price) * qty
+    }, 0),
     [orderState.selected_services]
   )
 
@@ -103,7 +73,6 @@ export function CheckoutStep({
   // Gateway
   const [gatewayInfo, setGatewayInfo] = useState<GatewayInfo | null>(null)
   const [gatewayLoading,  setGatewayLoading]  = useState(true)
-  const [initiatingPayment, setInitiatingPayment] = useState(false)
   // Coupon
   const [couponOpen,      setCouponOpen]      = useState(false)
   const [couponCode,      setCouponCode]      = useState('')
@@ -112,10 +81,13 @@ export function CheckoutStep({
   // BUG 1: warning shown when an applied coupon becomes invalid due to subtotal change
   const [couponWarning,   setCouponWarning]   = useState<string | null>(null)
   const [availableCoupons,setAvailableCoupons]= useState<AvailableCoupon[]>([])
-  const [selectedMethod, setSelectedMethod] = useState<'cod' | null>(null)
+  const [selectedMethod, setSelectedMethod] = useState<'cod' | 'online' | null>(null)
   // Instructions
   const [instructions,   setInstructions]   = useState(orderState.special_instructions ?? '')
   const [editingInstr,   setEditingInstr]   = useState(false)
+  // Estimated delivery date preview
+  const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState<string | null>(null)
+  const [estimateLoading,       setEstimateLoading]       = useState(false)
   const expressCache = useRef<Map<boolean, {
     services: SelectedService[]
     feeBreakdown: FeeBreakdown
@@ -139,6 +111,34 @@ export function CheckoutStep({
       .catch(() => {})
       .finally(() => setFeesLoading(false))
   }, [subtotal, currentIsExpress])
+
+  // ---- Estimated delivery date preview --------------------------
+  const providerId = orderState.selected_provider?.id
+  const servicesKey = useMemo(
+    () => JSON.stringify(orderState.selected_services.map(s => ({ id: s.service_id, x: s.is_express }))),
+    [orderState.selected_services]
+  )
+  useEffect(() => {
+    if (!providerId || !orderState.pickup_date || orderState.selected_services.length === 0) {
+      setEstimatedDeliveryDate(null)
+      return
+    }
+    setEstimateLoading(true)
+    fetch('/api/customer/orders/estimate-delivery', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        laundry_profile_id: providerId,
+        pickup_date: orderState.pickup_date,
+        services: orderState.selected_services.map(s => ({ service_id: s.service_id, is_express: s.is_express })),
+      }),
+    })
+      .then(r => r.json())
+      .then(json => { if (json.success) setEstimatedDeliveryDate(json.data.estimated_delivery_date) })
+      .catch(() => {})
+      .finally(() => setEstimateLoading(false))
+  }, [providerId, orderState.pickup_date, servicesKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Wallet + Gateway + Available coupons (once on mount) ----
   useEffect(() => {
@@ -306,152 +306,12 @@ export function CheckoutStep({
     gatewayInfo?.cod_enabled &&
     codCheckAmount <= (gatewayInfo?.cod_max_amount ?? 5000)
   )
-  const canPlace = walletCoversAll || selectedMethod === 'cod'
-  const initiateOnlinePayment = async (method: string, walletAmount: number) => {
-    setInitiatingPayment(true);
-    try {
-      // Decide merchant txn / order number to send to backend:
-      // Prefer a server-provided order_number if you already have one on orderState.
-      // Fallback: generate a client-side id (LESS IDEAL — better to create server-side).
-      const orderNumber = (orderState as any).order_number ?? `ORD_${Date.now()}`
+  const canPlace = walletCoversAll || selectedMethod === 'cod' || (selectedMethod === 'online' && onlinePaymentAvailable)
 
-      // Call unified create-order endpoint
-      const res = await fetch('/api/customer/payments/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          amount: walletAmount,
-          order_number: orderNumber,
-          customer_name: orderState.pickup_address?.contact_name ?? '',
-          customer_email: orderState.pickup_address?.contact_phone ?? '',
-        }),
-      })
-
-      const json = await res.json().catch(() => ({ success: false, message: 'Invalid response' }))
-
-      if (!res.ok || !json.success) {
-        throw new Error(json.message || 'Failed to create payment order')
-      }
-
-      const data = json.data || {}
-
-      // PAYU: hosted checkout (POST)
-      if (data.provider === 'payu') {
-        // data.checkout_url and data.checkout_form_fields are expected
-        if (!data.checkout_url || !data.checkout_form_fields) {
-          throw new Error('Missing PayU checkout details')
-        }
-        // Use your existing helper that creates and submits a form
-        redirectToGateway(data.checkout_url, data.checkout_form_fields)
-        return
-      }
-
-      // CASHFREE: use SDK with payment_session_id
-      if (data.provider === 'cashfree') {
-        if (!data.payment_session_id) {
-          throw new Error('Missing Cashfree payment_session_id')
-        }
-
-        // Ensure scripts are loaded (or include scripts in layout to skip this)
-        await ensureProviderScripts(Boolean(data.sandbox))
-
-        const cashfree = (window as any).Cashfree({
-          mode: data.sandbox ? 'sandbox' : 'production',
-        })
-
-        // Launch the checkout; redirectTarget: '_self' to return in same tab
-        await cashfree.checkout({
-          paymentSessionId: data.payment_session_id,
-          redirectTarget: '_self',
-        })
-        return
-      }
-
-      // RAZORPAY: open modal
-      if (data.provider === 'razorpay') {
-        if (!data.client_key || !data.gateway_order_id) {
-          throw new Error('Missing Razorpay client key or order id')
-        }
-
-        // Ensure scripts are loaded or include them in layout
-        await ensureProviderScripts(Boolean(data.sandbox))
-
-        const options = {
-          key: data.client_key,
-          order_id: data.gateway_order_id,
-          amount: data.amount,
-          currency: data.currency,
-          name: 'Your Store',
-          description: orderNumber,
-          prefill: {
-            name: orderState.pickup_address?.contact_name ?? '', //TODO: Update orderState to have profile with custometName, CustomerPhone, & customerEmail
-            email: orderState.pickup_address?.contact_phone ?? '',
-            contact: orderState.pickup_address?.contact_phone ?? '',
-          },
-          handler: async function (response: any) {
-            try {
-              // Call your verify endpoint (your route expects order_id number - adjust if needed)
-              const verifyBody: any = {
-                gateway_order_id: response.razorpay_order_id,
-                gateway_payment_id: response.razorpay_payment_id,
-                signature: response.razorpay_signature,
-              }
-
-              // If you have a numeric order id in orderState, include it:
-              if ((orderState as any).order_id) {
-                verifyBody.order_id = (orderState as any).order_id
-              } else {
-                // Include merchant order_number so backend can map the payment
-                verifyBody.extra = { order_number: orderNumber }
-              }
-
-              const vRes = await fetch('/api/customer/payments/verify', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
-                body: JSON.stringify(verifyBody),
-              })
-
-              const vJson = await vRes.json().catch(() => ({}))
-
-              if (vRes.ok && vJson?.redirect_url) {
-                window.location.href = vJson.redirect_url
-                return
-              }
-
-              if (vRes.ok) {
-                // fallback redirect if verify succeeded
-                window.location.href = `/order/success?provider=razorpay&txnid=${encodeURIComponent(orderNumber)}&payment_id=${encodeURIComponent(response.razorpay_payment_id)}`
-              } else {
-                window.location.href = `/checkout?payment=failed&provider=razorpay`
-              }
-            } catch (err) {
-              console.error('Razorpay verify error', err)
-              window.location.href = `/checkout?payment=failed&provider=razorpay&reason=verify_error`
-            }
-          },
-          modal: {
-            ondismiss: function () {
-              window.location.href = `/checkout?payment=failed&provider=razorpay&reason=user_cancelled`
-            },
-          },
-        }
-
-        const rzp = new (window as any).Razorpay(options)
-        rzp.open()
-        return
-      }
-
-      throw new Error('Unsupported provider returned from create-order')
-    } catch (err) {
-      console.error('[CheckoutStep] initiateOnlinePayment error', err)
-      // redirect to failure or show toast
-      window.location.href = `/checkout?payment=failed&reason=${encodeURIComponent(String((err as Error).message ?? 'init_err'))}`
-    } finally {
-      setInitiatingPayment(false)
-    }
-  }
+  // The order is always created first via onSubmit (cod/wallet/online alike).
+  // For 'online', the parent (page.tsx) creates the order, then calls the
+  // order-bound /pay endpoint and launches the active gateway's checkout —
+  // CheckoutStep no longer talks to any payment-gateway API directly.
   const handlePlace = async () => {
     if (!canPlace) return
     try {
@@ -460,16 +320,17 @@ export function CheckoutStep({
         return
       }
       if (selectedMethod === 'cod') {
-        const method =
-          walletContributionRounded > 0
-            ? 'wallet+cod'
-            : 'cod'
+        const method = walletContributionRounded > 0 ? 'wallet+cod' : 'cod'
+        await onSubmit(method, walletContributionRounded)
+        return
+      }
+      if (selectedMethod === 'online') {
+        const method = walletContributionRounded > 0 ? 'wallet+online' : 'online'
         await onSubmit(method, walletContributionRounded)
         return
       }
     } catch (error) {
       console.error('[CheckoutStep] Place order failed:', error)
-      alert('Failed to place order. Please try again.')
     }
   }
 
@@ -478,7 +339,7 @@ export function CheckoutStep({
   return (
     <div className="grid gap-6 lg:grid-cols-5">
       {/* ---- Left: Summary ---- */}
-      <div className="space-y-4 lg:col-span-3">
+      <div className="space-y-3 lg:col-span-3">
         <h2 className="text-base font-semibold text-foreground">Order Review</h2>
 
         {/* BUG 1: Coupon warning banner */}
@@ -493,9 +354,9 @@ export function CheckoutStep({
         )}
 
         {/* Address + Provider */}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-border/50 bg-card p-4">
-            <div className="mb-2 flex items-center gap-1.5">
+        <div className="grid gap-2.5 sm:grid-cols-2">
+          <div className="rounded-xl border border-border/50 bg-card p-3">
+            <div className="mb-1.5 flex items-center gap-1.5">
               <MapPin className="h-3.5 w-3.5 text-primary" />
               <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Address</span>
             </div>
@@ -509,8 +370,8 @@ export function CheckoutStep({
               </div>
             )}
           </div>
-          <div className="rounded-xl border border-border/50 bg-card p-4">
-            <div className="mb-2 flex items-center gap-1.5">
+          <div className="rounded-xl border border-border/50 bg-card p-3">
+            <div className="mb-1.5 flex items-center gap-1.5">
               <Store className="h-3.5 w-3.5 text-primary" />
               <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Provider & Schedule</span>
             </div>
@@ -522,20 +383,43 @@ export function CheckoutStep({
                 {orderState.pickup_time_slot && ` · ${orderState.pickup_time_slot}`}
               </p>
             )}
+            {estimateLoading ? (
+              <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3 w-3 animate-spin" /> Estimating delivery date…
+              </p>
+            ) : estimatedDeliveryDate && (
+              <p className="mt-1.5 flex items-center gap-1.5 rounded-lg bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
+                <Truck className="h-3 w-3" /> Estimated delivery: {formatDate(estimatedDeliveryDate)}
+              </p>
+            )}
           </div>
         </div>
 
         {/* Services */}
-        <div className="rounded-xl border border-border/50 bg-card p-4">
-          <div className="mb-3 flex items-center gap-1.5">
-            <Package className="h-3.5 w-3.5 text-primary" />
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Selected Services</span>
+        <div className="rounded-xl border border-border/50 bg-card p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Package className="h-3.5 w-3.5 text-primary" />
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Selected Services</span>
+            </div>
+            <button type="button" onClick={onEditServices}
+              className="flex items-center gap-1 text-xs text-primary hover:underline">
+              <Edit3 className="h-3 w-3" /> Edit
+            </button>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {orderState.selected_services.map((svc, i) => (
               <div key={i} className="flex items-center justify-between gap-3 text-sm">
                 <div className="flex min-w-0 items-center gap-2">
-                  {svc.type === 'per_unit' && <span className="text-base">{(svc as any).icon}</span>}
+                  {svc.type === 'per_unit' && (
+                    <ProductIcon
+                      src={resolveProductIconSrc(svc.product_type_name)}
+                      fallbackEmoji={(svc as any).icon}
+                      alt={svc.product_type_name}
+                      size={24}
+                      className="shrink-0 rounded-md"
+                    />
+                  )}
                   <span className="truncate text-foreground">
                     {svc.type === 'per_unit' ? (svc as any).product_type_name : svc.service_name}
                   </span>
@@ -552,6 +436,11 @@ export function CheckoutStep({
                   <span className="text-muted-foreground mr-2">
                     {svc.type === 'per_kg' ? `${(svc as any).weight_kg}kg` : `×${(svc as any).quantity}`}
                   </span>
+                  {svc.mrp && svc.mrp > svc.unit_price && (
+                    <span className="text-muted-foreground line-through mr-1">
+                      {formatINR(svc.mrp * (svc.type === 'per_kg' ? (svc as any).weight_kg : (svc as any).quantity))}
+                    </span>
+                  )}
                   <span className="font-semibold text-foreground">{formatINR(svc.line_total)}</span>
                 </div>
               </div>
@@ -560,8 +449,8 @@ export function CheckoutStep({
         </div>
 
         {/* Special instructions */}
-        <div className="rounded-xl border border-border/50 bg-card p-4">
-          <div className="mb-2 flex items-center justify-between">
+        <div className="rounded-xl border border-border/50 bg-card p-3">
+          <div className="mb-1.5 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <Edit3 className="h-3.5 w-3.5 text-primary" />
               <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Special Instructions</span>
@@ -582,22 +471,28 @@ export function CheckoutStep({
         </div>
 
         {/* Price breakdown */}
-        <div className="rounded-xl border border-border/50 bg-card p-4">
-          <div className="mb-3 flex items-center gap-1.5">
+        <div className="rounded-xl border border-border/50 bg-card p-3">
+          <div className="mb-2 flex items-center gap-1.5">
             <Receipt className="h-3.5 w-3.5 text-primary" />
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Price Breakdown</span>
           </div>
           {feesLoading ? (
-            <div className="flex items-center gap-2 py-3">
+            <div className="flex items-center gap-2 py-2">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               <span className="text-xs text-muted-foreground">Calculating…</span>
             </div>
           ) : (
-            <div className="space-y-2 text-sm">
+            <div className="space-y-1.5 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Services subtotal</span>
                 <span className="font-medium text-foreground">{formatINR(subtotal)}</span>
               </div>
+              {totalMrpSavings > 0 && (
+                <div className="flex justify-between">
+                  <span className="text-emerald-600">You saved</span>
+                  <span className="font-medium text-emerald-600">{formatINR(totalMrpSavings)}</span>
+                </div>
+              )}
               {feeBreakdown?.fees.map(fee => (
                 <div key={fee.code} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -609,7 +504,7 @@ export function CheckoutStep({
                 </div>
               ))}
               {hasAnyExpressCapable && (
-                <div className="flex items-center justify-between rounded-lg border border-border/40 px-3 py-2.5">
+                <div className="flex items-center justify-between rounded-lg border border-border/40 px-3 py-2">
                   <div className="flex items-center gap-2">
                     <Zap className={cn('h-4 w-4', currentIsExpress ? 'text-amber-500' : 'text-muted-foreground')} />
                     <div>
@@ -655,11 +550,11 @@ export function CheckoutStep({
                   <span className="font-semibold">-{formatINR(walletContributionRounded)}</span>
                 </div>
               )}
-              <div className="flex justify-between border-t border-border/40 pt-2">
+              <div className="flex justify-between border-t border-border/40 pt-1.5">
                 <span className="font-bold text-foreground">
                   {walletContributionRounded > 0 && !walletCoversAll ? 'Remaining to Pay' : 'Total'}
                 </span>
-                <span className="text-xl font-bold text-primary">
+                <span className="text-lg font-bold text-primary">
                   {formatINR(walletCoversAll ? grossTotal : amountAfterWallet)}
                 </span>
               </div>
@@ -669,12 +564,12 @@ export function CheckoutStep({
       </div>
 
       {/* ---- Right: Wallet + Coupon + Payment ---- */}
-      <div className="space-y-4 lg:col-span-2">
+      <div className="space-y-3 lg:col-span-2">
 
         {/* Wallet */}
         {!walletLoading && walletInfo?.has_wallet && walletInfo.balance > 0 && (
           <div className={cn(
-            'rounded-xl border p-4 transition-all',
+            'rounded-xl border p-3 transition-all',
             useWallet ? 'border-violet-300 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30' : 'border-border/50 bg-card'
           )}>
             <div className="flex items-center justify-between">
@@ -698,7 +593,7 @@ export function CheckoutStep({
               </button>
             </div>
             {useWallet && (
-              <div className="mt-3 rounded-lg bg-violet-100/50 px-3 py-2 text-xs text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+              <div className="mt-2 rounded-lg bg-violet-100/50 px-3 py-1.5 text-xs text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
                 {walletCoversAll
                   ? `✓ Wallet covers the full amount of ${formatINR(grossTotal)}`
                   : `${formatINR(walletContributionRounded)} from wallet · ${formatINR(amountAfterWallet)} remaining via another method`}
@@ -710,7 +605,7 @@ export function CheckoutStep({
         {/* Coupon */}
         <div className="rounded-xl border border-border/50 bg-card">
           <button type="button" onClick={() => setCouponOpen(v => !v)}
-            className="flex w-full items-center justify-between px-4 py-3">
+            className="flex w-full items-center justify-between px-3.5 py-2.5">
             <div className="flex items-center gap-2">
               <Tag className="h-4 w-4 text-primary" />
               <span className="text-sm font-semibold text-foreground">
@@ -726,7 +621,7 @@ export function CheckoutStep({
           </button>
 
           {couponOpen && (
-            <div className="border-t border-border/40 p-4 space-y-3">
+            <div className="border-t border-border/40 p-3 space-y-2.5">
               {orderState.applied_coupon ? (
                 <div className="flex items-center justify-between rounded-xl bg-emerald-50 px-4 py-3 dark:bg-emerald-950/30">
                   <div className="flex items-center gap-2">
@@ -805,8 +700,8 @@ export function CheckoutStep({
 
         {/* Payment */}
         {!walletCoversAll && (
-          <div className="rounded-xl border border-border/50 bg-card p-4">
-            <div className="mb-3 flex items-center gap-2">
+          <div className="rounded-xl border border-border/50 bg-card p-3">
+            <div className="mb-2 flex items-center gap-2">
               <CreditCard className="h-4 w-4 text-primary" />
               <span className="text-sm font-semibold text-foreground">
                 {walletContributionRounded > 0 ? `Pay Remaining ${formatINR(amountAfterWallet)}` : 'Payment Method'}
@@ -822,32 +717,38 @@ export function CheckoutStep({
                 {onlinePaymentAvailable && (
                   <button
                     type="button"
-                    onClick={() => { void initiateOnlinePayment('online', amountAfterWallet) }}
-                    disabled={initiatingPayment || feesLoading}
-                    className="flex w-full items-center justify-between rounded-xl border border-primary/40 bg-primary/5 px-4 py-3 text-left transition-all hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => setSelectedMethod(selectedMethod === 'online' ? null : 'online')}
+                    disabled={feesLoading}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-all disabled:cursor-not-allowed disabled:opacity-50',
+                      selectedMethod === 'online'
+                        ? 'border-primary/40 bg-primary/5 ring-1 ring-primary/20'
+                        : 'border-border/50 hover:border-border'
+                    )}
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                        {initiatingPayment ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <CreditCard className="h-4 w-4" />
-                        )}
-                      </div>
-
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">
-                          Pay Online
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          Secure payment via ${gatewayInfo?.provider?.toUpperCase() ?? 'payment gateway'}
-                        </p>
-                      </div>
+                    <div
+                      className={cn(
+                        'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
+                        selectedMethod === 'online'
+                          ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-muted-foreground'
+                      )}
+                    >
+                      <CreditCard className="h-4 w-4" />
                     </div>
 
-                    <span className="text-sm font-bold text-primary">
-                      {formatINR(amountAfterWallet)}
-                    </span>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-foreground">Pay Online</p>
+                      <p className="text-xs text-muted-foreground">
+                        Secure payment via {gatewayInfo?.provider?.toUpperCase() ?? 'payment gateway'}
+                      </p>
+                    </div>
+
+                    {selectedMethod === 'online' ? (
+                      <Check className="h-4 w-4 shrink-0 text-primary" />
+                    ) : (
+                      <span className="shrink-0 text-sm font-bold text-primary">{formatINR(amountAfterWallet)}</span>
+                    )}
                   </button>
                 )}
 
@@ -856,7 +757,7 @@ export function CheckoutStep({
                     type="button"
                     onClick={() => setSelectedMethod(selectedMethod === 'cod' ? null : 'cod')}
                     className={cn(
-                      'flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition-all',
+                      'flex w-full items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left transition-all',
                       selectedMethod === 'cod'
                         ? 'border-primary/40 bg-primary/5 ring-1 ring-primary/20'
                         : 'border-border/50 hover:border-border'
@@ -900,7 +801,7 @@ export function CheckoutStep({
 
         {/* COD limit notice */}
         {gatewayInfo && gatewayInfo.cod_enabled && amountAfterWallet > (gatewayInfo.cod_max_amount ?? 5000) && !walletCoversAll && (
-          <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 dark:bg-amber-950/30">
+          <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3.5 py-2.5 dark:bg-amber-950/30">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
             <p className="text-xs text-amber-700 dark:text-amber-400">
               COD not available above {formatINR(gatewayInfo.cod_max_amount ?? 5000)}
@@ -909,16 +810,16 @@ export function CheckoutStep({
         )}
 
         {/* Security note */}
-        <div className="flex items-start gap-2 rounded-xl bg-muted/30 px-4 py-3">
+        <div className="flex items-start gap-2 rounded-xl bg-muted/30 px-3.5 py-2.5">
           <Shield className="mt-0.5 h-4 w-4 shrink-0 text-emerald-500" />
           <p className="text-xs text-muted-foreground">256-bit encrypted · We never store card details</p>
         </div>
 
         {/* Place order */}
-        {(walletCoversAll || selectedMethod === 'cod') && (
+        {(walletCoversAll || selectedMethod === 'cod' || selectedMethod === 'online') && (
         <button type="button" onClick={handlePlace}
-          disabled={!canPlace || isSubmitting || feesLoading || initiatingPayment}
-          className="w-full rounded-2xl bg-gradient-to-r from-primary to-violet-700 py-4 text-base font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-50">
+          disabled={!canPlace || isSubmitting || feesLoading}
+          className="w-full rounded-2xl bg-gradient-to-r from-primary to-violet-700 py-3.5 text-base font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-50">
           {isSubmitting ? (
             <span className="flex items-center justify-center gap-2">
               <Loader2 className="h-5 w-5 animate-spin" /> Processing...
@@ -928,6 +829,13 @@ export function CheckoutStep({
           ) : selectedMethod === 'cod' ? (
             <span>
               Place COD Order · {formatINR(amountAfterWallet)}
+              {walletContributionRounded > 0 && (
+                <span className="ml-1 text-sm font-normal opacity-80">(+{formatINR(walletContributionRounded)} wallet)</span>
+              )}
+            </span>
+          ) : selectedMethod === 'online' ? (
+            <span>
+              Proceed to Pay · {formatINR(amountAfterWallet)}
               {walletContributionRounded > 0 && (
                 <span className="ml-1 text-sm font-normal opacity-80">(+{formatINR(walletContributionRounded)} wallet)</span>
               )}

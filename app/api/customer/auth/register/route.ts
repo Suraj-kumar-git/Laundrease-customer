@@ -28,7 +28,9 @@ const registerSchema = z.object({
   phone: z
     .string()
     .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format'), // REMOVED .optional()
-  role: z.string().includes('customer'),
+  role: z
+    .enum(['customer', 'delivery', 'laundry', 'support', 'admin'])
+    .default('customer'),
 })
  
 export async function POST(req: NextRequest) {
