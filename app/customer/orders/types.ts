@@ -135,7 +135,7 @@ export interface CreateOrderData {
  
 export interface OrderResponse {
   success: boolean
-  order_id?: number
+  order_id?: string
   order_number?: string
   message?: string
   payment_required?: boolean
@@ -144,7 +144,7 @@ export interface OrderResponse {
  
 // Order Flow State Management
 export interface OrderFlowState {
-  order_id?: number
+  order_id?: string
   order_number?: string
   step: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
   same_address?: boolean

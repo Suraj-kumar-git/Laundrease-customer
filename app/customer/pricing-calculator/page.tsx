@@ -8,19 +8,150 @@ import {
   CheckCircle2, AlertCircle, Loader2, RefreshCw,
   Info, Star, Home, Globe, Store, ArrowLeftRight,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { FooterPageLayout, PageSection } from '@/components/layout/footer-page-layout'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
-import { useCart } from '@/components/cart-provider'
 import { ProviderPicker, type PickableProvider } from './components/ProviderPicker'
 import { MyAddressStep } from './components/MyAddressStep'
 import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveProductIconSrc } from '@/lib/product-icons'
+import { calcLineTotal, cartItemsToSelectedServices } from '@/lib/cart-store'
 import type {
   AreaPricingData, ServiceWithProducts, PricingProductType,
   CartLineItem, PricingModel, ServiceCategory,
 } from '@/types/pricing'
 import { CATEGORY_LABELS, SERVICE_CATEGORY_LABELS } from '@/types/pricing'
+
+// ---- Isolated "calculator cart" ------------------------------
+// Deliberately NOT the shared useCart()/CartProvider — items picked here
+// are just for estimating a price, not a real cart, so they must never
+// show up in the header's cart icon/sheet. Kept in sessionStorage (not the
+// shared cart's localStorage key) so it survives opening/closing the real
+// CartSheet (which is an overlay, not a navigation) without ever touching
+// the real cart — only "Place Order" below pushes these into the real cart.
+const CALC_CART_STORAGE_KEY = 'laundrease_pricing_calc_cart_v1'
+
+function loadCalcCart(): { items: CartLineItem[]; isExpress: boolean } {
+  if (typeof window === 'undefined') return { items: [], isExpress: false }
+  try {
+    const raw = window.sessionStorage.getItem(CALC_CART_STORAGE_KEY)
+    if (!raw) return { items: [], isExpress: false }
+    const parsed = JSON.parse(raw)
+    return {
+      items: Array.isArray(parsed.items) ? parsed.items : [],
+      isExpress: !!parsed.isExpress,
+    }
+  } catch {
+    return { items: [], isExpress: false }
+  }
+}
+
+function saveCalcCart(items: CartLineItem[], isExpress: boolean) {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(CALC_CART_STORAGE_KEY, JSON.stringify({ items, isExpress }))
+  } catch { /* ignore quota/serialization errors */ }
+}
+
+function usePricingCalculatorCart() {
+  const router = useRouter()
+  const { user } = useAuth()
+  // Lazy initializers — read sessionStorage exactly once, on first render.
+  const [items, setItems] = useState<CartLineItem[]>(() => loadCalcCart().items)
+  const [isExpress, setIsExpress] = useState<boolean>(() => loadCalcCart().isExpress)
+  const [placing, setPlacing] = useState(false)
+
+  const persist = useCallback((nextItems: CartLineItem[], nextExpress: boolean) => {
+    saveCalcCart(nextItems, nextExpress)
+  }, [])
+
+  const addItem = useCallback((item: Omit<CartLineItem, 'line_total' | 'is_express' | 'express_multiplier'> & { express_multiplier?: number }) => {
+    setItems(prev => {
+      const key = `${item.product_type_id}_${item.service_id}`
+      const expressMultiplier = item.express_multiplier ?? 1.5
+      const lineTotal = calcLineTotal({
+        pricing_model: item.pricing_model,
+        unit_price: item.unit_price,
+        quantity: item.quantity,
+        weight_kg: item.weight_kg,
+        is_express: isExpress,
+        express_multiplier: expressMultiplier,
+      })
+      const next = prev.filter(i => `${i.product_type_id}_${i.service_id}` !== key)
+      next.push({ ...item, is_express: isExpress, express_multiplier: expressMultiplier, line_total: lineTotal })
+      persist(next, isExpress)
+      return next
+    })
+  }, [isExpress, persist])
+
+  const updateItem = useCallback((key: string, field: 'quantity' | 'weight_kg', value: number) => {
+    setItems(prev => {
+      const next = prev.map(item => {
+        if (`${item.product_type_id}_${item.service_id}` !== key) return item
+        const updated = { ...item, [field]: value }
+        updated.line_total = calcLineTotal(updated)
+        return updated
+      })
+      persist(next, isExpress)
+      return next
+    })
+  }, [isExpress, persist])
+
+  const removeItem = useCallback((key: string) => {
+    setItems(prev => {
+      const next = prev.filter(item => `${item.product_type_id}_${item.service_id}` !== key)
+      persist(next, isExpress)
+      return next
+    })
+  }, [isExpress, persist])
+
+  const clear = useCallback(() => {
+    setItems([])
+    persist([], isExpress)
+  }, [isExpress, persist])
+
+  const toggleExpress = useCallback(() => {
+    setIsExpress(prev => {
+      const next = !prev
+      setItems(current => {
+        const updatedItems = current.map(item => {
+          const updated = { ...item, is_express: next }
+          updated.line_total = calcLineTotal(updated)
+          return updated
+        })
+        persist(updatedItems, next)
+        return updatedItems
+      })
+      return next
+    })
+  }, [persist])
+
+  const placeOrder = useCallback(async () => {
+    if (!user) {
+      router.push('/customer/auth/login?returnTo=/customer/pricing-calculator')
+      return
+    }
+    if (items.length === 0) return
+    setPlacing(true)
+    try {
+      await fetch('/api/customer/cart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ selected_services: cartItemsToSelectedServices(items), is_express: isExpress }),
+      })
+      // Now that they're committed to ordering, clear the calculator's local
+      // copy — the real cart (pushed above) is the source of truth from here.
+      clear()
+      router.push('/customer/orders/create?resume=1')
+    } finally {
+      setPlacing(false)
+    }
+  }, [user, items, isExpress, router, clear])
+
+  return { items, isExpress, toggleExpress, addItem, updateItem, removeItem, clear, placeOrder, placing }
+}
 
 // ---- Helpers ------------------------------------------------
 function formatINR(amount: number) {
@@ -468,7 +599,7 @@ function SummaryPanel({
                 <ArrowRight className="h-4 w-4" />
               </button>
               <Link
-                href="/quick-pickup"
+                href="/customer/quick-pickup"
                 className="flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
               >
                 <Zap className="h-4 w-4" />
@@ -499,7 +630,7 @@ function PricingCalculator({
     areaData.services[0]?.service.id ?? 0
   )
   const [activeCategory, setActiveCategory] = useState<string>('all')
-  const cart = useCart()
+  const cart = usePricingCalculatorCart()
   const { isExpress } = cart
 
   const cartItemsByKey = useMemo(() => {

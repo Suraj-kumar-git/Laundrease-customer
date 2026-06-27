@@ -2,6 +2,7 @@
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
 import { successResponse, errorResponse } from '@/lib/api-response'
+import { resolveProfileImageUrl } from '@/lib/s3'
 
 export async function GET(req: NextRequest) {
   try {
@@ -61,6 +62,7 @@ export async function GET(req: NextRequest) {
     const activeOrderResult = await query(`
       SELECT
         o.id,
+        o.public_id,
         o.order_number,
         o.status,
         o.pickup_address,
@@ -180,7 +182,7 @@ export async function GET(req: NextRequest) {
         fullName:     profile.full_name,
         email:        profile.email,
         phone:        profile.phone,
-        profileImage: profile.profile_image,
+        profileImage: await resolveProfileImageUrl(profile.profile_image),
         loyaltyPoints: parseInt(profile.loyalty_points) || 0,
         totalOrders:   parseInt(profile.total_orders) || 0,
         lastOrderAt:   profile.last_order_at,
@@ -203,7 +205,7 @@ export async function GET(req: NextRequest) {
       })),
 
       activeOrder: activeOrderRow ? {
-        id:               activeOrderRow.id,
+        id:               activeOrderRow.public_id,
         orderNumber:      activeOrderRow.order_number,
         status:           activeOrderRow.status,
         pickupAddress:    activeOrderRow.pickup_address,

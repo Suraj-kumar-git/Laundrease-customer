@@ -3,13 +3,13 @@
 //
 // Lightweight Google Places autocomplete text input. Type to search, pick a
 // suggestion from the dropdown. Degrades to a plain text input (no dropdown)
-// if GOOGLE_MAPS_API_KEY isn't configured.
+// if NEXT_PUBLIC_GOOGLE_MAPS_API_KEY isn't configured.
 
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, MapPin } from 'lucide-react'
 import { loadScript } from '@/lib/payment-client'
 
-const MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY
+const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 
 declare global {
   interface Window {

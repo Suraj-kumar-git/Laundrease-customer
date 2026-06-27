@@ -79,13 +79,15 @@ export async function getOrCreateOrderInvoiceUrl(
     weight_kg:  string | null
     unit_price: string
     line_total: string
+    sac_code:   string | null
   }>(
     `SELECT
        COALESCE(oi.garment_label, pt.name || ' — ' || sv.name) AS label,
        oi.quantity,
        oi.weight_kg::text,
        ois.unit_price::text,
-       ois.line_total::text
+       ois.line_total::text,
+       sv.sac_code
      FROM order_items oi
      JOIN product_types pt ON pt.id = oi.product_type_id
      JOIN order_item_services ois ON ois.order_item_id = oi.id
@@ -150,6 +152,7 @@ export async function getOrCreateOrderInvoiceUrl(
       weightKg: r.weight_kg != null ? parseFloat(r.weight_kg) : null,
       unitPrice: parseFloat(r.unit_price),
       lineTotal: parseFloat(r.line_total),
+      sacCode: r.sac_code,
     })),
     adjustments: adjRes.rows.map(r => ({
       kind: r.kind,

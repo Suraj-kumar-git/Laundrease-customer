@@ -355,7 +355,7 @@ function PageContent() {
   // Order already exists in the DB at this point (created by handleSubmitOrder
   // before this is ever called) — we just ask the order-bound /pay endpoint
   // for gateway checkout data and launch whichever provider is active.
-  const initiateOnlinePayment = async (orderId: number, orderNumber: string) => {
+  const initiateOnlinePayment = async (orderId: string, orderNumber: string) => {
     const gwRes  = await fetch(`/api/customer/orders/${orderId}/pay`, {
       method: 'POST', credentials: 'include',
     })

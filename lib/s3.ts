@@ -204,6 +204,35 @@ export async function deleteProfilePhoto(s3Url: string): Promise<void> {
   }
 }
 
+const PROFILE_IMAGE_SIGNED_URL_EXPIRY = 3600 // 1 hour — re-signed fresh on every read
+
+/**
+ * Resolve whatever's stored in `users.profile_image` (a raw S3 URL, in the
+ * format produced by uploadProfilePhoto above) into a signed, browser-loadable
+ * URL. The bucket has no public-read policy, so the raw URL alone 404s/403s —
+ * every read path that surfaces profile_image to a client must go through
+ * this. Safe to call with non-S3 URLs (e.g. OAuth provider avatars) — those
+ * are returned unchanged.
+ */
+export async function resolveProfileImageUrl(stored: string | null): Promise<string | null> {
+  if (!stored) return null
+  let key: string
+  try {
+    const parsed = new URL(stored)
+    if (!parsed.hostname.endsWith('.amazonaws.com')) return stored // external (e.g. OAuth) avatar — pass through
+    key = parsed.pathname.slice(1)
+  } catch {
+    return stored
+  }
+  if (!key.startsWith('profile-images/')) return stored
+  try {
+    if (!(await objectExists(key))) return null
+    return await getSignedDownloadUrl(key, { expiresIn: PROFILE_IMAGE_SIGNED_URL_EXPIRY, disposition: 'inline' })
+  } catch {
+    return null
+  }
+}
+
 // ─── Careers JD downloads (was lib/s3-jd.ts) ───────────────────────────────
 
 /** Pre-signed download URL for a careers JD PDF. Returns null if the key doesn't exist. */

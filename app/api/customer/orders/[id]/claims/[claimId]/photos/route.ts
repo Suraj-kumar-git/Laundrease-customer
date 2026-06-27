@@ -18,14 +18,14 @@ export async function POST(
 ) {
   const userId = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
-  const { id, claimId } = await params
-  const orderId = parseInt(id, 10)
+  const { id: publicId, claimId } = await params
 
   try {
-    const claim = await queryOne<{ id: number; photo_urls: string[]; status: string }>(
-      `SELECT id, photo_urls, status FROM garment_claims
-       WHERE id = $1 AND order_id = $2 AND customer_id = $3`,
-      [claimId, orderId, userId]
+    const claim = await queryOne<{ id: number; order_id: number; photo_urls: string[]; status: string }>(
+      `SELECT gc.id, gc.order_id, gc.photo_urls, gc.status FROM garment_claims gc
+       JOIN orders o ON o.id = gc.order_id
+       WHERE gc.id = $1 AND o.public_id = $2 AND gc.customer_id = $3`,
+      [claimId, publicId, userId]
     )
     if (!claim) return notFoundResponse('Claim not found')
     if (claim.status !== 'submitted') {
@@ -39,7 +39,7 @@ export async function POST(
     const file = formData.get('file') as File | null
     if (!file) return errorResponse('No file provided', 400)
 
-    const s3Key = await uploadClaimPhoto(file, orderId, claim.id)
+    const s3Key = await uploadClaimPhoto(file, claim.order_id, claim.id)
 
     const updated = await queryOne<{ photo_urls: string[] }>(
       `UPDATE garment_claims

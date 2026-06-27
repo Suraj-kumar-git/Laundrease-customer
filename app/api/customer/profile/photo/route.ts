@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
 import { hashPassword, verifyPassword } from '@/lib/auth'
-import { uploadProfilePhoto, deleteProfilePhoto } from '@/lib/s3'
+import { uploadProfilePhoto, deleteProfilePhoto, resolveProfileImageUrl } from '@/lib/s3'
 import {
   successResponse,
   errorResponse,
@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
       deleteProfilePhoto(oldImageUrl).catch(() => {})
     }
 
-    return successResponse({ profile_image: imageUrl })
+    return successResponse({ profile_image: await resolveProfileImageUrl(imageUrl) })
   } catch (error) {
     console.error('[POST /api/customer/profile/photo]', error)
     return serverErrorResponse('Failed to upload photo')

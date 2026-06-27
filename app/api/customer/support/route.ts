@@ -105,7 +105,7 @@ export async function POST(req: NextRequest) {
       subject:       string
       description:   string
       priority?:     string
-      order_id?:     number
+      order_id?:     string
     } = await req.json()
 
     if (!body.category)            return errorResponse('Category is required', 400)
@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
     let orderNumber: string | null = null
     if (body.order_id) {
       const order = await queryOne<{ id: number; order_number: string }>(
-        `SELECT id, order_number FROM orders WHERE id = $1 AND customer_id = $2`,
+        `SELECT id, order_number FROM orders WHERE public_id = $1 AND customer_id = $2`,
         [body.order_id, userId]
       )
       if (!order) return errorResponse('Order not found', 400)

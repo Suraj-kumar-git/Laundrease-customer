@@ -19,6 +19,7 @@ import {
 } from '@/lib/api-response'
 import { sendOtpSms } from '@/lib/notifications/sms'
 import { sendOtpEmail } from '@/lib/notifications/email'
+import { resolveProfileImageUrl } from '@/lib/s3'
  
 // Validation schema
 const loginSchema = z.object({
@@ -295,7 +296,7 @@ export async function POST(req: NextRequest) {
         status: user.status,
         email_verified: user.email_verified,
         phone_verified: user.phone_verified,
-        profile_image: user.profile_image,
+        profile_image: await resolveProfileImageUrl(user.profile_image),
         ...profileData,
       },
       message: 'Login successful',

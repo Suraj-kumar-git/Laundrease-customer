@@ -18,25 +18,23 @@ export async function GET(
   req:     NextRequest,
   context: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
-  const { id } = await context.params
+  const { id: publicId } = await context.params
 
   const auth = await getAuthUser(req)
   if (!auth || auth.role !== 'customer') return unauthorizedResponse()
   const userId  = auth.id
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return NextResponse.json({ success: false, message: 'Invalid order id' }, { status: 400 })
 
   try {
     // Ownership check
     const order = await queryOne<{ id: number }>(
-      `SELECT id FROM orders WHERE id = $1 AND customer_id = $2`,
-      [orderId, userId]
+      `SELECT id FROM orders WHERE public_id = $1 AND customer_id = $2`,
+      [publicId, userId]
     )
     if (!order) {
       return NextResponse.json({ success: false, message: 'Order not found' }, { status: 404 })
     }
 
-    const result = await getOrCreateOrderInvoiceUrl(orderId)
+    const result = await getOrCreateOrderInvoiceUrl(order.id)
     if (!result) {
       return NextResponse.json({ success: false, message: 'Order not found' }, { status: 404 })
     }

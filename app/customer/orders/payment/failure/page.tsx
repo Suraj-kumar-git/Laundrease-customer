@@ -19,7 +19,7 @@ import { launchGatewayCheckout } from '@/lib/payment-client'
 import { SearchParamProvider } from '@/components/common/searchParamProvider'
 
 interface OrderInfo {
-  id: number
+  id: string
   order_number: string
   total_amount: number
   payment_status: string
@@ -50,10 +50,20 @@ function PaymentFailureContent() {
     if (!orderId) { setLoadError('Missing order reference.'); setLoading(false); return }
 
     Promise.all([
-      fetch(`/api/customer/orders/${orderId}`, { credentials: 'include' }).then(r => r.json()),
-      fetch('/api/customer/payments/gateway-info').then(r => r.json()),
+      fetch(`/api/customer/orders/${orderId}`, { credentials: 'include' }),
+      fetch('/api/customer/payments/gateway-info'),
     ])
-      .then(([orderJson, gwJson]) => {
+      .then(async ([orderRes, gwRes]) => {
+        if (orderRes.status === 401) {
+          // The gateway's redirect chain can occasionally land here without
+          // the session cookie attached — the order itself is fine, so bounce
+          // through login and come straight back instead of showing an error.
+          const target = `/customer/orders/payment/failure?order_id=${orderId}${reason ? `&reason=${reason}` : ''}`
+          router.replace(`/customer/auth/login?returnTo=${encodeURIComponent(target)}`)
+          return
+        }
+        const orderJson = await orderRes.json()
+        const gwJson     = await gwRes.json()
         if (!orderJson.success) throw new Error(orderJson.error ?? 'Order not found')
         setOrder(orderJson.data.order)
         setPayments(orderJson.data.payments ?? [])

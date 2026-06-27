@@ -106,6 +106,11 @@ export async function POST(req: NextRequest) {
       )
     })
 
+    // Cart was deliberately kept around (not cleared at order-create time)
+    // until payment is actually confirmed — clear it now that it is.
+    try { await query(`DELETE FROM shopping_carts WHERE user_id = $1`, [userId]) }
+    catch { /* non-fatal */ }
+
     return successResponse({
       verified: true,
       order_id: body.order_id,

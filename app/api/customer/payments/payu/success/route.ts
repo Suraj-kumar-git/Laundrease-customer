@@ -150,6 +150,17 @@ export async function POST(req: NextRequest) {
             payment.order_id,
           ]
         )
+
+        // Cart was deliberately kept around (not cleared at order-create time)
+        // until payment is actually confirmed — clear it now that it is.
+        if (isVerifiedSuccess) {
+          await client.query(
+            `DELETE FROM shopping_carts WHERE user_id = (
+               SELECT customer_id FROM orders WHERE id = $1
+             )`,
+            [payment.order_id]
+          )
+        }
       }
     })
 
