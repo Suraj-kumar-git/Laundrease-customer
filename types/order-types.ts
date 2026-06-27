@@ -184,7 +184,7 @@ export interface OrderFlowState {
   special_instructions?: string
   order_summary?: OrderSummary
   // Post-submit
-  order_id?: number
+  order_id?: string
   order_number?: string
   is_express?: boolean
   draft_order_number?: string

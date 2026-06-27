@@ -18,15 +18,20 @@ export async function GET(
   const userId  = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  const { id } = await params
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return notFoundResponse('Order not found')
+  const { id: publicId } = await params
 
   try {
+    const orderLookup = await queryOne<{ id: number }>(
+      `SELECT id FROM orders WHERE public_id = $1 AND customer_id = $2`,
+      [publicId, userId]
+    )
+    if (!orderLookup) return notFoundResponse('Order not found')
+    const orderId = orderLookup.id
+
     // Main order row
     const orderRes = await query(
       `SELECT
-         o.id, o.order_number, o.status, o.assignment_status,
+         o.id, o.public_id, o.order_number, o.status, o.assignment_status,
          o.pickup_address, o.delivery_address,
          o.pickup_date, o.pickup_time_slot,
          o.delivery_date, o.delivery_time_slot, o.estimated_delivery_date,
@@ -127,7 +132,7 @@ export async function GET(
 
     return successResponse({
       order: {
-        id:                 order.id,
+        id:                 order.public_id,
         order_number:       order.order_number,
         status:             order.status,
         assignment_status:  order.assignment_status,
@@ -206,9 +211,7 @@ export async function PATCH(
   const userId  = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  const { id } = await params
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return notFoundResponse('Order not found')
+  const { id: publicId } = await params
 
   let body: { pickup_date: string; pickup_time_slot: string }
   try { body = await req.json() } catch { return errorResponse('Invalid body', 400) }
@@ -229,11 +232,12 @@ export async function PATCH(
 
       // Verify order belongs to user and is reschedulable
       const check = await client.query(
-        `SELECT status, laundry_profile_id FROM orders WHERE id = $1 AND customer_id = $2 FOR UPDATE`,
-        [orderId, userId]
+        `SELECT id, status, laundry_profile_id FROM orders WHERE public_id = $1 AND customer_id = $2 FOR UPDATE`,
+        [publicId, userId]
       )
       if (check.rowCount === 0) throw new Error('NOT_FOUND')
       if (!RESCHEDULABLE_STATUSES.has(check.rows[0].status)) throw new Error('NOT_RESCHEDULABLE')
+      const orderId = check.rows[0].id
 
       // Recompute the estimated delivery date against the new pickup date.
       const itemsRes = await client.query(

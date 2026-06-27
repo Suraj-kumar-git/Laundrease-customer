@@ -16,18 +16,18 @@ export async function GET(
 ) {
   const userId = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
-  const { id } = await params
-  const orderId = parseInt(id, 10)
+  const { id: publicId } = await params
 
   try {
     const claims = await query(
-      `SELECT id, order_item_id, claim_type, description, photo_urls, status,
-              cleaning_charge_snapshot, cap_amount, compensation_amount,
-              decision_note, created_at, paid_at
-       FROM garment_claims
-       WHERE order_id = $1 AND customer_id = $2
-       ORDER BY created_at DESC`,
-      [orderId, userId]
+      `SELECT gc.id, gc.order_item_id, gc.claim_type, gc.description, gc.photo_urls, gc.status,
+              gc.cleaning_charge_snapshot, gc.cap_amount, gc.compensation_amount,
+              gc.decision_note, gc.created_at, gc.paid_at
+       FROM garment_claims gc
+       JOIN orders o ON o.id = gc.order_id
+       WHERE o.public_id = $1 AND gc.customer_id = $2
+       ORDER BY gc.created_at DESC`,
+      [publicId, userId]
     )
     return successResponse({ claims: claims.rows })
   } catch (err) {
@@ -42,9 +42,7 @@ export async function POST(
 ) {
   const userId = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
-  const { id } = await params
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return notFoundResponse('Order not found')
+  const { id: publicId } = await params
 
   try {
     const body: {
@@ -69,10 +67,11 @@ export async function POST(
     }
 
     const order = await queryOne<{ id: number; status: string; delivered_at: string | null; customer_id: string }>(
-      `SELECT id, status, delivered_at, customer_id::TEXT FROM orders WHERE id = $1 AND customer_id = $2`,
-      [orderId, userId]
+      `SELECT id, status, delivered_at, customer_id::TEXT FROM orders WHERE public_id = $1 AND customer_id = $2`,
+      [publicId, userId]
     )
     if (!order) return notFoundResponse('Order not found')
+    const orderId = order.id
     if (!['delivered', 'completed'].includes(order.status) || !order.delivered_at) {
       return errorResponse('Claims can only be filed on a delivered order', 400)
     }

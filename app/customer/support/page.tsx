@@ -138,7 +138,7 @@ function NewTicketForm({
   onSuccess: (id: number, ref: string) => void
   onClose: () => void
   lockedCategory?: string
-  lockedOrder?: { id: number; order_number: string } | null
+  lockedOrder?: { id: string; order_number: string } | null
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const initialCat = lockedCategory ? meta.categories.find(c => c.code === lockedCategory) ?? null : null
@@ -579,7 +579,7 @@ function CustomerSupportContent() {
   const [page,         setPage]         = useState(1)
   const [successRef,   setSuccessRef]   = useState('')
   const [detailTicket, setDetailTicket] = useState<Ticket | null>(null)
-  const [lockedOrder,  setLockedOrder]  = useState<{ id: number; order_number: string } | null>(null)
+  const [lockedOrder,  setLockedOrder]  = useState<{ id: string; order_number: string } | null>(null)
   const [prefillHandled, setPrefillHandled] = useState(false)
 
   useEffect(() => {
@@ -601,7 +601,7 @@ function CustomerSupportContent() {
       fetch(`/api/customer/orders/${orderId}`, { credentials: 'include' })
         .then(r => r.json())
         .then(j => {
-          if (j.success) setLockedOrder({ id: j.data.id, order_number: j.data.order_number })
+          if (j.success) setLockedOrder({ id: j.data.order.id, order_number: j.data.order.order_number })
         })
         .catch(() => {})
         .finally(() => { setView('new'); setPrefillHandled(true) })

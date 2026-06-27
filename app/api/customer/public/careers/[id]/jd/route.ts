@@ -16,20 +16,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const jobId = parseInt(id, 10)
-
-  if (isNaN(jobId)) {
-    return notFoundResponse('Job not found')
-  }
 
   try {
     // Fetch only the s3 key — never expose it in the job listing API
     const result = await query(
       `SELECT jd_s3_key FROM career_jobs
-       WHERE id = $1
+       WHERE public_id = $1
          AND is_active = TRUE
          AND (expires_at IS NULL OR expires_at > NOW())`,
-      [jobId]
+      [id]
     )
 
     if (result.rowCount === 0) {

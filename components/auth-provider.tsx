@@ -1,7 +1,8 @@
 "use client"
 
 import type React from "react"
-import { createContext, useCallback, useContext, useEffect, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
+import { usePathname } from "next/navigation"
 
 const role = process.env.ROLE || null;
 // Silent access-token refresh is wired up for the customer build only —
@@ -38,6 +39,12 @@ type AuthContextType = {
   getUserId:          () => string | null
   updateUser:         (updates: Partial<NonNullable<User>>) => void
   setNewUser:         (user: NonNullable<User>) => void
+  // Call this from any page-level fetch that gets back a real 401/403 —
+  // immediately syncs the header + localStorage to "logged out" instead of
+  // waiting for the next periodic checkAuth pass. Keeps cookie state and
+  // cached user data from drifting apart (e.g. if cookies were cleared by
+  // something other than the in-app logout() call).
+  markUnauthorized:   () => void
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
@@ -58,6 +65,8 @@ function buildUser(u: any): NonNullable<User> {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user,      setUser]      = useState<User>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const pathname = usePathname()
+  const hasCheckedOnce = useRef(false)
 
   // Plain (non-logout-on-failure) refresh attempt — used internally by
   // checkAuth's retry-after-401 and the periodic silent refresh below.
@@ -71,49 +80,66 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  useEffect(() => {
-    const checkAuth = async () => {
-      // Optimistic: render header immediately with stored data
+  // Immediately syncs the header + localStorage to "logged out". Any
+  // page-level fetch that gets back a real 401/403 should call this via
+  // markUnauthorized() below, instead of waiting for the next checkAuth
+  // pass — otherwise the header keeps showing a stale "logged in" state
+  // (read optimistically from localStorage) even though the cookies are
+  // already gone, and clicking any nav item bounces to login with no
+  // visible explanation.
+  const clearAuthState = useCallback(() => {
+    localStorage.removeItem("user")
+    setUser(null)
+  }, [])
+
+  const checkAuth = useCallback(async () => {
+    // Optimistic: render header immediately with stored data (first run only)
+    if (!hasCheckedOnce.current) {
       try {
         const stored = localStorage.getItem("user")
         if (stored) setUser(JSON.parse(stored))
       } catch { /* corrupt JSON — ignore */ }
-
-      // Authoritative: always verify with server and sync verification flags
-      try {
-        let res = await fetch(`/api/${role}/auth/me`, { credentials: "include" })
-
-        // Customer-only: the access token may simply have expired while the
-        // (still-valid) refresh token sat untouched — try a silent refresh
-        // and re-check once before treating this as a real logout.
-        if (!res.ok && (res.status === 401 || res.status === 403) && isCustomer) {
-          const refreshed = await tryRefresh()
-          if (refreshed) {
-            res = await fetch(`/api/${role}/auth/me`, { credentials: "include" })
-          }
-        }
-
-        if (res.ok) {
-          const data = await res.json()
-          if (data.success && data.data?.user) {
-            const serverUser = buildUser(data.data.user)
-            setUser(serverUser)
-            localStorage.setItem("user", JSON.stringify(serverUser))
-          }
-        } else if (res.status === 401 || res.status === 403) {
-          // Genuinely unauthenticated — token invalid/expired/revoked
-          // (and, for customers, the refresh attempt above didn't help either)
-          localStorage.removeItem("user")
-          setUser(null)
-        }
-        // Any other status (500, 502, 503, etc.) is a server/infra hiccup, not
-        // proof the session is invalid — keep the optimistic state so a
-        // transient DB/server error doesn't silently log the user out.
-      } catch { /* network error — keep optimistic state until next load */ }
-      finally { setIsLoading(false) }
     }
-    checkAuth()
-  }, [tryRefresh])
+
+    // Authoritative: always verify with server and sync verification flags
+    try {
+      let res = await fetch(`/api/${role}/auth/me`, { credentials: "include" })
+
+      // Customer-only: the access token may simply have expired while the
+      // (still-valid) refresh token sat untouched — try a silent refresh
+      // and re-check once before treating this as a real logout.
+      if (!res.ok && (res.status === 401 || res.status === 403) && isCustomer) {
+        const refreshed = await tryRefresh()
+        if (refreshed) {
+          res = await fetch(`/api/${role}/auth/me`, { credentials: "include" })
+        }
+      }
+
+      if (res.ok) {
+        const data = await res.json()
+        if (data.success && data.data?.user) {
+          const serverUser = buildUser(data.data.user)
+          setUser(serverUser)
+          localStorage.setItem("user", JSON.stringify(serverUser))
+        }
+      } else if (res.status === 401 || res.status === 403) {
+        // Genuinely unauthenticated — token invalid/expired/revoked
+        // (and, for customers, the refresh attempt above didn't help either)
+        clearAuthState()
+      }
+      // Any other status (500, 502, 503, etc.) is a server/infra hiccup, not
+      // proof the session is invalid — keep the optimistic state so a
+      // transient DB/server error doesn't silently log the user out.
+    } catch { /* network error — keep optimistic state until next load */ }
+    finally { setIsLoading(false); hasCheckedOnce.current = true }
+  }, [tryRefresh, clearAuthState])
+
+  // Re-validate on every route change, not just on first load — the header
+  // is mounted once in the root layout and otherwise never notices if the
+  // session went bad (cookies expired/revoked/cleared) while the user kept
+  // navigating client-side, leaving it stuck showing a stale "logged in"
+  // state until a full page reload.
+  useEffect(() => { checkAuth() }, [pathname, checkAuth])
 
   // Customer-only: proactively rotate the access token on a fixed interval
   // while the user is logged in and the tab stays open, so a long browsing
@@ -127,12 +153,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshAccessToken = useCallback(async (): Promise<boolean> => {
     const ok = await tryRefresh()
-    if (!ok) {
-      setUser(null)
-      localStorage.removeItem("user")
-    }
+    if (!ok) clearAuthState()
     return ok
-  }, [tryRefresh])
+  }, [tryRefresh, clearAuthState])
 
   const login = async ({ email, phone, password }: LoginPayload) => {
     setIsLoading(true)
@@ -208,8 +231,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await fetch(`/api/${role}/auth/logout`, { method: "POST", credentials: "include" })
     } catch { /* ignore */ }
     finally {
-      setUser(null)
-      localStorage.removeItem("user")
+      clearAuthState()
       setIsLoading(false)
     }
   }
@@ -234,7 +256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, isLoading, login, register, logout, refreshAccessToken, getUserId, updateUser, setNewUser }}
+      value={{ user, isLoading, login, register, logout, refreshAccessToken, getUserId, updateUser, setNewUser, markUnauthorized: clearAuthState }}
     >
       {children}
     </AuthContext.Provider>

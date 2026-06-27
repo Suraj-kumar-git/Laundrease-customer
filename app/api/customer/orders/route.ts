@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
     const [ordersRes, countRes] = await Promise.all([
       query(
         `SELECT
-           o.id,
+           o.public_id AS id,
            o.order_number,
            o.status,
            o.pickup_date,

@@ -24,7 +24,7 @@ import { Separator }         from '@/components/ui/separator'
 
 interface OrderConfirmationProps {
   orderNumber: string
-  orderId?:    number
+  orderId?:    string
 }
 
 export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationProps) {

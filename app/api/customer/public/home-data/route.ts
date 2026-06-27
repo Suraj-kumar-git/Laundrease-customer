@@ -9,6 +9,7 @@
 
 import { NextRequest } from 'next/server'
 import { query, queryOne } from '@/lib/db'
+import { resolveProfileImageUrl } from '@/lib/s3'
 import { successResponse, serverErrorResponse } from '@/lib/api-response'
 
 // Haversine distance in km (SQL approximation — good enough for city-level sorting)
@@ -131,18 +132,25 @@ export async function GET(req: NextRequest) {
       config[row.key] = row.value
     }
 
+    const providers = await Promise.all(providersRes.rows.map(async r => ({
+      id:           r.id,
+      name:         r.business_name,
+      city:         r.city,
+      rating:       parseFloat(r.rating) || 0,
+      rating_count: r.rating_count || 0,
+      image:        await resolveProfileImageUrl(r.provider_image),
+      min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
+      distance_km:  r.distance_km  ? parseFloat(r.distance_km)  : null,
+      postal_code:  r.postal_code,
+    })))
+
+    const testimonials = await Promise.all(testimonialsRes.rows.map(async t => ({
+      ...t,
+      avatar_url: await resolveProfileImageUrl(t.avatar_url),
+    })))
+
     return successResponse({
-      providers: providersRes.rows.map(r => ({
-        id:           r.id,
-        name:         r.business_name,
-        city:         r.city,
-        rating:       parseFloat(r.rating) || 0,
-        rating_count: r.rating_count || 0,
-        image:        r.provider_image ?? null,
-        min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
-        distance_km:  r.distance_km  ? parseFloat(r.distance_km)  : null,
-        postal_code:  r.postal_code,
-      })),
+      providers,
       location_used: hasLocation,
       stats: {
         total_users:    parseInt(statsRow?.total_users    ?? '0'),
@@ -150,7 +158,7 @@ export async function GET(req: NextRequest) {
         success_rate:   parseFloat(statsRow?.success_rate  ?? '100'),
         partner_count:  parseInt(statsRow?.partner_count  ?? '0'),
       },
-      testimonials: testimonialsRes.rows,
+      testimonials,
       platform: {
         name:         config.platform_name || 'Laundrease',
         supportEmail: config.support_email || null,

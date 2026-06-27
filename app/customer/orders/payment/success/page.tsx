@@ -27,8 +27,19 @@ function PaymentSuccessContent() {
     if (!orderId) { setError('Missing order reference.'); setLoading(false); return }
 
     fetch(`/api/customer/orders/${orderId}`, { credentials: 'include' })
-      .then(res => res.json())
+      .then(res => {
+        if (res.status === 401) {
+          // The gateway's redirect chain can occasionally land here without
+          // the session cookie attached — the order itself is fine (the
+          // payment callback already confirmed it), so bounce through login
+          // and come straight back instead of showing a scary auth error.
+          router.replace(`/customer/auth/login?returnTo=${encodeURIComponent(`/customer/orders/payment/success?order_id=${orderId}`)}`)
+          return null
+        }
+        return res.json()
+      })
       .then(json => {
+        if (!json) return
         if (!json.success) throw new Error(json.error ?? 'Order not found')
         setOrderNumber(json.data.order.order_number)
       })
@@ -54,7 +65,7 @@ function PaymentSuccessContent() {
     )
   }
 
-  return <OrderConfirmation orderId={parseInt(orderId, 10)} orderNumber={orderNumber} />
+  return <OrderConfirmation orderId={orderId} orderNumber={orderNumber} />
 }
 
 export default function PaymentSuccessPage() {

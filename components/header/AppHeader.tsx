@@ -267,7 +267,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
 
           {/* Desktop nav-items only when logged in */}
           {user && (
-            <nav className="hidden items-center gap-1 md:flex">
+            <nav className="hidden items-center gap-1 lg:flex">
               {NAV_ITEMS_AUTH.map(item => {
                 const Icon   = item.icon
                 const active = isActive(item.href)
@@ -294,7 +294,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
             </nav>
           )}
           {!user && (
-            <nav className="hidden items-center gap-1 md:flex">
+            <nav className="hidden items-center gap-1 lg:flex">
               {NAV_ITEMS_NOT_AUTH.map(item => {
                 const Icon   = item.icon
                 const active = isActive(item.href)
@@ -329,7 +329,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
             <CartBadge onClick={onCartClick} />
 
             {/* Desktop: user menu or login CTA */}
-            <div className="hidden md:flex items-center gap-2">
+            <div className="hidden lg:flex items-center gap-2">
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               ) : user ? (
@@ -355,7 +355,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
             {/* Mobile hamburger */}
             <button
               onClick={() => setMobileMenuOpen(v => !v)}
-              className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+              className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:hidden"
               aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
               aria-expanded={mobileMenuOpen}
             >
@@ -375,7 +375,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setMobileMenuOpen(false)}
-              className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm md:hidden"
+              className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm lg:hidden"
             />
 
             {/* Slide-down panel â€” attaches below the header, full width */}
@@ -386,7 +386,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
               exit={{ opacity: 0, y: -16 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
               // top-14 = header height; max-h = viewport minus header; overflow-y-auto for scroll
-              className="fixed left-0 right-0 top-14 z-40 max-h-[calc(100vh-3.5rem)] overflow-y-auto border-b border-border/50 bg-background shadow-xl md:hidden"
+              className="fixed left-0 right-0 top-14 z-40 max-h-[calc(100vh-3.5rem)] overflow-y-auto border-b border-border/50 bg-background shadow-xl lg:hidden"
             >
               {/* User info banner (logged in) */}
               {user && (

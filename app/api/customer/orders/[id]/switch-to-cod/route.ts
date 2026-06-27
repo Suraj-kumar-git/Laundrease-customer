@@ -22,19 +22,18 @@ export async function POST(
   const userId = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  const { id } = await params
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return notFoundResponse('Order not found')
+  const { id: publicId } = await params
 
   try {
     const result = await transaction(async (client) => {
       const orderRes = await client.query(
         `SELECT id, order_number, total_amount, payment_status, payment_method
-         FROM orders WHERE id = $1 AND customer_id = $2 FOR UPDATE`,
-        [orderId, userId]
+         FROM orders WHERE public_id = $1 AND customer_id = $2 FOR UPDATE`,
+        [publicId, userId]
       )
       if (orderRes.rowCount === 0) throw new Error('NOT_FOUND')
       const order = orderRes.rows[0]
+      const orderId = order.id
 
       if (order.payment_status === 'paid') throw new Error('ALREADY_PAID')
 

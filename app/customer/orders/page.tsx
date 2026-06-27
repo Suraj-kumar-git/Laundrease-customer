@@ -18,7 +18,7 @@ import { SearchParamProvider } from '@/components/common/searchParamProvider'
 
 // ---- Types --------------------------------------------------
 interface Order {
-  id:               number
+  id:               string
   order_number:     string
   status:           string
   pickup_date:      string
@@ -37,7 +37,7 @@ interface Order {
 }
 
 interface ReviewState {
-  orderId:              number
+  orderId:              string
   orderNumber:          string
   providerName?:        string | null
   deliveryPartnerName?: string | null
@@ -223,7 +223,7 @@ function PageContent() {
   const [total,        setTotal]        = useState(0)
 
   // Map orderId → existing review rating (so star fill is correct)
-  const [reviewedMap, setReviewedMap] = useState<Record<number, number | null>>({})
+  const [reviewedMap, setReviewedMap] = useState<Record<string, number | null>>({})
 
   // Review modal state
   const [reviewTarget, setReviewTarget] = useState<ReviewState | null>(null)
