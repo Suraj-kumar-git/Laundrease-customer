@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/components/auth-provider'
 import type { NearbyProvider, ServiceType } from '@/types/pricing'
 
 // ---- Callback request form ----------------------------------
@@ -288,6 +289,7 @@ function CallbackForm() {
 
 // ---- Find provider tab --------------------------------------
 function FindProviderTab() {
+  const { user } = useAuth()
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -357,11 +359,15 @@ function FindProviderTab() {
               <MapPin className="mx-auto h-10 w-10 text-muted-foreground/30" />
               <p className="mt-3 font-medium text-foreground">No providers in {query} yet</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                We&apos;re expanding. Try a nearby pincode or area or{' '}
-                <Link href="/customer/auth/register" className="text-primary hover:underline">
-                  sign up
-                </Link>{' '}
-                for updates.
+                We&apos;re expanding. Try a nearby pincode or area{user ? '.' : (
+                  <>
+                    {' '}or{' '}
+                    <Link href="/customer/auth/register" className="text-primary hover:underline">
+                      sign up
+                    </Link>{' '}
+                    for updates.
+                  </>
+                )}
               </p>
             </div>
           ) : (
@@ -438,6 +444,7 @@ function FindProviderTab() {
 // ---- Page ---------------------------------------------------
 export default function QuickPickupPage() {
   const [activeTab, setActiveTab] = useState<'callback' | 'find'>('callback')
+  const { user } = useAuth()
 
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'Quick Pickup' }]}>
@@ -529,23 +536,25 @@ export default function QuickPickupPage() {
               </div>
             </div>
 
-            {/* Platform CTA */}
-            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-6">
-              <Sparkles className="mb-3 h-6 w-6 text-primary" />
-              <h3 className="font-semibold text-foreground">
-                Want more control over your order?
-              </h3>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Sign up for free to choose your provider, track your order in real-time, apply coupons, and save addresses.
-              </p>
-              <Link
-                href="/customer/auth/register"
-                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
-              >
-                Create Free Account
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
+            {/* Platform CTA — guests only; signed-in users already have an account */}
+            {!user && (
+              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-6">
+                <Sparkles className="mb-3 h-6 w-6 text-primary" />
+                <h3 className="font-semibold text-foreground">
+                  Want more control over your order?
+                </h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Sign up for free to choose your provider, track your order in real-time, apply coupons, and save addresses.
+                </p>
+                <Link
+                  href="/customer/auth/register"
+                  className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
+                >
+                  Create Free Account
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </PageSection>

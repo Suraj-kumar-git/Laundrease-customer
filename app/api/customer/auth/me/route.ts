@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { getAuthUser } from '@/lib/auth'
+import { resolveProfileImageUrl } from '@/lib/s3'
  
 /**
 * GET /api/customer/auth/me
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
         email: user.email,
         full_name: user.full_name,
         phone: user.phone,
-        profile_image: user.profile_image,
+        profile_image: await resolveProfileImageUrl(user.profile_image),
         email_verified: user.email_verified,
         phone_verified: user.phone_verified,
         status: user.status,

@@ -6,7 +6,7 @@ import {
 } from '@/lib/api-response'
 
 interface AddressBody {
-  id?:            number     // required for PUT/DELETE
+  id?:            string     // public_id — required for PUT/DELETE
   label:          string
   tags?:          string[]
   address_line1:  string
@@ -127,10 +127,11 @@ export async function PUT(req: NextRequest) {
       // Verify address belongs to this customer
       const check = await client.query(
         `SELECT id FROM customer_addresses
-         WHERE id = $1 AND customer_profile_id = $2 AND deleted_at IS NULL`,
+         WHERE public_id = $1 AND customer_profile_id = $2 AND deleted_at IS NULL`,
         [body.id, profileId]
       )
       if (check.rowCount === 0) throw new Error('NOT_FOUND')
+      const addressId = check.rows[0].id
 
       if (body.is_default) {
         await client.query(
@@ -155,7 +156,7 @@ export async function PUT(req: NextRequest) {
           body.state ?? null, body.postal_code ?? null, body.country_code ?? 'IN',
           body.instructions ?? null, body.contact_name ?? null,
           body.contact_phone ?? null, body.is_default ?? false,
-          body.id,
+          addressId,
         ]
       )
 
@@ -176,8 +177,8 @@ export async function DELETE(req: NextRequest) {
   if (!userId) return unauthorizedResponse()
 
   const { searchParams } = req.nextUrl
-  const addressId = parseInt(searchParams.get('id') ?? '', 10)
-  if (isNaN(addressId)) return errorResponse('id query param required', 400)
+  const publicId = searchParams.get('id')
+  if (!publicId) return errorResponse('id query param required', 400)
 
   try {
     const profileId = await getCustomerProfileId(userId)
@@ -185,11 +186,12 @@ export async function DELETE(req: NextRequest) {
 
     const result = await transaction(async (client) => {
       const check = await client.query(
-        `SELECT is_default FROM customer_addresses
-         WHERE id = $1 AND customer_profile_id = $2 AND deleted_at IS NULL`,
-        [addressId, profileId]
+        `SELECT id, is_default FROM customer_addresses
+         WHERE public_id = $1 AND customer_profile_id = $2 AND deleted_at IS NULL`,
+        [publicId, profileId]
       )
       if (check.rowCount === 0) throw new Error('NOT_FOUND')
+      const addressId = check.rows[0].id
 
       await client.query(
         `UPDATE customer_addresses SET deleted_at = NOW() WHERE id = $1`, [addressId]

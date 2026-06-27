@@ -30,9 +30,7 @@ export async function POST(
   const userId = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  const { id } = await params
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return notFoundResponse('Order not found')
+  const { id: publicId } = await params
 
   let reason: string | null = null
   let refundMethod: 'wallet' | 'original' = 'wallet'
@@ -52,13 +50,14 @@ export async function POST(
       const orderRes = await client.query(
         `SELECT id, order_number, status, payment_status, total_amount, customer_id
          FROM orders
-         WHERE id = $1 AND customer_id = $2
+         WHERE public_id = $1 AND customer_id = $2
          FOR UPDATE`,
-        [orderId, userId]
+        [publicId, userId]
       )
       if (orderRes.rowCount === 0) throw new Error('NOT_FOUND')
 
       const order = orderRes.rows[0]
+      const orderId = order.id
       if (!CANCELLABLE_STATUSES.has(order.status)) {
         throw new Error('NOT_CANCELLABLE')
       }
@@ -110,6 +109,7 @@ export async function POST(
       )
 
       return {
+        order_id: orderId,
         order_number: order.order_number,
         refunded: wasPaid && !refundToOriginal,
         refund_amount: wasPaid ? refundAmount : 0,
@@ -121,14 +121,14 @@ export async function POST(
     let originalRefundError: string | null = null
     if (result.refund_to_original) {
       const refundResult = await initiateOriginalMethodRefund({
-        orderId, amount: result.refund_amount, initiatedBy: userId, initiatedByRole: 'customer',
+        orderId: result.order_id, amount: result.refund_amount, initiatedBy: userId, initiatedByRole: 'customer',
       })
       if (!refundResult.success) {
         originalRefundError = refundResult.error || 'Refund could not be initiated'
         // Cancellation already went through — only the refund failed to start.
         // Revert to 'paid' (nothing is actually processing at the gateway)
         // so the customer can retry, e.g. via the wallet option instead.
-        await queryOne(`UPDATE orders SET payment_status = 'paid', updated_at = NOW() WHERE id = $1`, [orderId])
+        await queryOne(`UPDATE orders SET payment_status = 'paid', updated_at = NOW() WHERE id = $1`, [result.order_id])
       }
     }
 

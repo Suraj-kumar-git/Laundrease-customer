@@ -31,20 +31,19 @@ export async function POST(
   const userId = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  const { id } = await params
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return notFoundResponse('Order not found')
+  const { id: publicId } = await params
 
   try {
     const orderRes = await query(
       `SELECT o.id, o.order_number, o.status, o.payment_status, u.full_name, u.email, u.phone
        FROM orders o
        JOIN users u ON u.id = o.customer_id
-       WHERE o.id = $1 AND o.customer_id = $2`,
-      [orderId, userId]
+       WHERE o.public_id = $1 AND o.customer_id = $2`,
+      [publicId, userId]
     )
     if (orderRes.rowCount === 0) return notFoundResponse('Order not found')
     const order = orderRes.rows[0]
+    const orderId = order.id
 
     if (order.payment_status === 'paid') {
       return errorResponse('This order has already been paid.', 400, 'ALREADY_PAID')

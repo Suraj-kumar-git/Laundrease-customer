@@ -36,7 +36,7 @@ const GUEST_ITEMS = [
   {
     group: 'Help',
     items: [
-      { label: 'Help Center', href: '/help-center', icon: HelpCircle },
+      { label: 'Help Center', href: '/customer/help-center', icon: HelpCircle },
       { label: 'Download App', href: '#', icon: Download, comingSoon: true },
     ],
   },

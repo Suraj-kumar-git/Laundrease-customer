@@ -21,7 +21,7 @@ import { resolveProductIconSrc } from '@/lib/product-icons'
 
 // ---- Types --------------------------------------------------
 interface OrderDetail {
-  id: number; order_number: string; status: string; assignment_status: string
+  id: string; order_number: string; status: string; assignment_status: string
   pickup_address: any; delivery_address: any
   pickup_date: string; pickup_time_slot: string
   delivery_date: string | null; delivery_time_slot: string | null
@@ -130,7 +130,7 @@ function Section({ title, icon: Icon, children, className }: {
 function RescheduleModal({
   orderId, currentDate, currentSlot, onClose, onSuccess,
 }: {
-  orderId: number; currentDate: string; currentSlot: string
+  orderId: string; currentDate: string; currentSlot: string
   onClose: () => void; onSuccess: (date: string, slot: string, estimatedDeliveryDate: string | null) => void
 }) {
   const { toast }         = useToast()
@@ -271,7 +271,7 @@ function RescheduleModal({
 function CancelOrderModal({
   orderId, totalAmount, paymentStatus, gatewayProvider, onClose, onSuccess,
 }: {
-  orderId: number; totalAmount: number; paymentStatus: string; gatewayProvider: string | null
+  orderId: string; totalAmount: number; paymentStatus: string; gatewayProvider: string | null
   onClose: () => void; onSuccess: (message: string) => void
 }) {
   const { toast }     = useToast()
@@ -403,7 +403,7 @@ function CancelOrderModal({
 function ReportIssueModal({
   orderId, item, policy, onClose, onSuccess,
 }: {
-  orderId: number; item: OrderItem; policy: ItemProtectionPolicy
+  orderId: string; item: OrderItem; policy: ItemProtectionPolicy
   onClose: () => void; onSuccess: () => void
 }) {
   const [claimType, setClaimType] = useState<'damaged' | 'lost' | 'stolen'>('damaged')
@@ -541,7 +541,6 @@ export default function OrderDetailPage() {
   const [payments,   setPayments]   = useState<Payment[]>([])
   const [adjustments,setAdjustments]= useState<Adjustment[]>([])
   const [history,    setHistory]    = useState<StatusEntry[]>([])
-  const [coupons,    setCoupons]    = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState<string | null>(null)
   const [showReschedule, setShowReschedule] = useState(false)
@@ -580,7 +579,6 @@ export default function OrderDetailPage() {
       setPayments(json.data.payments)
       setAdjustments(json.data.adjustments)
       setHistory(json.data.status_history)
-      setCoupons(json.data.coupons)
       setClaims(json.data.claims || [])
       setItemProtectionPolicy(json.data.item_protection_policy || null)
     } catch (err: any) {
@@ -1035,13 +1033,6 @@ export default function OrderDetailPage() {
                   </div>
                 ))
               }
-              {/* order_coupons fallback */}
-              {coupons.map(c => (
-                <div key={c.coupon_code} className="flex justify-between text-emerald-600 dark:text-emerald-400">
-                  <span>Coupon ({c.coupon_code})</span>
-                  <span className="font-semibold">-{formatINR(c.amount_discounted)}</span>
-                </div>
-              ))}
 
               <div className="flex justify-between border-t border-border/40 pt-2.5 text-base">
                 <span className="font-bold text-foreground">Total</span>

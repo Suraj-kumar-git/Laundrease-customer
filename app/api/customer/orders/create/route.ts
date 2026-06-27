@@ -94,24 +94,45 @@ export async function POST(req: NextRequest) {
 
   try {
     // ---- Idempotency --------------------------------------------------------
+    // Only short-circuit on a *paid* match — re-submitting the same draft after
+    // a successful payment should return the existing order, not double-charge.
+    // If the previous attempt under this draft number never completed payment
+    // (abandoned online checkout, failed payment, etc.), it's a stale/zombie
+    // order — void it and fall through to create a fresh one for this attempt,
+    // so a retry (e.g. switching to COD from checkout) isn't silently bound to
+    // the old attempt's payment_method/status.
+    let staleDraftVoided = false
     if (body.draft_order_number) {
       const existing = await query(
-        `SELECT id, order_number, total_amount, payment_status, payment_method
+        `SELECT id, public_id, order_number, total_amount, payment_status, payment_method
          FROM orders WHERE order_number = $1 AND customer_id = $2`,
         [body.draft_order_number, userId]
       )
       if (existing.rowCount! > 0) {
         const o = existing.rows[0]
-        const wasCOD = (o.payment_method ?? '').includes('cod')
-        return successResponse({
-          order_id:              o.id,
-          order_number:          o.order_number,
-          total_amount:          parseFloat(o.total_amount),
-          payment_required:      o.payment_status === 'pending' && !wasCOD,
-          payment_fully_covered: false,
-          payment_method:        o.payment_method,
-          already_existed:       true,
-        }, 200)
+        if (o.payment_status === 'paid') {
+          const wasCOD = (o.payment_method ?? '').includes('cod')
+          return successResponse({
+            order_id:              o.public_id,
+            order_number:          o.order_number,
+            total_amount:          parseFloat(o.total_amount),
+            payment_required:      o.payment_status === 'pending' && !wasCOD,
+            payment_fully_covered: false,
+            payment_method:        o.payment_method,
+            already_existed:       true,
+          }, 200)
+        }
+        await query(
+          `UPDATE orders SET status = 'cancelled', payment_status = 'failed', updated_at = NOW()
+           WHERE id = $1`,
+          [o.id]
+        )
+        await query(
+          `UPDATE payments SET status = 'cancelled', updated_at = NOW()
+           WHERE order_id = $1 AND status IN ('initiated', 'pending', 'failed')`,
+          [o.id]
+        )
+        staleDraftVoided = true
       }
     }
 
@@ -241,7 +262,9 @@ export async function POST(req: NextRequest) {
       }
 
       // ---- Insert order -----------------------------------------------------
-      const orderNumber    = body.draft_order_number ?? `ORD${Date.now()}`
+      const orderNumber    = (body.draft_order_number && !staleDraftVoided)
+        ? body.draft_order_number
+        : `ORD${Date.now()}`
       const paymentStatus  = walletFullyCovered ? 'paid' : 'pending'
 
       // Estimated delivery DATE (not a time slot) — based on the slowest
@@ -279,7 +302,7 @@ export async function POST(req: NextRequest) {
            total_amount, payment_status, payment_method, assignment_status,
            estimated_delivery_date
          ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'unassigned',$16)
-         RETURNING id`,
+         RETURNING id, public_id`,
         [
           orderNumber, userId, body.laundry_profile_id,
           body.pickup_address, body.delivery_address ?? body.pickup_address, pickupPincode,
@@ -289,6 +312,7 @@ export async function POST(req: NextRequest) {
         ]
       )
       const orderId = orderRes.rows[0].id
+      const orderPublicId = orderRes.rows[0].public_id
 
       // ---- Order items ------------------------------------------------------
       // Per-kg items aren't tied to a specific garment — resolve the shared
@@ -427,7 +451,7 @@ export async function POST(req: NextRequest) {
       )
 
       return {
-        orderId, orderNumber, totalAmount,
+        orderId, orderPublicId, orderNumber, totalAmount,
         walletAmountUsed:    effectiveWalletAmount,
         remainingAmount:     remainingAfterWallet,
         walletFullyCovered,
@@ -442,8 +466,17 @@ export async function POST(req: NextRequest) {
     try { await query(`SELECT auto_assign_delivery_partner($1)`, [result.orderId]) }
     catch (e) { console.warn('[orders/create] Auto-assign skipped:', (e as Error).message) }
 
-    try { await query(`DELETE FROM shopping_carts WHERE user_id = $1`, [userId]) }
-    catch { /* non-fatal */ }
+    const needsGatewayPayment = !result.paymentFullyCovered && !isCodBased
+
+    // Only clear the cart once the order doesn't need any further online
+    // payment step — for COD/wallet-fully-covered orders the purchase is
+    // final here. For orders still awaiting a gateway payment, the cart must
+    // survive (so checkout can be retried) until the PayU/Cashfree callback
+    // actually confirms the payment.
+    if (!needsGatewayPayment) {
+      try { await query(`DELETE FROM shopping_carts WHERE user_id = $1`, [userId]) }
+      catch { /* non-fatal */ }
+    }
 
     try {
       await enqueueOrderConfirmationEmail({
@@ -459,10 +492,8 @@ export async function POST(req: NextRequest) {
       })
     } catch (e) { console.warn('[orders/create] SQS error:', e) }
 
-    const needsGatewayPayment = !result.paymentFullyCovered && !isCodBased
-
     return successResponse({
-      order_id:              result.orderId,
+      order_id:              result.orderPublicId,
       order_number:          result.orderNumber,
       total_amount:          result.totalAmount,
       wallet_amount_used:    result.walletAmountUsed,

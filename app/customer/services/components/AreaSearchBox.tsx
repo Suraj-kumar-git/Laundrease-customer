@@ -1,7 +1,7 @@
 'use client'
 // app/customer/services/components/AreaSearchBox.tsx
 //
-// Area search for the public services page. If GOOGLE_MAPS_API_KEY
+// Area search for the public services page. If NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 // is configured, shows live Places predictions as the visitor types (biased
 // towards their current location when available) and resolves the chosen
 // place to lat/lng for a radius-based provider search. Without that key, it
@@ -12,7 +12,7 @@ import { Loader2, MapPin, Search, LocateFixed } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { loadScript } from '@/lib/payment-client'
 
-const MAPS_KEY = process.env.GOOGLE_MAPS_API_KEY
+const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 
 export interface AreaSelection {
   label: string
