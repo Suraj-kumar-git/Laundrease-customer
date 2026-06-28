@@ -21,8 +21,8 @@ export async function initiateOriginalMethodRefund(params: {
   initiatedBy: string | number
   initiatedByRole: 'customer' | 'delivery' | 'admin'
 }): Promise<InitiateRefundResult> {
-  const payment = await queryOne<{ id: number; provider: string }>(
-    `SELECT id, provider FROM payments
+  const payment = await queryOne<{ id: number; provider: string; amount: string }>(
+    `SELECT id, provider, amount FROM payments
      WHERE order_id = $1 AND status = 'completed' AND provider IN ('payu', 'cashfree')
      ORDER BY id DESC LIMIT 1`,
     [params.orderId]
@@ -30,6 +30,13 @@ export async function initiateOriginalMethodRefund(params: {
   if (!payment) {
     return { success: false, error: 'No online gateway payment found for this order — use the wallet refund instead.' }
   }
+
+  // The gateway only ever captured this payment row's amount — for a
+  // wallet+online split order, that's less than orders.total_amount (the
+  // rest came from wallet). Refunding more than was actually captured is
+  // rejected by the gateway ("Invalid amount"), so always defer to the
+  // captured amount rather than whatever the caller passed in.
+  const refundAmount = Math.min(params.amount, parseFloat(payment.amount))
 
   const gatewayTxn = await queryOne<{ provider_order_id: string | null; provider_payment_id: string | null }>(
     `SELECT provider_order_id, provider_payment_id FROM payment_gateway_transactions
@@ -57,7 +64,7 @@ export async function initiateOriginalMethodRefund(params: {
     gatewayOrderId:   gatewayTxn.provider_order_id,
     gatewayPaymentId: gatewayTxn.provider_payment_id,
     merchantRefundId,
-    amount:           params.amount,
+    amount:           refundAmount,
   })
 
   const inserted = await queryOne<{ id: number }>(
@@ -70,7 +77,7 @@ export async function initiateOriginalMethodRefund(params: {
      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
      RETURNING id`,
     [
-      params.orderId, payment.id, payment.provider, params.amount,
+      params.orderId, payment.id, payment.provider, refundAmount,
       params.initiatedBy, params.initiatedByRole,
       merchantRefundId, result.gatewayRefundId,
       result.status, result.failureReason || null, JSON.stringify(result.rawResponse),

@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
           }, 200)
         }
         await query(
-          `UPDATE orders SET status = 'cancelled', payment_status = 'failed', updated_at = NOW()
+          `UPDATE orders SET status = 'failed', payment_status = 'failed', updated_at = NOW()
            WHERE id = $1`,
           [o.id]
         )
@@ -225,6 +225,14 @@ export async function POST(req: NextRequest) {
         Math.round((subtotal + feesTotal - discountAmount) * 100) / 100
       )
 
+      // GST is just another row from order_fee_config (already included in
+      // feesTotal/totalAmount above) — pulled out separately so it can be
+      // stored in orders.tax_amount for invoices/order-detail breakdowns
+      // that read the column directly instead of the adjustments list.
+      const taxAmount = feeRows
+        .filter(f => f.code === 'gst')
+        .reduce((s, f) => s + parseFloat(String(f.amount)), 0)
+
       // ---- Wallet -----------------------------------------------------------
       let effectiveWalletAmount = 0
       if (usesWallet && walletRequested > 0) {
@@ -298,16 +306,16 @@ export async function POST(req: NextRequest) {
            order_number, customer_id, laundry_profile_id, delivery_profile_id,
            status, pickup_address, delivery_address, pickup_pincode,
            pickup_date, pickup_time_slot, special_instructions,
-           is_express, subtotal, discount_amount,
+           is_express, subtotal, tax_amount, discount_amount,
            total_amount, payment_status, payment_method, assignment_status,
            estimated_delivery_date
-         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'unassigned',$16)
+         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'unassigned',$17)
          RETURNING id, public_id`,
         [
           orderNumber, userId, body.laundry_profile_id,
           body.pickup_address, body.delivery_address ?? body.pickup_address, pickupPincode,
           body.pickup_date, body.pickup_time_slot, body.special_instructions ?? null,
-          body.is_express, subtotal, discountAmount, totalAmount,
+          body.is_express, subtotal, taxAmount, discountAmount, totalAmount,
           paymentStatus, paymentMethod, estimatedDeliveryDate,
         ]
       )
@@ -355,8 +363,6 @@ export async function POST(req: NextRequest) {
           ]
         )
       }
-
-      // Tax row
 
       // Coupon discount
       if (appliedCouponCode && discountAmount > 0) {

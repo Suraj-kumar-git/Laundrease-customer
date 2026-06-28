@@ -418,13 +418,21 @@ function PageContent() {
         payment_method: paymentMethod,
       }))
 
-      // Order is now created (server cart is cleared by the API) — also wipe
-      // the guest/local cart (localStorage + header badge) so stale items
-      // from before login/checkout don't linger into the next order.
-      clearGuestCart()
-
       const isCodBased = paymentMethod === 'cod' || paymentMethod.endsWith('+cod')
-      if (result.data.payment_required && !result.data.payment_fully_covered && !isCodBased) {
+      const needsGateway = result.data.payment_required && !result.data.payment_fully_covered && !isCodBased
+
+      if (!needsGateway) {
+        // COD or fully wallet-covered — the order is final right now (the
+        // server cart was already cleared by the API for this case), so
+        // wipe the guest/local cart (localStorage + header badge) too.
+        clearGuestCart()
+      }
+      // For an online payment, the cart deliberately stays put — both the
+      // server cart and this local one — until the gateway callback actually
+      // confirms payment (cleared on /customer/orders/payment/success), so a
+      // failed/abandoned payment leaves checkout retryable with items intact.
+
+      if (needsGateway) {
         // The order already exists at this point — if the gateway launch
         // fails or the user dismisses it, send them to the failure page
         // (Retry Payment / Continue with COD / Cancel) instead of just a toast.

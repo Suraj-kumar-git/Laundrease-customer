@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Loader2, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useCart } from '@/components/cart-provider'
 import { OrderConfirmation } from '../../create/components/OrderConfirmation'
 import { SearchParamProvider } from '@/components/common/searchParamProvider'
 
@@ -18,6 +19,7 @@ function PaymentSuccessContent() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const orderId       = searchParams.get('order_id')
+  const { clear: clearGuestCart } = useCart()
 
   const [orderNumber, setOrderNumber] = useState<string | null>(null)
   const [loading,      setLoading]    = useState(true)
@@ -42,9 +44,14 @@ function PaymentSuccessContent() {
         if (!json) return
         if (!json.success) throw new Error(json.error ?? 'Order not found')
         setOrderNumber(json.data.order.order_number)
+        // Reaching this page at all means the gateway callback already
+        // confirmed payment — the local cart was deliberately kept around
+        // until now (see orders/create/page.tsx) so it can finally go.
+        clearGuestCart()
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId])
 
   if (loading) {

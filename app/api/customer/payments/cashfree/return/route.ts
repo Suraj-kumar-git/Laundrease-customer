@@ -83,7 +83,8 @@ async function handle(req: NextRequest) {
          p.status,
          p.provider,
          p.gateway_config_id,
-         o.order_number
+         o.order_number,
+         o.public_id AS order_public_id
        FROM payments p
        LEFT JOIN orders o ON o.id = p.order_id
        WHERE p.merchant_txn_id = $1
@@ -100,14 +101,14 @@ async function handle(req: NextRequest) {
     const payment = paymentLookup.rows[0]
 
     if (payment.status === 'completed') {
-      return buildRedirect(`/customer/orders/payment/success?order_id=${payment.order_id}`)
+      return buildRedirect(`/customer/orders/payment/success?order_id=${payment.order_public_id ?? ''}`)
     }
 
     const gatewayInfo = await getActiveGateway()
 
     if (!gatewayInfo || gatewayInfo.provider !== 'cashfree') {
       return buildRedirect(
-        `/customer/orders/payment/failure?order_id=${payment.order_id ?? ''}&reason=${encodeURIComponent('cashfree_not_active')}`
+        `/customer/orders/payment/failure?order_id=${payment.order_public_id ?? ''}&reason=${encodeURIComponent('cashfree_not_active')}`
       )
     }
 
@@ -210,9 +211,10 @@ async function handle(req: NextRequest) {
         await client.query(
           `UPDATE orders
            SET payment_status = $1,
+               status = CASE WHEN $3 THEN status ELSE 'failed' END,
                updated_at = NOW()
            WHERE id = $2`,
-          [orderPaymentStatus, payment.order_id]
+          [orderPaymentStatus, payment.order_id, result.verified]
         )
 
         // Cart was deliberately kept around (not cleared at order-create time)
@@ -230,11 +232,11 @@ async function handle(req: NextRequest) {
 
     if (!result.verified) {
       return buildRedirect(
-        `/customer/orders/payment/failure?order_id=${payment.order_id ?? ''}&reason=${encodeURIComponent('verification_failed')}`
+        `/customer/orders/payment/failure?order_id=${payment.order_public_id ?? ''}&reason=${encodeURIComponent('verification_failed')}`
       )
     }
 
-    return buildRedirect(`/customer/orders/payment/success?order_id=${payment.order_id}`)
+    return buildRedirect(`/customer/orders/payment/success?order_id=${payment.order_public_id ?? ''}`)
   } catch (error) {
     console.error('[Cashfree return]', error)
 

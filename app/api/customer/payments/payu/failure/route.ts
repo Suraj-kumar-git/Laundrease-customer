@@ -49,13 +49,17 @@ export async function POST(req: NextRequest) {
       callback_verified: webhookVerified,
     })
 
-    let orderId: number | null = null
+    // The redirect URL needs the order's public_id (UUID) — orders.id is an
+    // internal BIGSERIAL the customer-facing routes don't accept.
+    let orderPublicId: string | null = null
 
     await transaction(async (client) => {
       const paymentResult = await client.query(
-        `SELECT id, order_id, amount, currency, gateway_config_id
-         FROM payments
-         WHERE merchant_txn_id = $1
+        `SELECT p.id, p.order_id, p.amount, p.currency, p.gateway_config_id,
+                o.public_id AS order_public_id
+         FROM payments p
+         LEFT JOIN orders o ON o.id = p.order_id
+         WHERE p.merchant_txn_id = $1
          LIMIT 1`,
         [txnid]
       )
@@ -65,7 +69,7 @@ export async function POST(req: NextRequest) {
       }
 
       const payment = paymentResult.rows[0]
-      orderId = payment.order_id
+      orderPublicId = payment.order_public_id
 
       await client.query(
         `UPDATE payments
@@ -111,6 +115,7 @@ export async function POST(req: NextRequest) {
         await client.query(
           `UPDATE orders
            SET payment_status = $1,
+               status = 'failed',
                updated_at = NOW()
            WHERE id = $2`,
           ['failed', payment.order_id]
@@ -118,7 +123,7 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    return buildRedirect(`/customer/orders/payment/failure?order_id=${orderId ?? ''}`)
+    return buildRedirect(`/customer/orders/payment/failure?order_id=${orderPublicId ?? ''}`)
   } catch (error) {
     console.error('[POST /api/customer/payments/payu/failure]', error)
     return NextResponse.redirect(
