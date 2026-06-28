@@ -1,134 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
  
-// All available roles in the system
-const ROLES = ['customer', 'admin', 'delivery', 'laundry', 'support'] as const
+const PROTECTED_ROUTES = [
+  '/customer/addresses',
+  '/customer/checkout',
+  '/customer/dashboard',
+  '/customer/feedback',
+  '/customer/orders',
+  '/customer/profile',
+  '/customer/refer-and-earn',
+  '/customer/settings',
+  '/customer/support',
+]
  
-// Define protected routes by role
-// const PROTECTED_ROUTES = ROLES.reduce((acc, role) => {
-//   acc[role] = [`${role}/*`];
-//   return acc;
-// }, {} as Record<typeof ROLES[number], string[]>);
-
-const PROTECTED_ROUTES = {
-  customer: [
-    '/customer/addresses',
-    '/customer/checkout',
-    '/customer/dashboard',
-    '/customer/feedback',
-    '/customer/orders',
-    '/customer/profile',
-    '/customer/refer-and-earn',
-    '/customer/settings',
-    '/customer/support',
-  ],
-  admin: [
-    '/admin/analytics',
-    '/admin/careers',
-    '/admin/cash-remittance',
-    '/admin/cms',
-    '/admin/coupons',
-    '/admin/dashboard',
-    '/admin/delivery',
-    '/admin/finance-overview',
-    '/admin/item-protection',
-    '/admin/quick-pickup-requests',
-    '/admin/laundry/payouts',
-    '/admin/loyalty',
-    '/admin/orders',
-    '/admin/providers',
-    '/admin/referral',
-    '/admin/reviews',
-    '/admin/service-areas',
-    '/admin/service-catalog',
-    '/admin/settings',
-    '/admin/staff-payouts',
-    '/admin/subscription',
-    '/admin/support',
-    '/admin/support-agents',
-    '/admin/testimonials',
-    '/admin/users',
-    '/admin/wallets',
-  ],
-  delivery: [
-    '/delivery/dashboard',
-    '/delivery/orders',
-    '/delivery/profile',
-    '/delivery/availability',
-    '/delivery/support',
-    '/delivery/onboarding',
-  ],
-  laundry: [
-    '/laundry/analytics',
-    '/laundry/dashboard',
-    '/laundry/onboarding',
-    '/laundry/orders',
-    '/laundry/payouts',
-    '/laundry/quick-pickup-requests',
-    '/laundry/profile',
-    '/laundry/reviews',
-    '/laundry/services',
-    '/laundry/settings',
-    '/laundry/subscription',
-    '/laundry/support',
-  ],
-  support: [
-    '/support/analytics',
-    '/support/cash-ledger',
-    '/support/claims',
-    '/support/dashboard',
-    '/support/profile',
-    '/support/tickets',
-  ],
-}
-type Role = keyof typeof PROTECTED_ROUTES;
-function needsVerification(p: string, role: Role): boolean {
-  const path = p.split(/[?#]/)[0]; // strip query and hash
-  const routes = PROTECTED_ROUTES[role];
-  return routes.some(r => path === r || path.startsWith(`${r}/`));
-}
- 
-// Generate auth Pages for all roles dynamically
-function generateAuthPageURLs(): string[] {
-  const authPages = [
-    '/admin/auth/login',
-    '/admin/auth/verify-otp',
-    '/customer/auth/forgot-password',
-    '/customer/auth/login',
-    '/customer/auth/register',
-    '/customer/auth/reset-password/*',
-    '/customer/auth/verify',
-    '/delivery/auth/login',
-    '/delivery/auth/register',
-    '/delivery/auth/verify',
-    '/laundry/auth/login',
-    '/laundry/auth/register',
-    '/support/auth/login',
-    '/support/auth/verify-otp',
-  ]
-  return authPages;
-}
-// Generate auth api routes for all roles dynamically
-function generateAuthAPIs(): string[] {
-  const authAPIs = [
-    '/api/admin/auth/*',
-    '/api/customer/auth/*',
-    '/api/delivery/auth/*',
-    '/api/laundry/auth/*',
-    '/api/support/auth/*',
-  ];
-  return authAPIs;
-}
- 
-// Public routes that don't require authentication
 const PUBLIC_URLs = [
   '/',
   '/customer',
-  '/delivery',
-  '/laundry',
-  '/laundry/onboarding/link-expired',
-  '/support',
-  '/admin',
   '/customer/about',
   '/customer/careers/*',
   '/customer/community-guidelines',
@@ -140,28 +27,25 @@ const PUBLIC_URLs = [
   '/customer/safety-center',
   '/customer/services',
   '/customer/terms-of-service',
-  // Auth routes for all roles (generated dynamically)
-  ...generateAuthPageURLs(),
+  '/customer/auth/forgot-password',
+  '/customer/auth/login',
+  '/customer/auth/register',
+  '/customer/auth/reset-password/*',
+  '/customer/auth/verify',
+  '/api/customer/laundry-providers/search',
+  '/api/customer/payments/payu/success',
+  '/api/customer/payments/payu/failure',
+  '/api/customer/payments/cashfree/return',
 ]
  
 // API routes that don't require authentication
 const PUBLIC_API_ROUTES = [
   '/api/customer/public/*',
-  '/api/laundry/public/*',
-  '/api/delivery/public/*',
-  '/api/delivery/webhooks/*',
-  // Read-only provider directory search — shown to unauthenticated visitors
-  // on the public /customer/services page.
+  '/api/customer/auth/*',
   '/api/customer/laundry-providers/search',
-  // Payment gateway browser-redirect callbacks (PayU surl/furl, Cashfree return).
-  // These arrive as cross-site form POSTs from the gateway's hosted checkout
-  // page, not from our own logged-in session — cookies are frequently dropped
-  // on cross-site POST navigations, so these must not require access_token.
-  // They authenticate the request via the gateway's own signature/hash instead.
   '/api/customer/payments/payu/success',
   '/api/customer/payments/payu/failure',
   '/api/customer/payments/cashfree/return',
-  ...generateAuthAPIs(),
 ]
  
 // Helper to check if a path is public
@@ -184,32 +68,30 @@ function isPublicApiRoute(pathname: string): boolean {
   })
 }
  
-// Helper to check if path is an auth page (for any role)
 function isAuthPage(pathname: string): boolean {
-  return ROLES.some(role => pathname.startsWith(`/${role}/auth/`))
+  return pathname.startsWith('/customer/auth/')
 }
  
-// Helper to check if user has access to route
-function hasRouteAccess(pathname: string, userRole: string): boolean {
-  // Check if route matches user's role-specific routes
-  const roleRoutes = PROTECTED_ROUTES[userRole as Role]
-  if (!roleRoutes) return false
-  return roleRoutes.some(route => pathname.startsWith(route))
+function hasRouteAccess(pathname: string): boolean {
+  return PROTECTED_ROUTES.some(route => pathname.startsWith(route))
 }
  
+function needsVerification(pathname: string): boolean {
+  const path = pathname.split(/[?#]/)[0]
+  return PROTECTED_ROUTES.some(route => path === route || path.startsWith(`${route}/`))
+}
+
 function getRoleFromPath(pathname: string): string | null {
   const normalized = pathname.trim()
-  for (const role of ROLES) {
-    if (
-      normalized === `/${role}` ||
-      normalized.startsWith(`/${role}/`)
-    ) {
-      return role;
-    }
+  if (
+    normalized === `/customer` ||
+    normalized.startsWith(`/customer/`)
+  ) {
+    return 'customer';
   }
   return null;
 }
- 
+
 // Verify JWT token
 async function verifyToken(token: string): Promise<any> {
   try {
@@ -248,7 +130,7 @@ async function verifyRefreshTokenSignature(token: string): Promise<Awaited<Retur
     return null
   }
 }
-
+ 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   // Skip middleware for static files
@@ -259,12 +141,9 @@ export async function proxy(request: NextRequest) {
   ) {
     return NextResponse.next()
   }
-  // Enforce deployment role: block access to other-role paths
-  const DEPLOY_ROLE = process.env.ROLE || null;
-  // Determine role segment in path (e.g. '/admin' or '/admin/...') using helper
   const pathRole = getRoleFromPath(pathname)
 
-  if (DEPLOY_ROLE && pathRole && pathRole !== DEPLOY_ROLE) {
+  if (pathRole !== 'customer') {
     if (pathname.startsWith('/api')) {
       return NextResponse.json(
         { success: false, error: 'Not Found' },
@@ -293,7 +172,6 @@ export async function proxy(request: NextRequest) {
         { status: 401 }
       )
     }
-
     const requestHeaders = new Headers(request.headers)
     requestHeaders.set('x-user-id', payload.userId as string)
     requestHeaders.set('x-user-role', payload.role as string)
@@ -337,7 +215,6 @@ export async function proxy(request: NextRequest) {
   }
   // Get access token from cookies
   const accessToken = request.cookies.get('access_token')?.value
-
   // Verify token (if present)
   const payload = accessToken ? await verifyToken(accessToken) : null
 
@@ -350,19 +227,17 @@ export async function proxy(request: NextRequest) {
     // This one request goes through ungated (no x-user-id headers, so any
     // data API it calls will 401 once and the page handles that), but the
     // session itself — and the cookies — are left untouched.
-    if (DEPLOY_ROLE === 'customer') {
+    if (process.env.ROLE === 'customer') {
       const refreshToken = request.cookies.get('refresh_token')?.value
       const refreshPayload = refreshToken ? await verifyRefreshTokenSignature(refreshToken) : null
       if (refreshPayload?.userId) {
         return NextResponse.next()
       }
     }
-
     // No usable session at all — genuinely logged out. Clear cookies only if
     // there was actually an access token to invalidate; otherwise there's
     // nothing to clear.
-    const loginPath = pathRole ? `/${pathRole}/auth/login` : '/'
-    const loginUrl = new URL(loginPath, request.url)
+    const loginUrl = new URL('/customer/auth/login', request.url)
     loginUrl.searchParams.set('returnTo', pathname)
     const response = NextResponse.redirect(loginUrl)
     if (accessToken) {
@@ -372,34 +247,22 @@ export async function proxy(request: NextRequest) {
     return response
   }
 
-  if (needsVerification(pathname, payload.role as Role) && !(payload.phoneVerified || payload?.emailVerified)) {
-    const role     = payload.role as string
-    const verifyUrl = new URL(`/${role}/auth/verify`, request.url)
+  if (needsVerification(pathname) && !(payload.phoneVerified || payload?.emailVerified)) {
+    const verifyUrl = new URL('/customer/auth/verify', request.url)
     verifyUrl.searchParams.set('returnTo', pathname)
     return NextResponse.redirect(verifyUrl)
   }
-
-  // Check if user has access to this route
-  if (!hasRouteAccess(pathname, payload.role as string)) {
-    // User doesn't have access - redirect to their default page
-    const roleDefaultPages: Record<string, string> = {
-      customer: '/customer/dashboard',
-      admin: '/admin/dashboard',
-      delivery: '/delivery/dashboard',
-      laundry: '/laundry/dashboard',
-      support: '/support/dashboard',
-    }
-
-    const defaultPage = roleDefaultPages[payload.role as string] || '/'
-    return NextResponse.redirect(new URL(defaultPage, request.url))
+ 
+  if (!hasRouteAccess(pathname)) {
+    return NextResponse.redirect(new URL('/customer/dashboard', request.url))
   }
-
+ 
   // Add user info to request headers
   const requestHeaders = new Headers(request.headers)
   requestHeaders.set('x-user-id', payload.userId as string)
   requestHeaders.set('x-user-role', payload.role as string)
   requestHeaders.set('x-user-email', payload.email as string)
-
+ 
   return NextResponse.next({
     request: {
       headers: requestHeaders,
