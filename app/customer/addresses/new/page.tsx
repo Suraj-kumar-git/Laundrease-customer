@@ -7,7 +7,7 @@ import { AddressForm } from '@/components/forms/AddressForm'
 
 export default function NewAddressPage() {
   return (
-    <div className="container mx-auto max-w-xl px-4 py-6">
+    <div className="container mx-auto max-w-2xl px-4 py-6">
       {/* Header */}
       <div className="mb-6">
         <Link

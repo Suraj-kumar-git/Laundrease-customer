@@ -18,7 +18,7 @@ import { SearchParamProvider } from '@/components/common/searchParamProvider'
 
 // ---- Types --------------------------------------------------
 interface Order {
-  id:               number
+  id:               string
   order_number:     string
   status:           string
   pickup_date:      string
@@ -37,7 +37,7 @@ interface Order {
 }
 
 interface ReviewState {
-  orderId:              number
+  orderId:              string
   orderNumber:          string
   providerName?:        string | null
   deliveryPartnerName?: string | null
@@ -59,6 +59,7 @@ const STATUS_CONFIG: Record<string, {
   delivered:        { label: 'Delivered',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40 dark:text-green-400',    icon: CheckCircle },
   completed:        { label: 'Completed',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40 dark:text-green-400',    icon: CheckCircle },
   cancelled:        { label: 'Cancelled',        color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40 dark:text-red-400',          icon: XCircle },
+  failed:           { label: 'Order Failed',     color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40 dark:text-red-400',          icon: XCircle },
   // returned:         { label: 'Returned',         color: 'text-orange-700',  bg: 'bg-orange-100 dark:bg-orange-950/40 dark:text-orange-400', icon: Package },
 }
 
@@ -72,6 +73,7 @@ const STATUS_FILTERS = [
   { value: 'delivered',   label: 'Delivered' },
   // { value: 'completed',   label: 'Completed' },
   { value: 'cancelled',   label: 'Cancelled' },
+  { value: 'failed',      label: 'Order Failed' },
 ]
 
 function formatINR(n: number) {
@@ -223,7 +225,7 @@ function PageContent() {
   const [total,        setTotal]        = useState(0)
 
   // Map orderId → existing review rating (so star fill is correct)
-  const [reviewedMap, setReviewedMap] = useState<Record<number, number | null>>({})
+  const [reviewedMap, setReviewedMap] = useState<Record<string, number | null>>({})
 
   // Review modal state
   const [reviewTarget, setReviewTarget] = useState<ReviewState | null>(null)
@@ -301,7 +303,7 @@ function PageContent() {
 
   return (
     <>
-      <div className="container mx-auto max-w-2xl px-4 py-6">
+      <div className="container mx-auto max-w-5xl px-4 py-6">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
           <div>
@@ -367,16 +369,18 @@ function PageContent() {
           </div>
         ) : (
           <div className="space-y-3">
-            <AnimatePresence>
-              {orders.map(order => (
-                <OrderCard
-                  key={order.id}
-                  order={order}
-                  onRateClick={handleRateClick}
-                  reviewedRating={reviewedMap[order.id]}
-                />
-              ))}
-            </AnimatePresence>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <AnimatePresence>
+                {orders.map(order => (
+                  <OrderCard
+                    key={order.id}
+                    order={order}
+                    onRateClick={handleRateClick}
+                    reviewedRating={reviewedMap[order.id]}
+                  />
+                ))}
+              </AnimatePresence>
+            </div>
 
             {hasMore && (
               <div className="flex justify-center pt-2">

@@ -25,7 +25,7 @@ interface Address {
 }
 interface StatusHistoryItem { status: string; notes: string | null; location: string | null; timestamp: string }
 interface ActiveOrder {
-  id: number; orderNumber: string; status: string; pickupAddress: string
+  id: string; orderNumber: string; status: string; pickupAddress: string
   deliveryAddress: string; pickupDate: string; pickupTimeSlot: string | null
   deliveryDate: string | null; deliveryTimeSlot: string | null; totalAmount: number
   isExpress: boolean; laundryName: string | null; createdAt: string; updatedAt: string
@@ -574,7 +574,7 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
   // ---- Main page ----------------------------------------------
 
 export default function CustomerDashboard() {
-  const { user } = useAuth()
+  const { user, markUnauthorized } = useAuth()
   const router   = useRouter()
 
   const [data,              setData]             = useState<DashboardData | null>(null)
@@ -595,6 +595,7 @@ export default function CustomerDashboard() {
     try {
       setRefreshing(true); setError(false)
       const res  = await fetch('/api/customer/dashboard', { credentials: 'include' })
+      if (res.status === 401 || res.status === 403) { markUnauthorized(); setError(true); return }
       if (!res.ok) { setError(true); return }
       const json = await res.json()
       if (!json.success) { setError(true); return }
@@ -606,7 +607,7 @@ export default function CustomerDashboard() {
       }
     } catch { setError(true) }
     finally { setLoading(false); setRefreshing(false) }
-  }, [])
+  }, [markUnauthorized])
 
   useEffect(() => { fetchDashboard() }, [fetchDashboard])
 
@@ -666,33 +667,24 @@ export default function CustomerDashboard() {
     <>
       <div className="min-h-screen overflow-x-hidden bg-muted/20">
 
-        {/* ---- Hero header ---- */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-primary via-primary/90 to-violet-700 pb-16 pt-8">
-          <div className="pointer-events-none absolute inset-0">
-            <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/5 blur-2xl" />
-            <div className="absolute -bottom-10 left-10 h-48 w-48 rounded-full bg-white/5 blur-2xl" />
-          </div>
-          <div className="container relative mx-auto px-4">
+        {/* ---- Compact header: greeting + stats, no heavy background ---- */}
+        <div className="border-b border-border/50 bg-background pb-5 pt-6">
+          <div className="container mx-auto px-4">
             <div className="flex items-start justify-between">
               <div>
-                <p className="mb-1 text-sm font-medium text-white/70">
+                <p className="mb-0.5 text-xs font-medium text-muted-foreground">
                   {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </p>
-                <h1 className="text-2xl font-bold text-white sm:text-3xl">Hello, {firstName}! 👋</h1>
-                <p className="mt-1 text-sm text-white/75">
-                  {data.statistics.activeOrders > 0
-                    ? `You have ${data.statistics.activeOrders} active order${data.statistics.activeOrders > 1 ? 's' : ''}`
-                    : 'Ready for fresh laundry?'}
-                </p>
+                <h1 className="text-xl font-bold text-foreground sm:text-2xl">Hello, {firstName}! 👋</h1>
               </div>
               <button onClick={fetchDashboard} disabled={refreshing}
-                className="rounded-full bg-white/15 p-2.5 text-white backdrop-blur-sm transition-colors hover:bg-white/25 disabled:opacity-50">
+                className="rounded-full bg-muted p-2.5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:opacity-50">
                 <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
               </button>
             </div>
 
             {/* ---- Stat pills — all clickable ---- */}
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
               {statPills.map((stat, i) => (
                 <motion.button
                   key={stat.label}
@@ -701,17 +693,28 @@ export default function CustomerDashboard() {
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.06 }}
-                  className="flex items-center gap-2.5 rounded-xl bg-white/10 px-3 py-2.5 backdrop-blur-sm transition-all hover:bg-white/20 active:scale-95 text-left cursor-pointer"
+                  className="flex items-center gap-2.5 rounded-xl border border-border/50 bg-card px-3 py-2 transition-all hover:border-primary/30 hover:bg-muted/40 active:scale-95 text-left cursor-pointer"
                 >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/20">
-                    <stat.icon className="h-4 w-4 text-white" />
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                    <stat.icon className="h-4 w-4 text-primary" />
                   </div>
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-bold leading-none text-white">{stat.value}</div>
-                    <div className="mt-0.5 truncate text-[10px] text-white/70">{stat.label}</div>
+                    <div className="truncate text-sm font-bold leading-none text-foreground">{stat.value}</div>
+                    <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{stat.label}</div>
                   </div>
                 </motion.button>
               ))}
+            </div>
+
+            {/* ---- Address + New Order — moved up from below to use this space efficiently ---- */}
+            <div className="mt-3 flex flex-col gap-2.5 sm:flex-row">
+              <div className="flex-1">
+                <AddressDropdown addresses={data.addresses} selectedId={selectedAddressId} onSelect={setSelectedAddressId} />
+              </div>
+              <Link href="/customer/orders/create"
+                className="group flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 sm:py-0">
+                <Plus className="h-4 w-4" /> New Order
+              </Link>
             </div>
           </div>
         </div>
@@ -722,19 +725,6 @@ export default function CustomerDashboard() {
 
             {/* ============ LEFT / MAIN COLUMN ============ */}
             <div className="min-w-0 space-y-6 lg:col-span-2">
-
-              {/* Address picker */}
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-                className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-4 w-4 text-primary" />
-                    <h2 className="text-sm font-semibold text-foreground">Delivery Address</h2>
-                  </div>
-                  <Link href="/customer/addresses/new" className="text-xs font-medium text-primary hover:underline">+ Add New</Link>
-                </div>
-                <AddressDropdown addresses={data.addresses} selectedId={selectedAddressId} onSelect={setSelectedAddressId} />
-              </motion.div>
 
               {/* Active Order */}
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
@@ -848,31 +838,16 @@ export default function CustomerDashboard() {
             {/* ============ RIGHT / SIDEBAR ============ */}
             <div className="min-w-0 space-y-5">
 
-              {/* New Order CTA */}
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-                <Link href="/customer/orders/create">
-                  <div className="group flex cursor-pointer items-center justify-between rounded-2xl bg-gradient-to-br from-primary to-violet-700 p-5 shadow-md shadow-primary/20 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary/30">
-                    <div>
-                      <p className="text-sm font-semibold text-white">New Laundry Order</p>
-                      <p className="mt-0.5 text-xs text-white/70">Pick up today or schedule later</p>
-                    </div>
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 text-white transition-transform group-hover:translate-x-0.5">
-                      <Plus className="h-5 w-5" />
-                    </div>
-                  </div>
-                </Link>
-              </motion.div>
-
               {/* Quick links */}
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
                 className="rounded-2xl border border-border/50 bg-card p-4 shadow-sm">
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quick Access</p>
                 <div className="space-y-1">
                   {[
-                    { key: 'qp',  href: '/quick-pickup',           icon: Zap,    label: 'Quick Pickup',      sub: 'No account needed',     onClick: null },
+                    { key: 'qp',  href: '/customer/quick-pickup',           icon: Zap,    label: 'Quick Pickup',      sub: 'No account needed',     onClick: null },
                     { key: 'wal', href: null,                       icon: Wallet, label: 'Wallet',             sub: formatINR(displayWallet), onClick: () => setWalletOpen(true) },
                     { key: 'ref', href: '/customer/refer-and-earn', icon: Gift,   label: 'Refer & Earn',       sub: 'Earn wallet credits',   onClick: null },
-                    { key: 'cal', href: '/pricing-calculator',      icon: Star,   label: 'Pricing Calculator', sub: 'Estimate your cost',    onClick: null },
+                    { key: 'cal', href: '/customer/pricing-calculator',      icon: Star,   label: 'Pricing Calculator', sub: 'Estimate your cost',    onClick: null },
                   ].map(item => {
                     const inner = (
                       <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-muted/60">
@@ -941,8 +916,9 @@ export default function CustomerDashboard() {
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Support</p>
                 <div className="space-y-1">
                   {[
-                    { href: '/help-center',       label: 'Help Center'   },
-                    { href: '/safety-center',     label: 'Safety Center' },
+                    { href: '/customer/support',  label: 'My Tickets'    },
+                    { href: '/customer/help-center',       label: 'Help Center'   },
+                    { href: '/customer/safety-center',     label: 'Safety Center' },
                     { href: '/customer/settings', label: 'Settings'      },
                   ].map(item => (
                     <Link key={item.href} href={item.href}>

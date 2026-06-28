@@ -38,6 +38,8 @@ export async function POST(req: NextRequest) {
         u.email,
         u.status,
         u.deleted_at,
+        u.email_verified,
+        u.phone_verified,
         r.name as role_name
        FROM user_sessions s
        INNER JOIN users u ON u.id = s.user_id
@@ -73,8 +75,8 @@ export async function POST(req: NextRequest) {
       email: session.email,
       role: session.role_name,
       sessionId: session.session_id,
-      emailVerified: false,
-      phoneVerified: false
+      emailVerified: session.email_verified,
+      phoneVerified: session.phone_verified
     })
 
     const refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRY || '7d';

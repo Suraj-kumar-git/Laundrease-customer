@@ -56,12 +56,15 @@ export interface Service {
 }
  
 export interface SelectedService {
-  product_type_id: string | number
+  // null for per_kg items — they aren't tied to a single garment type;
+  // the backend resolves the shared "mixed load" product type instead.
+  product_type_id: number | null
   express_multiplier: number
   service_id: number
   service_name: string
   weight_kg: number
   unit_price: number
+  mrp?: number | null
   is_express: boolean
   line_total: number
   quantity: number
@@ -132,7 +135,7 @@ export interface CreateOrderData {
  
 export interface OrderResponse {
   success: boolean
-  order_id?: number
+  order_id?: string
   order_number?: string
   message?: string
   payment_required?: boolean
@@ -141,7 +144,7 @@ export interface OrderResponse {
  
 // Order Flow State Management
 export interface OrderFlowState {
-  order_id?: number
+  order_id?: string
   order_number?: string
   step: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8
   same_address?: boolean

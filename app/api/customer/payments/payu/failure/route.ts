@@ -11,7 +11,8 @@ function getCustomerBaseUrl(): string {
 }
 
 function buildRedirect(path: string): NextResponse {
-  return NextResponse.redirect(new URL(path, getCustomerBaseUrl()))
+  // 303, not the default 307 — see payu/success/route.ts for why.
+  return NextResponse.redirect(new URL(path, getCustomerBaseUrl()), 303)
 }
 
 export async function POST(req: NextRequest) {
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest) {
     const hash = String(form.get('hash') || '')
 
     if (!txnid) {
-      return buildRedirect('/checkout?payment=failed&provider=payu&reason=missing_txnid')
+      return buildRedirect('/customer/orders/payment/failure?reason=missing_txnid')
     }
 
     let webhookVerified = false
@@ -48,11 +49,17 @@ export async function POST(req: NextRequest) {
       callback_verified: webhookVerified,
     })
 
+    // The redirect URL needs the order's public_id (UUID) — orders.id is an
+    // internal BIGSERIAL the customer-facing routes don't accept.
+    let orderPublicId: string | null = null
+
     await transaction(async (client) => {
       const paymentResult = await client.query(
-        `SELECT id, order_id
-         FROM payments
-         WHERE merchant_txn_id = $1
+        `SELECT p.id, p.order_id, p.amount, p.currency, p.gateway_config_id,
+                o.public_id AS order_public_id
+         FROM payments p
+         LEFT JOIN orders o ON o.id = p.order_id
+         WHERE p.merchant_txn_id = $1
          LIMIT 1`,
         [txnid]
       )
@@ -62,6 +69,7 @@ export async function POST(req: NextRequest) {
       }
 
       const payment = paymentResult.rows[0]
+      orderPublicId = payment.order_public_id
 
       await client.query(
         `UPDATE payments
@@ -78,10 +86,36 @@ export async function POST(req: NextRequest) {
         ]
       )
 
+      await client.query(
+        `INSERT INTO payment_gateway_transactions (
+           payment_id, gateway_config_id, provider, merchant_txn_id,
+           provider_order_id, provider_payment_id, provider_txn_id,
+           amount, currency, status, response_payload, failed_at
+         )
+         VALUES ($1, $2, 'payu', $3, $3, $4, $4, $5, $6, 'failed', $7::jsonb, NOW())
+         ON CONFLICT (merchant_txn_id) DO UPDATE SET
+           provider_payment_id = EXCLUDED.provider_payment_id,
+           provider_txn_id     = EXCLUDED.provider_txn_id,
+           status              = 'failed',
+           response_payload    = COALESCE(payment_gateway_transactions.response_payload, '{}'::jsonb) || EXCLUDED.response_payload,
+           failed_at           = COALESCE(payment_gateway_transactions.failed_at, NOW()),
+           updated_at          = NOW()`,
+        [
+          payment.id,
+          payment.gateway_config_id,
+          txnid,
+          mihpayid || null,
+          payment.amount,
+          payment.currency || 'INR',
+          gatewayResponse,
+        ]
+      )
+
       if (payment.order_id) {
         await client.query(
           `UPDATE orders
            SET payment_status = $1,
+               status = 'failed',
                updated_at = NOW()
            WHERE id = $2`,
           ['failed', payment.order_id]
@@ -89,11 +123,12 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    return buildRedirect(`/checkout?payment=failed&provider=payu&txnid=${encodeURIComponent(txnid)}`)
+    return buildRedirect(`/customer/orders/payment/failure?order_id=${orderPublicId ?? ''}`)
   } catch (error) {
     console.error('[POST /api/customer/payments/payu/failure]', error)
     return NextResponse.redirect(
-      new URL('/checkout?payment=failed&provider=payu&reason=server_error', process.env.NEXT_PUBLIC_CUSTOMER_URL!)
+      new URL('/customer/orders/payment/failure?reason=server_error', process.env.NEXT_PUBLIC_CUSTOMER_URL!),
+      303
     )
   }
 }

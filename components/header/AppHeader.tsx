@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -11,9 +11,11 @@ import {
   Calculator,
   Layers,
   Truck,
-  MessagesSquare
+  MessagesSquare,
+  LifeBuoy,
 } from 'lucide-react'
 import { useAuth } from '@/components/auth-provider'
+import { useCart } from '@/components/cart-provider'
 import { cn } from '@/lib/utils'
 import Image from "next/image"
 import { ThemeToggle } from "@/components/theme-toggle"
@@ -57,29 +59,6 @@ const Logo = ({ logoUrl, className = "" }: { logoUrl?: string; className?: strin
     )
 }
 
-// ---- Cart badge count ---------------------------------------
-function useCartCount(isLoggedIn: boolean) {
-  const [count, setCount] = useState(0)
-
-  const refresh = useCallback(async () => {
-    if (!isLoggedIn) { setCount(0); return }
-    try {
-      const res  = await fetch('/api/customer/cart/summary', { credentials: 'include' })
-      const json = await res.json()
-      if (json.success) setCount(json.data?.item_count ?? 0)
-    } catch { /* silent */ }
-  }, [isLoggedIn])
-
-  // This makes API calls each 30s.
-  useEffect(() => {
-    refresh()
-    const id = setInterval(refresh, 30000)
-    return () => clearInterval(id)
-  }, [refresh])
-
-  return { count, refresh }
-}
-
 // ---- Remove import of Theme toggle to use the below one only for light or dark-------------------------------------------
 // function ThemeToggle() {
 //   const { theme, setTheme } = useTheme()
@@ -100,8 +79,7 @@ function useCartCount(isLoggedIn: boolean) {
 
 // ---- Cart icon with badge -----------------------------------
 export function CartBadge({ onClick }: { onClick: () => void }) {
-  const { user } = useAuth()
-  const { count } = useCartCount(!!user)
+  const { itemCount: count } = useCart()
 
   return (
     <button
@@ -149,7 +127,8 @@ function DesktopUserMenu({ user, onLogout }: { user: any; onLogout: () => void }
     { icon: Gift,      label: 'Refer & Earn',  href: '/customer/refer-and-earn' },
     { icon: MapPin,    label: 'Addresses',     href: '/customer/addresses' },
     { icon: Settings,  label: 'Settings',      href: '/customer/settings' },
-    { icon: HelpCircle,label: 'Help Center',   href: '/help-center' },
+    { icon: LifeBuoy,  label: 'My Tickets',    href: '/customer/support' },
+    { icon: HelpCircle,label: 'Help Center',   href: '/customer/help-center' },
     { icon: MessagesSquare, label: 'Feedback', href: '/customer/feedback'  },
   ]
 
@@ -263,6 +242,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
     { href: '/customer/refer-and-earn', label: 'Refer & Earn', icon: Gift },
     { href: '/customer/settings',     label: 'Settings',    icon: Settings },
     { href: '/customer/feedback',     label: 'Feedback', icon: MessagesSquare },
+    { href: '/customer/support',      label: 'My Tickets', icon: LifeBuoy },
     { href: '/customer/help-center',  label: 'Help Center', icon: HelpCircle },
   ]
 
@@ -271,7 +251,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
     { href: '/customer/pricing-calculator', label: 'Pricing', icon: Calculator, },
     { href: '/customer/quick-pickup', label: 'Quick Pickup', icon: Truck, },
     { href: '/customer/faq', label: 'FAQ', icon: HelpCircle, },
-    { href: '/customer/help-center',            label: 'Help Center',icon: HelpCircle },
+    { href: '/customer/help-center', label: 'Help Center',icon: HelpCircle },
   ]
 
   const DIVIDER_AFTER = 3 // after index 3 (Addresses), show a divider
@@ -287,7 +267,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
 
           {/* Desktop nav-items only when logged in */}
           {user && (
-            <nav className="hidden items-center gap-1 md:flex">
+            <nav className="hidden items-center gap-1 lg:flex">
               {NAV_ITEMS_AUTH.map(item => {
                 const Icon   = item.icon
                 const active = isActive(item.href)
@@ -314,7 +294,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
             </nav>
           )}
           {!user && (
-            <nav className="hidden items-center gap-1 md:flex">
+            <nav className="hidden items-center gap-1 lg:flex">
               {NAV_ITEMS_NOT_AUTH.map(item => {
                 const Icon   = item.icon
                 const active = isActive(item.href)
@@ -345,11 +325,11 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
           <div className="flex items-center gap-1">
             <ThemeToggle />
 
-            {/* Cart â€” only when logged in */}
-            {user && <CartBadge onClick={onCartClick} />}
+            {/* Cart — visible to guests too, since items can be added before signing in */}
+            <CartBadge onClick={onCartClick} />
 
             {/* Desktop: user menu or login CTA */}
-            <div className="hidden md:flex items-center gap-2">
+            <div className="hidden lg:flex items-center gap-2">
               {isLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               ) : user ? (
@@ -375,7 +355,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
             {/* Mobile hamburger */}
             <button
               onClick={() => setMobileMenuOpen(v => !v)}
-              className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:hidden"
+              className="flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground lg:hidden"
               aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
               aria-expanded={mobileMenuOpen}
             >
@@ -395,7 +375,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setMobileMenuOpen(false)}
-              className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm md:hidden"
+              className="fixed inset-0 z-30 bg-black/30 backdrop-blur-sm lg:hidden"
             />
 
             {/* Slide-down panel â€” attaches below the header, full width */}
@@ -406,7 +386,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
               exit={{ opacity: 0, y: -16 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
               // top-14 = header height; max-h = viewport minus header; overflow-y-auto for scroll
-              className="fixed left-0 right-0 top-14 z-40 max-h-[calc(100vh-3.5rem)] overflow-y-auto border-b border-border/50 bg-background shadow-xl md:hidden"
+              className="fixed left-0 right-0 top-14 z-40 max-h-[calc(100vh-3.5rem)] overflow-y-auto border-b border-border/50 bg-background shadow-xl lg:hidden"
             >
               {/* User info banner (logged in) */}
               {user && (

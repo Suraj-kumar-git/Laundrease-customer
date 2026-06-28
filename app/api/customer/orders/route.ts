@@ -20,7 +20,22 @@ export async function GET(req: NextRequest) {
   const offset = (page - 1) * limit
 
   try {
-    const conditions = ['o.customer_id = $1']
+    // Orders awaiting online payment confirmation aren't "placed" yet — an
+    // order row exists up front (so it has an id to attach the gateway
+    // payment to), but until that payment actually clears, it shouldn't
+    // appear as a real order to the customer. COD orders are exempt since
+    // they're never online-payment-gated. If the customer retries payment
+    // or switches to COD, payment_status/payment_method change and the
+    // order becomes visible normally.
+    const conditions = [
+      'o.customer_id = $1',
+      // 'failed' (payment never completed) and 'cancelled' orders are always
+      // shown to the customer regardless of payment_status — cancelling a
+      // paid order flips payment_status to 'refunded'/'refund_processing',
+      // which wouldn't match payment_status = 'paid' below. Only the
+      // still-pending, payment-not-yet-resolved drafts stay invisible.
+      `(o.payment_method LIKE '%cod%' OR o.payment_status = 'paid' OR o.status IN ('failed', 'cancelled'))`,
+    ]
     const params: any[] = [userId]
     let pi = 2
 
@@ -34,7 +49,7 @@ export async function GET(req: NextRequest) {
     const [ordersRes, countRes] = await Promise.all([
       query(
         `SELECT
-           o.id,
+           o.public_id AS id,
            o.order_number,
            o.status,
            o.pickup_date,

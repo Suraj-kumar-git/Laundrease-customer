@@ -3,14 +3,13 @@
 // PATCH /api/customer/orders/[id] — reschedule pickup (date + time slot)
 
 import { NextRequest } from 'next/server'
-import { query, transaction } from '@/lib/db'
+import { query, queryOne, transaction } from '@/lib/db'
 import {
   successResponse, errorResponse, notFoundResponse,
   serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
-
-// Statuses that are still reschedulable (not yet picked up)
-const RESCHEDULABLE_STATUSES = new Set(['pending', 'confirmed'])
+import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from '@/lib/order-status'
+import { calculateEstimatedDeliveryDate } from '@/lib/delivery-estimate'
 
 export async function GET(
   req: NextRequest,
@@ -19,18 +18,24 @@ export async function GET(
   const userId  = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  const { id } = await params
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return notFoundResponse('Order not found')
+  const { id: publicId } = await params
 
   try {
+    const orderLookup = await queryOne<{ id: number }>(
+      `SELECT id FROM orders WHERE public_id = $1 AND customer_id = $2`,
+      [publicId, userId]
+    )
+    if (!orderLookup) return notFoundResponse('Order not found')
+    const orderId = orderLookup.id
+
     // Main order row
     const orderRes = await query(
       `SELECT
-         o.id, o.order_number, o.status, o.assignment_status,
+         o.id, o.public_id, o.order_number, o.status, o.assignment_status,
          o.pickup_address, o.delivery_address,
          o.pickup_date, o.pickup_time_slot,
-         o.delivery_date, o.delivery_time_slot,
+         o.delivery_date, o.delivery_time_slot, o.estimated_delivery_date,
+         o.delivered_at,
          o.special_instructions, o.is_express,
          o.subtotal, o.tax_amount, o.discount_amount, o.total_amount,
          o.payment_status, o.payment_method,
@@ -79,7 +84,7 @@ export async function GET(
 
     // Payments
     const paymentsRes = await query(
-      `SELECT id, amount, payment_method, status, merchant_txn_id, created_at
+      `SELECT id, amount, payment_method, provider, status, merchant_txn_id, created_at
        FROM payments WHERE order_id = $1 ORDER BY created_at`,
       [orderId]
     )
@@ -108,12 +113,26 @@ export async function GET(
       [orderId]
     )
 
-    // Can the order be rescheduled?
+    // Item-protection claims already filed on this order, plus the policy
+    // (cap/window) so the UI can show the right deadline without a second call.
+    const claimsRes = await query(
+      `SELECT id, order_item_id, claim_type, description, status,
+              cleaning_charge_snapshot, cap_amount, compensation_amount,
+              decision_note, created_at
+       FROM garment_claims WHERE order_id = $1 ORDER BY created_at DESC`,
+      [orderId]
+    )
+    const policy = await queryOne<{
+      multiplier: string; max_cap_amount: string; claim_window_hours: number; is_active: boolean
+    }>(`SELECT multiplier, max_cap_amount, claim_window_hours, is_active FROM item_protection_policy ORDER BY id LIMIT 1`)
+
+    // Can the order be rescheduled / cancelled?
     const canReschedule = RESCHEDULABLE_STATUSES.has(order.status)
+    const canCancel     = CANCELLABLE_STATUSES.has(order.status)
 
     return successResponse({
       order: {
-        id:                 order.id,
+        id:                 order.public_id,
         order_number:       order.order_number,
         status:             order.status,
         assignment_status:  order.assignment_status,
@@ -123,6 +142,8 @@ export async function GET(
         pickup_time_slot:   order.pickup_time_slot,
         delivery_date:      order.delivery_date,
         delivery_time_slot: order.delivery_time_slot,
+        estimated_delivery_date: order.estimated_delivery_date,
+        delivered_at:       order.delivered_at,
         special_instructions: order.special_instructions,
         is_express:         order.is_express,
         subtotal:           parseFloat(order.subtotal),
@@ -134,6 +155,7 @@ export async function GET(
         created_at:         order.created_at,
         updated_at:         order.updated_at,
         can_reschedule:     canReschedule,
+        can_cancel:         canCancel,
         provider: order.provider_id ? {
           id:      order.provider_id,
           name:    order.provider_name,
@@ -162,6 +184,18 @@ export async function GET(
       coupons:        couponsRes.rows.map(r => ({
         ...r, amount_discounted: parseFloat(r.amount_discounted),
       })),
+      claims: claimsRes.rows.map(r => ({
+        ...r,
+        cleaning_charge_snapshot: parseFloat(r.cleaning_charge_snapshot),
+        cap_amount:               parseFloat(r.cap_amount),
+        compensation_amount:      r.compensation_amount != null ? parseFloat(r.compensation_amount) : null,
+      })),
+      item_protection_policy: policy ? {
+        multiplier:         parseFloat(policy.multiplier),
+        max_cap_amount:     parseFloat(policy.max_cap_amount),
+        claim_window_hours: policy.claim_window_hours,
+        is_active:          policy.is_active,
+      } : null,
     })
   } catch (error) {
     console.error('[GET /api/customer/orders/:id]', error)
@@ -177,9 +211,7 @@ export async function PATCH(
   const userId  = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  const { id } = await params
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return notFoundResponse('Order not found')
+  const { id: publicId } = await params
 
   let body: { pickup_date: string; pickup_time_slot: string }
   try { body = await req.json() } catch { return errorResponse('Invalid body', 400) }
@@ -200,20 +232,42 @@ export async function PATCH(
 
       // Verify order belongs to user and is reschedulable
       const check = await client.query(
-        `SELECT status FROM orders WHERE id = $1 AND customer_id = $2 FOR UPDATE`,
-        [orderId, userId]
+        `SELECT id, status, laundry_profile_id FROM orders WHERE public_id = $1 AND customer_id = $2 FOR UPDATE`,
+        [publicId, userId]
       )
       if (check.rowCount === 0) throw new Error('NOT_FOUND')
       if (!RESCHEDULABLE_STATUSES.has(check.rows[0].status)) throw new Error('NOT_RESCHEDULABLE')
+      const orderId = check.rows[0].id
+
+      // Recompute the estimated delivery date against the new pickup date.
+      const itemsRes = await client.query(
+        `SELECT ois.service_id, ois.is_express
+         FROM order_items oi
+         JOIN order_item_services ois ON ois.order_item_id = oi.id
+         WHERE oi.order_id = $1`,
+        [orderId]
+      )
+      const estimatedDeliveryDate = await calculateEstimatedDeliveryDate(
+        (text, params) => client.query(text, params),
+        {
+          providerId: check.rows[0].laundry_profile_id,
+          pickupDate: body.pickup_date,
+          items: itemsRes.rows.map(r => ({ serviceId: r.service_id, isExpress: r.is_express })),
+        }
+      )
 
       await client.query(
         `UPDATE orders
-         SET pickup_date = $1, pickup_time_slot = $2, updated_at = NOW()
-         WHERE id = $3`,
-        [body.pickup_date, body.pickup_time_slot, orderId]
+         SET pickup_date = $1, pickup_time_slot = $2, estimated_delivery_date = $3, updated_at = NOW()
+         WHERE id = $4`,
+        [body.pickup_date, body.pickup_time_slot, estimatedDeliveryDate, orderId]
       )
 
-      return { pickup_date: body.pickup_date, pickup_time_slot: body.pickup_time_slot }
+      return {
+        pickup_date: body.pickup_date,
+        pickup_time_slot: body.pickup_time_slot,
+        estimated_delivery_date: estimatedDeliveryDate,
+      }
     })
 
     return successResponse(result)

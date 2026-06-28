@@ -1,6 +1,10 @@
 import { NextRequest } from 'next/server'
 import { transaction, query } from '@/lib/db'
 import { enqueueOrderConfirmationEmail } from '@/lib/sqs'
+import { calculateEstimatedDeliveryDate } from '@/lib/delivery-estimate'
+import { getActiveGateway } from '@/lib/payment'
+import { getMixedLoadProductTypeId } from '@/lib/product-types'
+import { checkProviderOrderEligibility } from '@/lib/subscription'
 import { randomUUID } from 'crypto'
 import {
   successResponse, errorResponse, validationError,
@@ -12,7 +16,7 @@ interface ServiceItem {
   service_id:         number
   service_name:       string
   weight_kg?:         number
-  product_type_id?:   number
+  product_type_id?:   number | null
   product_type_name?: string
   icon?:              string
   quantity?:          number
@@ -81,26 +85,54 @@ export async function POST(req: NextRequest) {
   const isCodBased      = paymentMethod === 'cod' || paymentMethod.includes('+cod')
   const secondaryMethod = extractSecondaryMethod(paymentMethod)
 
+  // Resolve the actually-active gateway once — online payments must use whichever
+  // provider the admin has configured, not a hardcoded one. Only relevant if some
+  // portion of the order isn't covered by COD/wallet (checked again once wallet
+  // coverage is computed inside the transaction).
+  const gatewayInfo = !isCodBased ? await getActiveGateway() : null
+  const onlineProvider = gatewayInfo?.provider ?? 'payu'
+
   try {
     // ---- Idempotency --------------------------------------------------------
+    // Only short-circuit on a *paid* match — re-submitting the same draft after
+    // a successful payment should return the existing order, not double-charge.
+    // If the previous attempt under this draft number never completed payment
+    // (abandoned online checkout, failed payment, etc.), it's a stale/zombie
+    // order — void it and fall through to create a fresh one for this attempt,
+    // so a retry (e.g. switching to COD from checkout) isn't silently bound to
+    // the old attempt's payment_method/status.
+    let staleDraftVoided = false
     if (body.draft_order_number) {
       const existing = await query(
-        `SELECT id, order_number, total_amount, payment_status, payment_method
+        `SELECT id, public_id, order_number, total_amount, payment_status, payment_method
          FROM orders WHERE order_number = $1 AND customer_id = $2`,
         [body.draft_order_number, userId]
       )
       if (existing.rowCount! > 0) {
         const o = existing.rows[0]
-        const wasCOD = (o.payment_method ?? '').includes('cod')
-        return successResponse({
-          order_id:              o.id,
-          order_number:          o.order_number,
-          total_amount:          parseFloat(o.total_amount),
-          payment_required:      o.payment_status === 'pending' && !wasCOD,
-          payment_fully_covered: false,
-          payment_method:        o.payment_method,
-          already_existed:       true,
-        }, 200)
+        if (o.payment_status === 'paid') {
+          const wasCOD = (o.payment_method ?? '').includes('cod')
+          return successResponse({
+            order_id:              o.public_id,
+            order_number:          o.order_number,
+            total_amount:          parseFloat(o.total_amount),
+            payment_required:      o.payment_status === 'pending' && !wasCOD,
+            payment_fully_covered: false,
+            payment_method:        o.payment_method,
+            already_existed:       true,
+          }, 200)
+        }
+        await query(
+          `UPDATE orders SET status = 'failed', payment_status = 'failed', updated_at = NOW()
+           WHERE id = $1`,
+          [o.id]
+        )
+        await query(
+          `UPDATE payments SET status = 'cancelled', updated_at = NOW()
+           WHERE order_id = $1 AND status IN ('initiated', 'pending', 'failed')`,
+          [o.id]
+        )
+        staleDraftVoided = true
       }
     }
 
@@ -116,6 +148,12 @@ export async function POST(req: NextRequest) {
       )
       if (providerRes.rowCount === 0) throw new Error('INVALID_PROVIDER')
       const provider = providerRes.rows[0]
+
+      // ---- Subscription gate -------------------------------------------------
+      // A provider whose subscription has lapsed or who's hit their plan's
+      // monthly order cap can't take on new orders until they renew/upgrade.
+      const eligibility = await checkProviderOrderEligibility(client, provider.id)
+      if (!eligibility.eligible) throw new Error(eligibility.reason)
 
       // ---- Customer ---------------------------------------------------------
       const custRes = await client.query(
@@ -187,6 +225,14 @@ export async function POST(req: NextRequest) {
         Math.round((subtotal + feesTotal - discountAmount) * 100) / 100
       )
 
+      // GST is just another row from order_fee_config (already included in
+      // feesTotal/totalAmount above) — pulled out separately so it can be
+      // stored in orders.tax_amount for invoices/order-detail breakdowns
+      // that read the column directly instead of the adjustments list.
+      const taxAmount = feeRows
+        .filter(f => f.code === 'gst')
+        .reduce((s, f) => s + parseFloat(String(f.amount)), 0)
+
       // ---- Wallet -----------------------------------------------------------
       let effectiveWalletAmount = 0
       if (usesWallet && walletRequested > 0) {
@@ -224,31 +270,67 @@ export async function POST(req: NextRequest) {
       }
 
       // ---- Insert order -----------------------------------------------------
-      const orderNumber    = body.draft_order_number ?? `ORD${Date.now()}`
+      const orderNumber    = (body.draft_order_number && !staleDraftVoided)
+        ? body.draft_order_number
+        : `ORD${Date.now()}`
       const paymentStatus  = walletFullyCovered ? 'paid' : 'pending'
+
+      // Estimated delivery DATE (not a time slot) — based on the slowest
+      // service in the order, provider turnaround overrides, and express.
+      const estimatedDeliveryDate = await calculateEstimatedDeliveryDate(
+        (text, params) => client.query(text, params),
+        {
+          providerId: body.laundry_profile_id,
+          pickupDate: body.pickup_date,
+          items: body.services.map(svc => ({ serviceId: svc.service_id, isExpress: svc.is_express })),
+        }
+      )
+
+      // Pickup pincode, stored denormalized so the delivery available-orders
+      // query can match it directly — it was never being populated before,
+      // which silently broke region matching for every order (the query
+      // would fall through to a fragile city-substring match instead).
+      let pickupPincode: string | null = null
+      if (body.address_id) {
+        const addrRes = await client.query(
+          `SELECT postal_code FROM customer_addresses WHERE id = $1 AND customer_profile_id = (
+             SELECT id FROM customer_profiles WHERE user_id = $2
+           )`,
+          [body.address_id, userId]
+        )
+        pickupPincode = addrRes.rows[0]?.postal_code ?? null
+      }
 
       const orderRes = await client.query(
         `INSERT INTO orders (
            order_number, customer_id, laundry_profile_id, delivery_profile_id,
-           status, pickup_address, delivery_address,
+           status, pickup_address, delivery_address, pickup_pincode,
            pickup_date, pickup_time_slot, special_instructions,
-           is_express, subtotal, discount_amount,
-           total_amount, payment_status, payment_method, assignment_status
-         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'unassigned')
-         RETURNING id`,
+           is_express, subtotal, tax_amount, discount_amount,
+           total_amount, payment_status, payment_method, assignment_status,
+           estimated_delivery_date
+         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'unassigned',$17)
+         RETURNING id, public_id`,
         [
           orderNumber, userId, body.laundry_profile_id,
-          body.pickup_address, body.delivery_address ?? body.pickup_address,
+          body.pickup_address, body.delivery_address ?? body.pickup_address, pickupPincode,
           body.pickup_date, body.pickup_time_slot, body.special_instructions ?? null,
-          body.is_express, subtotal, discountAmount, totalAmount,
-          paymentStatus, paymentMethod,
+          body.is_express, subtotal, taxAmount, discountAmount, totalAmount,
+          paymentStatus, paymentMethod, estimatedDeliveryDate,
         ]
       )
       const orderId = orderRes.rows[0].id
+      const orderPublicId = orderRes.rows[0].public_id
 
       // ---- Order items ------------------------------------------------------
+      // Per-kg items aren't tied to a specific garment — resolve the shared
+      // "Regular Laundry (Mixed)" product type once up front rather than
+      // hardcoding an id that may not exist in every environment.
+      const hasKgItem = body.services.some(svc => svc.type === 'per_kg')
+      const mixedLoadProductTypeId = hasKgItem ? await getMixedLoadProductTypeId(client) : null
+
       for (const svc of body.services) {
-        const productTypeId = svc.type === 'per_unit' ? (svc.product_type_id ?? 1) : 1
+        const productTypeId = svc.type === 'per_unit' ? (svc.product_type_id ?? 1) : mixedLoadProductTypeId
         const weightKg      = svc.type === 'per_kg'   ? svc.weight_kg              : null
         const quantity      = svc.type === 'per_unit' ? (svc.quantity ?? 1)        : 1
         const itemRes = await client.query(
@@ -281,8 +363,6 @@ export async function POST(req: NextRequest) {
           ]
         )
       }
-
-      // Tax row
 
       // Coupon discount
       if (appliedCouponCode && discountAmount > 0) {
@@ -334,32 +414,36 @@ export async function POST(req: NextRequest) {
 
       // ---- Remaining payment row -------------------------------------------
       if (remainingAfterWallet > 0) {
-        const provider = secondaryMethod === 'cod' ? 'cod' : 'payu'
-        const status = secondaryMethod === 'cod' ? 'pending' : 'initiated'
-        const merchantTxnId =
-          secondaryMethod === 'cod'
-            ? `COD-${orderId}-${randomUUID()}`
-            : `PAYU-${orderId}-${randomUUID()}`
+        const isOnline = secondaryMethod !== 'cod'
+        if (isOnline && !gatewayInfo) throw new Error('NO_GATEWAY_CONFIGURED')
+
+        const provider = isOnline ? onlineProvider : 'cod'
+        const status   = isOnline ? 'initiated' : 'pending'
+        const merchantTxnId = isOnline
+          ? `${onlineProvider.toUpperCase()}-${orderId}-${randomUUID()}`
+          : `COD-${orderId}-${randomUUID()}`
 
         await client.query(
           `INSERT INTO payments
-            (order_id, amount, payment_method, status, provider, merchant_txn_id)
-          VALUES ($1,$2,$3,$4,$5,$6)`,
-          [orderId, remainingAfterWallet, secondaryMethod, status, provider, merchantTxnId]
+            (order_id, amount, payment_method, status, provider, merchant_txn_id, gateway_config_id)
+          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [orderId, remainingAfterWallet, secondaryMethod, status, provider, merchantTxnId, isOnline ? gatewayInfo!.id : null]
         )
       } else if (effectiveWalletAmount <= 0) {
-        const provider = paymentMethod === 'cod' ? 'cod' : 'payu'
-        const status = paymentMethod === 'cod' ? 'pending' : 'initiated'
-        const merchantTxnId =
-          paymentMethod === 'cod'
-            ? `COD-${orderId}-${randomUUID()}`
-            : `PAYU-${orderId}-${randomUUID()}`
+        const isOnline = paymentMethod !== 'cod'
+        if (isOnline && !gatewayInfo) throw new Error('NO_GATEWAY_CONFIGURED')
+
+        const provider = isOnline ? onlineProvider : 'cod'
+        const status   = isOnline ? 'initiated' : 'pending'
+        const merchantTxnId = isOnline
+          ? `${onlineProvider.toUpperCase()}-${orderId}-${randomUUID()}`
+          : `COD-${orderId}-${randomUUID()}`
 
         await client.query(
           `INSERT INTO payments
-            (order_id, amount, payment_method, status, provider, merchant_txn_id)
-          VALUES ($1,$2,$3,$4,$5,$6)`,
-          [orderId, totalAmount, paymentMethod, status, provider, merchantTxnId]
+            (order_id, amount, payment_method, status, provider, merchant_txn_id, gateway_config_id)
+          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [orderId, totalAmount, paymentMethod, status, provider, merchantTxnId, isOnline ? gatewayInfo!.id : null]
         )
       }
       // walletFullyCovered → no second payment row needed
@@ -373,7 +457,7 @@ export async function POST(req: NextRequest) {
       )
 
       return {
-        orderId, orderNumber, totalAmount,
+        orderId, orderPublicId, orderNumber, totalAmount,
         walletAmountUsed:    effectiveWalletAmount,
         remainingAmount:     remainingAfterWallet,
         walletFullyCovered,
@@ -388,8 +472,17 @@ export async function POST(req: NextRequest) {
     try { await query(`SELECT auto_assign_delivery_partner($1)`, [result.orderId]) }
     catch (e) { console.warn('[orders/create] Auto-assign skipped:', (e as Error).message) }
 
-    try { await query(`DELETE FROM shopping_carts WHERE user_id = $1`, [userId]) }
-    catch { /* non-fatal */ }
+    const needsGatewayPayment = !result.paymentFullyCovered && !isCodBased
+
+    // Only clear the cart once the order doesn't need any further online
+    // payment step — for COD/wallet-fully-covered orders the purchase is
+    // final here. For orders still awaiting a gateway payment, the cart must
+    // survive (so checkout can be retried) until the PayU/Cashfree callback
+    // actually confirms the payment.
+    if (!needsGatewayPayment) {
+      try { await query(`DELETE FROM shopping_carts WHERE user_id = $1`, [userId]) }
+      catch { /* non-fatal */ }
+    }
 
     try {
       await enqueueOrderConfirmationEmail({
@@ -405,10 +498,8 @@ export async function POST(req: NextRequest) {
       })
     } catch (e) { console.warn('[orders/create] SQS error:', e) }
 
-    const needsGatewayPayment = !result.paymentFullyCovered && !isCodBased
-
     return successResponse({
-      order_id:              result.orderId,
+      order_id:              result.orderPublicId,
       order_number:          result.orderNumber,
       total_amount:          result.totalAmount,
       wallet_amount_used:    result.walletAmountUsed,
@@ -422,11 +513,15 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error('[POST /api/customer/orders/create]', error)
     if (error.message === 'INVALID_PROVIDER')            return errorResponse('Selected provider is not available', 400)
+    if (error.message === 'NO_ACTIVE_SUBSCRIPTION')      return errorResponse('This provider is not currently accepting orders. Please choose another provider.', 400)
+    if (error.message === 'SUBSCRIPTION_EXPIRED')        return errorResponse('This provider’s subscription has expired and they cannot accept new orders right now. Please choose another provider.', 400)
+    if (error.message === 'ORDER_LIMIT_REACHED')         return errorResponse('This provider has reached their order limit for this billing cycle. Please choose another provider.', 400)
     if (error.message === 'CUSTOMER_NOT_FOUND')          return errorResponse('Customer profile not found', 404)
     if (error.message === 'COD_DISABLED')                return errorResponse('Cash on Delivery is not available', 400)
     if (error.message === 'COD_LIMIT_EXCEEDED')          return errorResponse('Order amount exceeds COD limit', 400)
     if (error.message === 'WALLET_NOT_FOUND')            return errorResponse('Wallet not found', 400)
     if (error.message === 'INSUFFICIENT_WALLET_BALANCE') return errorResponse('Insufficient wallet balance', 400)
+    if (error.message === 'NO_GATEWAY_CONFIGURED')       return errorResponse('No payment gateway is configured. Please contact support.', 503)
     return serverErrorResponse('Failed to create order')
   }
 }

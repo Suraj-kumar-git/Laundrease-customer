@@ -14,16 +14,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const jobId = parseInt(id, 10)
-
-  if (isNaN(jobId)) {
-    return notFoundResponse('Job not found')
-  }
 
   try {
     const result = await query(
       `SELECT
-         id, title, department, location, employment_type,
+         public_id AS id, title, department, location, employment_type,
          experience_range, about_role,
          responsibilities, requirements, nice_to_have, benefits,
          (jd_s3_key IS NOT NULL) AS has_jd,
@@ -33,10 +28,10 @@ export async function GET(
          to_char(posted_at, 'YYYY-MM-DD') AS posted_at,
          to_char(expires_at, 'YYYY-MM-DD') AS expires_at
        FROM career_jobs
-       WHERE id = $1
+       WHERE public_id = $1
          AND is_active = TRUE
          AND (expires_at IS NULL OR expires_at > NOW())`,
-      [jobId]
+      [id]
     )
 
     if (result.rowCount === 0) {
