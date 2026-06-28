@@ -9,6 +9,7 @@ import { PayUAdapter } from './payu'
 export * from './types'
 
 export interface ActiveGatewayInfo {
+  id: number
   adapter: PaymentGatewayAdapter
   codEnabled: boolean
   codMaxAmount: number
@@ -24,7 +25,7 @@ export interface ActiveGatewayInfo {
  */
 export async function getActiveGateway(): Promise<ActiveGatewayInfo | null> {
   const result = await query(
-    `SELECT provider, api_key_enc, api_secret_enc, webhook_secret_enc,
+    `SELECT id, provider, api_key_enc, api_secret_enc, webhook_secret_enc,
             config, cod_enabled, cod_max_order_amount
      FROM payment_gateway_config
      WHERE is_active = TRUE
@@ -54,8 +55,8 @@ export async function getActiveGateway(): Promise<ActiveGatewayInfo | null> {
   if (row.provider === 'payu') {
     config.extra = {
       ...config.extra,
-      successUrl: `${process.env.NEXT_PUBLIC_CUSTOMER_URL}/customer/orders/payment/success`,
-      failureUrl: `${process.env.NEXT_PUBLIC_CUSTOMER_URL}customer/orders/payment/failure`,
+      successUrl: `${process.env.NEXT_PUBLIC_CUSTOMER_URL}/api/customer/payments/payu/success`,
+      failureUrl: `${process.env.NEXT_PUBLIC_CUSTOMER_URL}/api/customer/payments/payu/failure`,
     }
   }
   
@@ -76,6 +77,7 @@ export async function getActiveGateway(): Promise<ActiveGatewayInfo | null> {
   }
 
   return {
+  id: row.id,
   adapter,
   codEnabled: row.cod_enabled,
   codMaxAmount: parseFloat(row.cod_max_order_amount),

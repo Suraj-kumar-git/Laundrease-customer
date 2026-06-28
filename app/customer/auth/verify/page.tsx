@@ -13,13 +13,16 @@ import { SearchParamProvider } from "@/components/common/searchParamProvider"
 import { useAuth } from "@/components/auth-provider"
  
 function PageContent() {
-  const [isLoading, setIsLoading] = useState(false)
+  const [emailLoading, setEmailLoading] = useState(false)
+  const [phoneLoading, setPhoneLoading] = useState(false)
   const [resendLoading, setResendLoading] = useState<'email' | 'phone' | null>(null)
   const [emailOtp, setEmailOtp] = useState(["", "", "", "", "", ""])
   const [phoneOtp, setPhoneOtp] = useState(["", "", "", "", "", ""])
   const [errors, setErrors] = useState({ email: "", phone: "" })
-  const [countdown, setCountdown] = useState(60)
-  const [canResend, setCanResend] = useState(false)
+  const [emailCountdown, setEmailCountdown] = useState(60)
+  const [phoneCountdown, setPhoneCountdown] = useState(60)
+  const [canResendEmail, setCanResendEmail] = useState(false)
+  const [canResendPhone, setCanResendPhone] = useState(false)
   const [verificationStatus, setVerificationStatus] = useState({
     email: false,
     phone: false,
@@ -48,13 +51,22 @@ function PageContent() {
   }, [user, authLoading, email, phone, returnTo, router])
  
   useEffect(() => {
-    if (countdown > 0) {
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000)
+    if (emailCountdown > 0) {
+      const timer = setTimeout(() => setEmailCountdown(emailCountdown - 1), 1000)
       return () => clearTimeout(timer)
     } else {
-      setCanResend(true)
+      setCanResendEmail(true)
     }
-  }, [countdown])
+  }, [emailCountdown])
+
+  useEffect(() => {
+    if (phoneCountdown > 0) {
+      const timer = setTimeout(() => setPhoneCountdown(phoneCountdown - 1), 1000)
+      return () => clearTimeout(timer)
+    } else {
+      setCanResendPhone(true)
+    }
+  }, [phoneCountdown])
  
   const handleOtpChange = (
     type: 'email' | 'phone',
@@ -105,107 +117,88 @@ function PageContent() {
     setOtp(newOtp)
   }
  
-  const handleVerify = async () => {
-    const emailCode = emailOtp.join("")
-    const phoneCode = phoneOtp.join("")
-    
-    const newErrors = { email: "", phone: "" }
-    
-    if (emailCode.length !== 6) {
-      newErrors.email = "Please enter the complete 6-digit email code"
-    }
-    if (phoneCode.length !== 6) {
-      newErrors.phone = "Please enter the complete 6-digit phone code"
-    }
- 
-    if (newErrors.email || newErrors.phone) {
-      setErrors(newErrors)
+  // Shared by both verify buttons — verifies just the one OTP that was
+  // submitted (the API accepts emailOtp and/or phoneOtp independently),
+  // and only routes/creates a session once the response says both are done.
+  const verifyOne = async (type: 'email' | 'phone') => {
+    const code = (type === 'email' ? emailOtp : phoneOtp).join("")
+    if (code.length !== 6) {
+      setErrors(prev => ({ ...prev, [type]: `Please enter the complete 6-digit ${type} code` }))
       return
     }
- 
-    setIsLoading(true)
-    setErrors({ email: "", phone: "" })
- 
+
+    const setLoading = type === 'email' ? setEmailLoading : setPhoneLoading
+    setLoading(true)
+    setErrors(prev => ({ ...prev, [type]: "" }))
+
     try {
-      // Verify both email and phone in single request
       const response = await fetch("/api/customer/auth/verify-otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          email: email,
-          phone: phone,
-          emailOtp: emailCode,
-          phoneOtp: phoneCode,
+          email,
+          phone,
+          ...(type === 'email' ? { emailOtp: code } : { phoneOtp: code }),
         }),
       })
- 
+
       const data = await response.json()
- 
+
       if (!response.ok) {
-        // Handle specific field errors if provided
-        if (data.data?.errors) {
-          setErrors({
-            email: data.data.errors.email || "",
-            phone: data.data.errors.phone || "",
-          })
-          throw new Error(Object.values(data.data.errors).join(", "))
-        }
-        throw new Error(data.error || "Verification failed")
+        // Only set the error for the field that was actually submitted —
+        // never touch the other field's error/state.
+        const fieldError = data.data?.errors?.[type] || data.error || "Verification failed"
+        setErrors(prev => ({ ...prev, [type]: fieldError }))
+        toast({ title: "Verification failed", description: fieldError, variant: "destructive" })
+        return
       }
- 
-      setVerificationStatus({ email: true, phone: true })
-      if (data.data?.requiresApproval) {
-        toast({
-          title: "Verification successful!",
-          description: "Your account is pending admin approval. You'll receive an email once approved.",
-        })
-        setTimeout(() => {
-          router.push(`/${data.data.role}/auth/pending-approval?email=${encodeURIComponent(email!)}`)
-        }, 1500)
-      } else {
-        // Fetch authoritative user from server and set in auth state
-        const meRes = await fetch("/api/customer/auth/me", { credentials: "include" })
-        if (meRes.ok) {
-          const meData = await meRes.json()
-          if (meData.success && meData.data?.user) {
-            setNewUser({
-              id:            String(meData.data.user.id),
-              name:          meData.data.user.full_name,
-              email:         meData.data.user.email,
-              phone:         meData.data.user.phone,
-              avatar:        meData.data.user.profile_image,
-              role:          meData.data.user.role,
-              isVerified:    true,
-              phoneVerified: true,
-            })
-          }
-        }
-        toast({
-          title: "Verification successful!",
-          description: "Both email and phone have been verified.",
-        })
-        setTimeout(() => {
-          router.push(`/customer/dashboard?userId=${data.data.userId}`)
-        }, 1500)
-      }
-    } catch (error: any) {
-      const errorMessage = error.message || "Verification failed"
-      
-      if (errorMessage.includes("Email")) {
-        setErrors(prev => ({ ...prev, email: errorMessage }))
-      } else if (errorMessage.includes("Phone")) {
-        setErrors(prev => ({ ...prev, phone: errorMessage }))
-      } else {
-        setErrors({ email: errorMessage, phone: errorMessage })
-      }
- 
+
+      setVerificationStatus(prev => ({ ...prev, [type]: true }))
       toast({
-        title: "Verification failed",
-        description: errorMessage,
-        variant: "destructive",
+        title: `${type === 'email' ? 'Email' : 'Phone'} verified!`,
+        description: data.data?.bothVerified
+          ? "Both email and phone have been verified."
+          : `Your ${type} has been verified. Verify your ${type === 'email' ? 'phone' : 'email'} too to continue.`,
       })
+
+      if (data.data?.bothVerified) {
+        if (data.data?.requiresApproval) {
+          toast({
+            title: "Verification successful!",
+            description: "Your account is pending admin approval. You'll receive an email once approved.",
+          })
+          setTimeout(() => {
+            router.push(`/${data.data.role}/auth/pending-approval?email=${encodeURIComponent(email!)}`)
+          }, 1500)
+        } else {
+          // Fetch authoritative user from server and set in auth state
+          const meRes = await fetch("/api/customer/auth/me", { credentials: "include" })
+          if (meRes.ok) {
+            const meData = await meRes.json()
+            if (meData.success && meData.data?.user) {
+              setNewUser({
+                id:            String(meData.data.user.id),
+                name:          meData.data.user.full_name,
+                email:         meData.data.user.email,
+                phone:         meData.data.user.phone,
+                avatar:        meData.data.user.profile_image,
+                role:          meData.data.user.role,
+                isVerified:    true,
+                phoneVerified: true,
+              })
+            }
+          }
+          setTimeout(() => {
+            router.push(`/customer/dashboard?userId=${data.data.userId}`)
+          }, 1500)
+        }
+      }
+    } catch {
+      const fieldError = "Something went wrong. Please try again."
+      setErrors(prev => ({ ...prev, [type]: fieldError }))
+      toast({ title: "Verification failed", description: fieldError, variant: "destructive" })
     } finally {
-      setIsLoading(false)
+      setLoading(false)
     }
   }
  
@@ -234,13 +227,14 @@ function PageContent() {
         description: `A new verification code has been sent to your ${type}.`,
       })
  
-      setCountdown(60)
-      setCanResend(false)
-      
       if (type === 'email') {
+        setEmailCountdown(60)
+        setCanResendEmail(false)
         setEmailOtp(["", "", "", "", "", ""])
         emailInputRefs.current[0]?.focus()
       } else {
+        setPhoneCountdown(60)
+        setCanResendPhone(false)
         setPhoneOtp(["", "", "", "", "", ""])
         phoneInputRefs.current[0]?.focus()
       }
@@ -322,7 +316,7 @@ function PageContent() {
                       className={`w-10 h-10 text-center text-lg font-semibold ${
                         verificationStatus.email ? 'border-green-500 bg-green-50 dark:bg-green-900/20' : ''
                       }`}
-                      disabled={isLoading || verificationStatus.email}
+                      disabled={emailLoading || verificationStatus.email}
                     />
                   ))}
                 </div>
@@ -334,10 +328,24 @@ function PageContent() {
                   </p>
                 )}
               </div>
- 
-              {!canResend ? (
+
+              {!verificationStatus.email && (
+                <Button
+                  onClick={() => verifyOne('email')}
+                  className="w-full"
+                  disabled={emailLoading || emailOtp.some(digit => digit === "")}
+                >
+                  {emailLoading ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verifying...</>
+                  ) : (
+                    "Verify Email"
+                  )}
+                </Button>
+              )}
+
+              {!canResendEmail ? (
                 <p className="text-xs text-muted-foreground text-center">
-                  Resend in <span className="font-semibold text-primary">{countdown}s</span>
+                  Resend in <span className="font-semibold text-primary">{emailCountdown}s</span>
                 </p>
               ) : (
                 <Button
@@ -379,7 +387,7 @@ function PageContent() {
                       className={`w-10 h-10 text-center text-lg font-semibold ${
                         verificationStatus.phone ? 'border-green-500 bg-green-50 dark:bg-green-900/20' : ''
                       }`}
-                      disabled={isLoading || verificationStatus.phone}
+                      disabled={phoneLoading || verificationStatus.phone}
                     />
                   ))}
                 </div>
@@ -391,10 +399,24 @@ function PageContent() {
                   </p>
                 )}
               </div>
- 
-              {!canResend ? (
+
+              {!verificationStatus.phone && (
+                <Button
+                  onClick={() => verifyOne('phone')}
+                  className="w-full"
+                  disabled={phoneLoading || phoneOtp.some(digit => digit === "")}
+                >
+                  {phoneLoading ? (
+                    <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verifying...</>
+                  ) : (
+                    "Verify Phone"
+                  )}
+                </Button>
+              )}
+
+              {!canResendPhone ? (
                 <p className="text-xs text-muted-foreground text-center">
-                  Resend in <span className="font-semibold text-primary">{countdown}s</span>
+                  Resend in <span className="font-semibold text-primary">{phoneCountdown}s</span>
                 </p>
               ) : (
                 <Button
@@ -408,27 +430,7 @@ function PageContent() {
               )}
             </div>
           </div>
- 
-          <Button
-            onClick={handleVerify}
-            className="w-full mt-6 bg-primary hover:bg-primary/90"
-            disabled={
-              isLoading ||
-              emailOtp.some(digit => digit === "") ||
-              phoneOtp.some(digit => digit === "") ||
-              (verificationStatus.email && verificationStatus.phone)
-            }
-          >
-            {isLoading ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                Verifying...
-              </>
-            ) : (
-              "Verify Both Codes"
-            )}
-          </Button>
- 
+
           <div className="mt-6 pt-4 border-t text-center text-sm text-muted-foreground">
             <p>
               Wrong email or phone?{" "}

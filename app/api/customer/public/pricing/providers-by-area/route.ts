@@ -5,6 +5,7 @@ import {
   errorResponse,
   serverErrorResponse,
 } from '@/lib/api-response'
+import { PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL } from '@/lib/subscription'
 
 // GET /api/customer/public/pricing/providers-by-area
 // Public — no auth required
@@ -57,18 +58,20 @@ export async function GET(req: NextRequest) {
            JOIN provider_service_areas psa ON psa.provider_id = lp.id
            WHERE lp.status = 'active'
              AND lp.is_verified = TRUE
+             AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}
              AND psa.is_active = TRUE
              AND psa.postal_code = $1
            ORDER BY lp.rating DESC, lp.business_name ASC`
         : `SELECT
-             id, business_name, city, postal_code, rating,
-             services_offered, contact_person_name, contact_person_phone,
-             address_line1, landmark
-           FROM laundry_profiles
-           WHERE status = 'active'
-             AND is_verified = TRUE
-             AND city ILIKE $1
-           ORDER BY rating DESC, business_name ASC`,
+             lp.id, lp.business_name, lp.city, lp.postal_code, lp.rating,
+             lp.services_offered, lp.contact_person_name, lp.contact_person_phone,
+             lp.address_line1, lp.landmark
+           FROM laundry_profiles lp
+           WHERE lp.status = 'active'
+             AND lp.is_verified = TRUE
+             AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}
+             AND lp.city ILIKE $1
+           ORDER BY lp.rating DESC, lp.business_name ASC`,
       [pincode ?? `%${city}%`]
     )
 

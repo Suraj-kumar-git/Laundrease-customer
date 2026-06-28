@@ -9,6 +9,7 @@
 
 import { NextRequest } from 'next/server'
 import { query, queryOne } from '@/lib/db'
+import { resolveProfileImageUrl } from '@/lib/s3'
 import { successResponse, serverErrorResponse } from '@/lib/api-response'
 
 // Haversine distance in km (SQL approximation — good enough for city-level sorting)
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
     // ---- 1. Providers --------------------------------------------------
     let providersRes
     if (hasLocation) {
-      // Location-aware: sort by distance, within ~15km radius
+      // Location-aware: sort by distance, within ~8km radius
       const distExpr = HAVERSINE_EXPR(1, 2)
       providersRes = await query(
         `SELECT
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
            AND lp.is_verified = TRUE
            AND lp.latitude IS NOT NULL
            AND lp.longitude IS NOT NULL
-           AND ${distExpr} <= 15
+           AND ${distExpr} <= 8
          ORDER BY distance_km ASC, lp.rating DESC
          LIMIT $3`,
         [lat, lng, limit]
@@ -119,18 +120,37 @@ export async function GET(req: NextRequest) {
        LIMIT 7`
     )
 
+    // ---- 4. Platform settings / social links -------------------------
+    const configRows = await query(
+      `SELECT key, value FROM platform_config
+       WHERE key IN ('platform_name','support_email','support_phone','business_address',
+                     'social_instagram','social_facebook','social_twitter',
+                     'app_store_url','play_store_url')`
+    )
+    const config: Record<string, any> = {}
+    for (const row of configRows.rows) {
+      config[row.key] = row.value
+    }
+
+    const providers = await Promise.all(providersRes.rows.map(async r => ({
+      id:           r.id,
+      name:         r.business_name,
+      city:         r.city,
+      rating:       parseFloat(r.rating) || 0,
+      rating_count: r.rating_count || 0,
+      image:        await resolveProfileImageUrl(r.provider_image),
+      min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
+      distance_km:  r.distance_km  ? parseFloat(r.distance_km)  : null,
+      postal_code:  r.postal_code,
+    })))
+
+    const testimonials = await Promise.all(testimonialsRes.rows.map(async t => ({
+      ...t,
+      avatar_url: await resolveProfileImageUrl(t.avatar_url),
+    })))
+
     return successResponse({
-      providers: providersRes.rows.map(r => ({
-        id:           r.id,
-        name:         r.business_name,
-        city:         r.city,
-        rating:       parseFloat(r.rating) || 0,
-        rating_count: r.rating_count || 0,
-        image:        r.provider_image ?? null,
-        min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
-        distance_km:  r.distance_km  ? parseFloat(r.distance_km)  : null,
-        postal_code:  r.postal_code,
-      })),
+      providers,
       location_used: hasLocation,
       stats: {
         total_users:    parseInt(statsRow?.total_users    ?? '0'),
@@ -138,7 +158,20 @@ export async function GET(req: NextRequest) {
         success_rate:   parseFloat(statsRow?.success_rate  ?? '100'),
         partner_count:  parseInt(statsRow?.partner_count  ?? '0'),
       },
-      testimonials: testimonialsRes.rows,
+      testimonials,
+      platform: {
+        name:         config.platform_name || 'Laundrease',
+        supportEmail: config.support_email || null,
+        supportPhone: config.support_phone || null,
+        address:      config.business_address || null,
+        social: {
+          instagram: config.social_instagram || null,
+          facebook:  config.social_facebook  || null,
+          twitter:   config.social_twitter   || null,
+          appStore:  config.app_store_url    || null,
+          playStore: config.play_store_url   || null,
+        },
+      },
     })
   } catch (error) {
     console.error('[GET /api/customer/public/home-data]', error)

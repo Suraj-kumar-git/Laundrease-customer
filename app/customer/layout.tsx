@@ -2,12 +2,14 @@ import type React from "react"
 import { Inter } from "next/font/google"
 import Link from "next/link"
 import Image from "next/image"
-import { Bell, Menu, Search, ShoppingCart } from "lucide-react"
+import { Bell, Menu, Search, ShoppingCart, MapPin } from "lucide-react"
+import { query } from "@/lib/db"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider } from "@/components/auth-provider"
+import { CartProvider } from "@/components/cart-provider"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
 import { Toaster } from "@/components/ui/toaster"
@@ -41,14 +43,85 @@ const Logo = ({ logoUrl, className = "" }: { logoUrl?: string; className?: strin
   )
 }
 
-export default function RootLayout({
+async function getFooterConfig() {
+  try {
+    const { rows } = await query(
+      `SELECT key, value FROM platform_config
+       WHERE key IN ('social_instagram', 'social_facebook', 'social_twitter', 'business_address', 'app_store_url', 'play_store_url')`
+    )
+    const config: Record<string, string | null> = {}
+    for (const row of rows) config[row.key] = row.value
+
+    return {
+      social: {
+        instagram: config.social_instagram || 'https://instagram.com/laundrease.in',
+        facebook:  config.social_facebook  || 'https://www.facebook.com/laundreasein',
+        x:         config.social_twitter   || 'https://x.com/laundreasein',
+      },
+      address: config.business_address || null,
+      // Admin-configured, no fallback — only show a badge once an admin
+      // has actually set a real store listing URL.
+      appStoreUrl:  config.app_store_url  || null,
+      playStoreUrl: config.play_store_url || null,
+    }
+  } catch (error) {
+    console.error('[customer/layout] Failed to load footer config:', error)
+    return {
+      social: {
+        instagram: 'https://instagram.com/laundrease.in',
+        facebook:  'https://www.facebook.com/laundreasein',
+        x:         'https://x.com/laundreasein',
+      },
+      address: null,
+      appStoreUrl:  null,
+      playStoreUrl: null,
+    }
+  }
+}
+
+// Branded store badges (App Store / Google Play look-alikes) — drawn as inline
+// SVG rather than shipped as image assets, so they inherit the footer's
+// light/dark border color and don't need a separate logo file.
+const GooglePlayBadge = () => (
+  <span className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-foreground transition-colors hover:bg-muted">
+    <svg viewBox="0 0 100 100" className="h-6 w-6 shrink-0" aria-hidden="true">
+      {/* Left body */}
+      <path fill="#00C2FF" d="M14 8 14 92 56 50Z" />
+      {/* Top-right facet */}
+      <path fill="#3BDC7E" d="M14 8 67 38 56 50Z" />
+      {/* Bottom-right facet */}
+      <path fill="#FF5C5C" d="M14 92 67 62 56 50Z" />
+      {/* Far-right tip */}
+      <path fill="#FFE24A" d="M67 38 90 50 67 62 56 50Z" />
+    </svg>
+    <span className="text-left leading-tight">
+      <span className="block text-[10px] text-muted-foreground">GET IT ON</span>
+      <span className="block text-base font-semibold">Google Play</span>
+    </span>
+  </span>
+)
+
+const AppStoreBadge = () => (
+  <span className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-foreground transition-colors hover:bg-muted">
+    <svg viewBox="0 0 384 512" className="h-6 w-6 shrink-0 fill-current" aria-hidden="true">
+      <path d="M318.7 268c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 140.4 4 184.8 4 275.5q0 40.5 14.8 83.2c13.2 36.7 60.8 126.8 110.4 125.2 26.2-.6 44.7-18.6 78.8-18.6 33.1 0 50.2 18.6 79.4 18.6 50.1-.7 93.3-82.4 105.9-119.2-67.5-31.8-74.6-93.4-74.6-96.7zM255.7 81.5C272.1 62 282.7 35 279.8 8c-24.6 1-54.1 16.4-71 35.9-15.2 17.3-28.4 44.8-24.9 71.2 26.1 2 52.8-13.3 71.8-33.6z" />
+    </svg>
+    <span className="text-left leading-tight">
+      <span className="block text-[10px] text-muted-foreground">Download on the</span>
+      <span className="block text-base font-semibold">App Store</span>
+    </span>
+  </span>
+)
+
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
   // In the future, you can fetch logoUrl from an API here
   // const logoUrl = await fetchLogoFromApi()
-  
+  const { social, address, appStoreUrl, playStoreUrl } = await getFooterConfig()
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={inter.className}>
@@ -63,6 +136,7 @@ export default function RootLayout({
         /> */}
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <AuthProvider>
+            <CartProvider>
             <div className="flex min-h-screen flex-col">
               {/* HeaderWithCart is a client component that manages the CartSheet state */}
             <HeaderWithCart />
@@ -73,9 +147,12 @@ export default function RootLayout({
                     <Link href="/customer" className="flex items-center gap-2">
                       <Logo />
                     </Link>
-                    <div className="flex gap-4">
+                    <div className="flex flex-wrap items-center gap-4">
                       <Link
-                        href="https://x.com/laundreasein"
+                        href={social.x}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="X (formerly Twitter)"
                         className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                       >
                         <svg
@@ -83,17 +160,16 @@ export default function RootLayout({
                           width="20"
                           height="20"
                           viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
+                          fill="currentColor"
                         >
-                          <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z"></path>
+                          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
                         </svg>
                       </Link>
                       <Link
-                        href="https://www.facebook.com/laundreasein"
+                        href={social.facebook}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Facebook"
                         className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                       >
                         <svg
@@ -111,7 +187,10 @@ export default function RootLayout({
                         </svg>
                       </Link>
                       <Link
-                        href="https://instagram.com/laundrease.in"
+                        href={social.instagram}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Instagram"
                         className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                       >
                         <svg
@@ -130,9 +209,19 @@ export default function RootLayout({
                           <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
                         </svg>
                       </Link>
+                      {appStoreUrl && (
+                        <Link href={appStoreUrl} target="_blank" rel="noopener noreferrer" aria-label="Download on the App Store">
+                          <AppStoreBadge />
+                        </Link>
+                      )}
+                      {playStoreUrl && (
+                        <Link href={playStoreUrl} target="_blank" rel="noopener noreferrer" aria-label="Get it on Google Play">
+                          <GooglePlayBadge />
+                        </Link>
+                      )}
                     </div>
                   </div>
-                  <div className="grid gap-8 md:grid-cols-4">
+                  <div className={`grid gap-8 md:grid-cols-2 ${address ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
                     <div>
                       <h3 className="mb-4 text-lg font-bold">Company</h3>
                       <ul className="space-y-2">
@@ -200,6 +289,15 @@ export default function RootLayout({
                       </p>
                       <NewsletterForm />
                     </div>
+                    {address && (
+                      <div>
+                        <h3 className="mb-4 text-lg font-bold">Address</h3>
+                        <p className="flex items-start gap-2 text-sm text-muted-foreground">
+                          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                          <span>{address}</span>
+                        </p>
+                      </div>
+                    )}
                   </div>
                   <div className="mt-12 border-t border-border pt-8 text-center text-sm text-muted-foreground">
                     <p>© 2026 Laundrease. All rights reserved.</p>
@@ -208,6 +306,7 @@ export default function RootLayout({
               </footer>
             </div>
             <Toaster />
+            </CartProvider>
           </AuthProvider>
         </ThemeProvider>
       </body>

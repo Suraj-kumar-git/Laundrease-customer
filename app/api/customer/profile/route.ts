@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
 import { hashPassword, verifyPassword } from '@/lib/auth'
+import { resolveProfileImageUrl } from '@/lib/s3'
 import {
   successResponse,
   errorResponse,
@@ -40,7 +41,7 @@ export async function GET(req: NextRequest) {
       full_name: row.full_name,
       email: row.email,
       phone: row.phone,
-      profile_image: row.profile_image,
+      profile_image: await resolveProfileImageUrl(row.profile_image),
       email_verified: row.email_verified,
       phone_verified: row.phone_verified,
       created_at: row.created_at,
@@ -77,8 +78,22 @@ export async function PUT(req: NextRequest) {
   if (Object.keys(errors).length > 0) return validationError(errors)
 
   try {
+    const current = await query(
+      `SELECT phone, phone_verified FROM users WHERE id = $1 AND deleted_at IS NULL`,
+      [userId]
+    )
+    if (current.rowCount === 0) return errorResponse('User not found', 404)
+    const { phone: currentPhone, phone_verified: phoneVerified } = current.rows[0]
+
+    // A verified phone number can't be changed in-place (mirrors the old
+    // email-lock behaviour, swapped onto phone now that email changes go
+    // through their own OTP-verified flow).
+    if (phone && phoneVerified && phone !== currentPhone) {
+      return errorResponse('Your phone number is verified and cannot be changed here. Contact support if you need to update it.', 400)
+    }
+
     // Check phone uniqueness if being changed
-    if (phone) {
+    if (phone && phone !== currentPhone) {
       const existing = await query(
         `SELECT id FROM users WHERE phone = $1 AND id != $2 AND deleted_at IS NULL`,
         [phone, userId]
@@ -92,7 +107,7 @@ export async function PUT(req: NextRequest) {
       [full_name, phone || null, userId]
     )
 
-    return successResponse({ updated: true, full_name, phone })
+    return successResponse({ updated: true, full_name, phone: phone || currentPhone })
   } catch (error) {
     console.error('[PUT /api/customer/profile]', error)
     return serverErrorResponse('Failed to update profile')
