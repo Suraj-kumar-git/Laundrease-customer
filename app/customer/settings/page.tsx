@@ -291,7 +291,7 @@ function PrivacySection() {
       })}
       <p className="text-xs text-muted-foreground">
         Granular privacy controls coming soon. Current defaults follow our{' '}
-        <a href="/privacy-policy" className="text-primary hover:underline">Privacy Policy</a>.
+        <a href="/customer/privacy-policy" className="text-primary hover:underline">Privacy Policy</a>.
       </p>
     </div>
   )

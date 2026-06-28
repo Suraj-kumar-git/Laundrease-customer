@@ -33,7 +33,7 @@ export default async function TermsOfServicePage() {
       doc={doc}
       breadcrumbLabel="Terms of Service"
       relatedLabel="Privacy Policy"
-      relatedHref="/privacy-policy"
+      relatedHref="/customer/privacy-policy"
     />
   )
 }
