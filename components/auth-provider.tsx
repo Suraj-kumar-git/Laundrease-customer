@@ -89,6 +89,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // visible explanation.
   const clearAuthState = useCallback(() => {
     localStorage.removeItem("user")
+    // Also drop the cart-provider's "already synced this guest cart" marker —
+    // otherwise a different user logging in on this browser (or this user
+    // logging back in as a genuine guest later) would be treated as already
+    // synced and their pending local cart would never get pushed to the server.
+    localStorage.removeItem("laundrease_cart_synced_user_v1")
     setUser(null)
   }, [])
 

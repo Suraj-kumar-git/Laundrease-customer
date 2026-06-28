@@ -59,6 +59,7 @@ const STATUS_CONFIG: Record<string, {
   delivered:        { label: 'Delivered',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40 dark:text-green-400',    icon: CheckCircle },
   completed:        { label: 'Completed',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40 dark:text-green-400',    icon: CheckCircle },
   cancelled:        { label: 'Cancelled',        color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40 dark:text-red-400',          icon: XCircle },
+  failed:           { label: 'Order Failed',     color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40 dark:text-red-400',          icon: XCircle },
   // returned:         { label: 'Returned',         color: 'text-orange-700',  bg: 'bg-orange-100 dark:bg-orange-950/40 dark:text-orange-400', icon: Package },
 }
 
@@ -72,6 +73,7 @@ const STATUS_FILTERS = [
   { value: 'delivered',   label: 'Delivered' },
   // { value: 'completed',   label: 'Completed' },
   { value: 'cancelled',   label: 'Cancelled' },
+  { value: 'failed',      label: 'Order Failed' },
 ]
 
 function formatINR(n: number) {

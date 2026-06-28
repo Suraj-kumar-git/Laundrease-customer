@@ -44,11 +44,14 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Per-user usage check
+    // Per-user usage check — a redemption tied to a failed/cancelled order
+    // never actually consumed the coupon, so it shouldn't count.
     if (c.usage_limit_per_user) {
       const usedRes = await query(
-        `SELECT COUNT(*)::int AS n FROM coupon_redemptions
-         WHERE coupon_code = $1 AND user_id = $2`,
+        `SELECT COUNT(*)::int AS n FROM coupon_redemptions cr
+         LEFT JOIN orders o ON o.id = cr.order_id
+         WHERE cr.coupon_code = $1 AND cr.user_id = $2
+           AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))`,
         [c.code, userId]
       )
       if (usedRes.rows[0].n >= parseInt(c.usage_limit_per_user)) {
@@ -56,13 +59,17 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // BUG 2 FIX: first_order_only — check against actual order history
+    // BUG 2 FIX: first_order_only — check against actual order history.
+    // Orders still awaiting online-payment confirmation (status='pending',
+    // payment_status not yet 'paid') aren't "placed" yet — same definition
+    // used by the dashboard and orders-list routes — so they don't count.
     if (c.first_order_only) {
       const historyRes = await query(
         `SELECT COUNT(*)::int AS n
          FROM orders
          WHERE customer_id = $1
-           AND status NOT IN ('cancelled')`,
+           AND status NOT IN ('cancelled', 'failed')
+           AND (payment_method LIKE '%cod%' OR payment_status = 'paid')`,
         [userId]
       )
       if (historyRes.rows[0].n > 0) {
@@ -76,7 +83,10 @@ export async function POST(req: NextRequest) {
     // Global usage limit
     if (c.usage_limit_global) {
       const globalRes = await query(
-        `SELECT COUNT(*)::int AS n FROM coupon_redemptions WHERE coupon_code = $1`,
+        `SELECT COUNT(*)::int AS n FROM coupon_redemptions cr
+         LEFT JOIN orders o ON o.id = cr.order_id
+         WHERE cr.coupon_code = $1
+           AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))`,
         [c.code]
       )
       if (globalRes.rows[0].n >= parseInt(c.usage_limit_global)) {

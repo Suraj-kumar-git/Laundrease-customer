@@ -10,6 +10,24 @@
 import type { CartLineItem } from '@/types/pricing'
 
 export const CART_STORAGE_KEY = 'laundrease_cart_v1'
+// Tracks which user id the guest→server push has already run for. Persisted
+// (not just an in-memory ref) so a full page reload — e.g. landing back on
+// /customer/orders/payment/success after the PayU/Cashfree redirect — doesn't
+// look like a fresh "guest just logged in" transition and re-push whatever's
+// still sitting in CART_STORAGE_KEY (which lingers there as a header-badge
+// mirror of the in-progress checkout) back onto a server cart that the
+// gateway callback already correctly cleared.
+export const CART_SYNCED_USER_KEY = 'laundrease_cart_synced_user_v1'
+
+export function getSyncedUserId(): string | null {
+  if (typeof window === 'undefined') return null
+  return window.localStorage.getItem(CART_SYNCED_USER_KEY)
+}
+
+export function setSyncedUserId(userId: string) {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(CART_SYNCED_USER_KEY, userId)
+}
 
 export function makeCartItemKey(productTypeId: number, serviceId: number) {
   return `${productTypeId}_${serviceId}`

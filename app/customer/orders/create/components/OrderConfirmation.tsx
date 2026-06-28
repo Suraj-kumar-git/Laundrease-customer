@@ -320,7 +320,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
           transition={{ delay: 0.9 }}
           className="mt-5 text-center"
         >
-          <Button variant="outline" size="lg" onClick={() => router.push('/customer')} className="w-full md:w-auto">
+          <Button variant="outline" size="lg" onClick={() => router.push('/customer/dashboard')} className="w-full md:w-auto">
             <Home className="w-5 h-5 mr-2" />
             Go to Home
           </Button>

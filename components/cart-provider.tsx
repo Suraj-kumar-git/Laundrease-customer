@@ -25,7 +25,7 @@ import type { CartLineItem } from '@/types/pricing'
 import {
   loadCartFromStorage, saveCartToStorage, clearCartStorage,
   calcLineTotal, cartItemsToSelectedServices, serverItemsToCartLineItems,
-  makeCartItemKey,
+  makeCartItemKey, getSyncedUserId, setSyncedUserId,
 } from '@/lib/cart-store'
 
 interface CartContextType {
@@ -89,6 +89,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!user || !hydratedFromStorage.current) return
     if (syncedForUser.current === user.id) return
     syncedForUser.current = user.id
+    // Persisted check — a plain in-memory ref resets on every full page
+    // reload, which would otherwise look identical to a genuine guest→login
+    // transition and re-push stale local items onto the server cart.
+    if (getSyncedUserId() === user.id) return
+    setSyncedUserId(user.id)
 
     setSyncing(true)
     const sync = async () => {
@@ -190,6 +195,12 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         credentials: 'include',
         body: JSON.stringify({ selected_services: cartItemsToSelectedServices(items), is_express: isExpress }),
       })
+      // Items are now owned by the server-side checkout flow — clear the
+      // local guest-cart mirror so it can't resurrect a stale copy on the
+      // server (e.g. on a fresh page load after the PayU/Cashfree redirect
+      // remounts CartProvider, which re-pushes any leftover local items).
+      setItems([])
+      clearCartStorage()
       router.push('/customer/orders/create?resume=1')
     } finally {
       setPlacing(false)

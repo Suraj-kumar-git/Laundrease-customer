@@ -712,7 +712,12 @@ function formatAddress(a: string | null) {
 type InvoiceDocumentProps = DocumentProps & { data: InvoiceData };
 export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docProps }) => {
   const taxableAmount = data.taxableAmount ?? data.subtotal
-  const effectiveTaxRate = data.taxRate ?? 0
+  // taxRate is rarely passed in explicitly — derive it from the actual
+  // amounts when it isn't, so CGST/SGST show their real rate instead of
+  // defaulting to 0% while still charging real money.
+  const effectiveTaxRate = data.taxRate ?? (
+    taxableAmount > 0 ? Math.round((data.taxAmount / taxableAmount) * 100 * 100) / 100 : 0
+  )
   const cgstRate = data.cgstRate ?? effectiveTaxRate / 2
   const sgstRate = data.sgstRate ?? effectiveTaxRate / 2
   const cgstAmount = data.cgstAmount ?? (data.taxAmount > 0 ? data.taxAmount / 2 : 0)
@@ -1064,25 +1069,6 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docPr
                   </Text>
                 </View>
               ))}
-
-            <View style={s.totalsRow}>
-              <Text style={s.totalsLabel}>Taxable Amount</Text>
-              <Text style={s.totalsValue}>{fmt(taxableAmount)}</Text>
-            </View>
-
-            {cgstAmount > 0 && (
-              <View style={s.totalsRow}>
-                <Text style={s.totalsLabel}>CGST</Text>
-                <Text style={s.totalsValue}>{fmt(cgstAmount)}</Text>
-              </View>
-            )}
-
-            {sgstAmount > 0 && (
-              <View style={s.totalsRow}>
-                <Text style={s.totalsLabel}>SGST</Text>
-                <Text style={s.totalsValue}>{fmt(sgstAmount)}</Text>
-              </View>
-            )}
 
             <View style={s.totalsFinalRow}>
               <Text style={s.totalsFinalLabel}>Total Amount</Text>

@@ -79,7 +79,10 @@ export async function GET(req: NextRequest) {
       FROM orders o
       LEFT JOIN laundry_profiles lp ON lp.id = o.laundry_profile_id
       WHERE o.customer_id = $1
-        AND o.status NOT IN ('delivered', 'completed', 'cancelled', 'returned')
+        AND o.status NOT IN ('delivered', 'completed', 'cancelled', 'returned', 'failed')
+        -- Hide orders still awaiting online payment confirmation — see
+        -- app/api/customer/orders/route.ts for why.
+        AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')
       ORDER BY o.created_at DESC
       LIMIT 1
     `, [userId])
@@ -124,7 +127,8 @@ export async function GET(req: NextRequest) {
         SELECT EXISTS (
           SELECT 1
           FROM orders o
-          WHERE o.customer_id = $1 AND o.status != 'cancelled'
+          WHERE o.customer_id = $1 AND o.status NOT IN ('cancelled', 'failed')
+            AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')
         ) AS has_placed_order
       )
       SELECT
@@ -140,8 +144,10 @@ export async function GET(req: NextRequest) {
         COALESCE((
           SELECT COUNT(*)
           FROM coupon_redemptions cr
+          LEFT JOIN orders o ON o.id = cr.order_id
           WHERE cr.coupon_code = c.code
             AND cr.user_id = $1
+            AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))
         ), 0)::int AS times_used
       FROM coupons c
       CROSS JOIN user_order_status uos
@@ -164,7 +170,8 @@ export async function GET(req: NextRequest) {
           WHERE status IN ('delivered', 'completed')
         )::int                                              AS completed_orders,
         COUNT(*) FILTER (
-          WHERE status NOT IN ('delivered', 'completed', 'cancelled', 'returned')
+          WHERE status NOT IN ('delivered', 'completed', 'cancelled', 'returned', 'failed')
+            AND (payment_method LIKE '%cod%' OR payment_status = 'paid')
         )::int                                              AS active_orders,
         COALESCE(
           SUM(total_amount) FILTER (WHERE status IN ('delivered', 'completed')),

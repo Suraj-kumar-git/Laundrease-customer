@@ -68,12 +68,16 @@ export async function POST(req: NextRequest) {
 
     const gatewayResponse = JSON.stringify(Object.fromEntries(form.entries()))
 
-    let orderId: number | null = null
+    // The redirect URL needs the order's public_id (UUID) — orders.id is an
+    // internal BIGSERIAL the customer-facing routes don't accept.
+    let orderPublicId: string | null = null
 
     await transaction(async (client) => {
       const paymentResult = await client.query(
-        `SELECT p.id, p.order_id, p.status, p.amount, p.currency, p.gateway_config_id
+        `SELECT p.id, p.order_id, p.status, p.amount, p.currency, p.gateway_config_id,
+                o.public_id AS order_public_id
          FROM payments p
+         LEFT JOIN orders o ON o.id = p.order_id
          WHERE p.merchant_txn_id = $1
          LIMIT 1`,
         [txnid]
@@ -84,7 +88,7 @@ export async function POST(req: NextRequest) {
       }
 
       const payment = paymentResult.rows[0]
-      orderId = payment.order_id
+      orderPublicId = payment.order_public_id
       const isVerifiedSuccess = verification.verified
       const paymentStatus = isVerifiedSuccess ? 'completed' : 'failed'
       const completedAt = isVerifiedSuccess ? new Date() : null
@@ -143,11 +147,13 @@ export async function POST(req: NextRequest) {
         await client.query(
           `UPDATE orders
            SET payment_status = $1,
+               status = CASE WHEN $3 THEN status ELSE 'failed' END,
                updated_at = NOW()
            WHERE id = $2`,
           [
             isVerifiedSuccess ? 'paid' : 'failed',
             payment.order_id,
+            isVerifiedSuccess,
           ]
         )
 
@@ -165,10 +171,10 @@ export async function POST(req: NextRequest) {
     })
 
     if (verification.verified) {
-      return buildRedirect(`/customer/orders/payment/success?order_id=${orderId}`)
+      return buildRedirect(`/customer/orders/payment/success?order_id=${orderPublicId ?? ''}`)
     }
 
-    return buildRedirect(`/customer/orders/payment/failure?order_id=${orderId}&reason=verification_failed`)
+    return buildRedirect(`/customer/orders/payment/failure?order_id=${orderPublicId ?? ''}&reason=verification_failed`)
   } catch (error) {
     console.error('[POST /api/customer/payments/payu/success]', error)
     return NextResponse.redirect(

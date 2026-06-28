@@ -76,6 +76,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   delivered:        { label: 'Delivered',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 7 },
   completed:        { label: 'Completed',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 8 },
   cancelled:        { label: 'Cancelled',        color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
+  failed:           { label: 'Order Failed',     color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
   // returned:         { label: 'Returned',         color: 'text-orange-700',  bg: 'bg-orange-100 dark:bg-orange-950/40', step: -1 },
 }
 
@@ -679,7 +680,7 @@ export default function OrderDetailPage() {
   }
 
   const statusCfg = STATUS_CONFIG[order.status] ?? { label: order.status, color: 'text-foreground', bg: 'bg-muted', step: 0 }
-  const isCancelled = order.status === 'cancelled' || order.status === 'returned'
+  const isCancelled = order.status === 'cancelled' || order.status === 'returned' || order.status === 'failed'
   const currentStep = statusCfg.step
 
   // Group items by service category for display
@@ -1044,7 +1045,7 @@ export default function OrderDetailPage() {
           {/* Payment — shows split clearly for wallet+COD / wallet+UPI */}
           <Section title="Payment" icon={CreditCard}>
             {(() => {
-              const NOT_PAYABLE = new Set(['delivered', 'completed', 'cancelled', 'returned'])
+              const NOT_PAYABLE = new Set(['delivered', 'completed', 'cancelled', 'returned', 'failed'])
               const canPayOnline = order.payment_method?.toLowerCase().includes('cod')
                 && order.payment_status !== 'paid'
                 && !NOT_PAYABLE.has(order.status)
