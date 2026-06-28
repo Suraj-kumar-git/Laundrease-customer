@@ -85,7 +85,9 @@ function getRoleFromPath(pathname: string): string | null {
   const normalized = pathname.trim()
   if (
     normalized === `/customer` ||
-    normalized.startsWith(`/customer/`)
+    normalized.startsWith(`/customer/`) ||
+    normalized === `/api/customer` ||
+    normalized.startsWith(`/api/customer/`)
   ) {
     return 'customer';
   }
