@@ -123,8 +123,7 @@ export default async function RootLayout({
   const { social, address, appStoreUrl, playStoreUrl } = await getFooterConfig()
 
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+    <div className={inter.className}>
         {/* If using the below script then the loadScript is not required in checkoutStep.tsx file */}
         {/* <Script
           src="https://checkout.razorpay.com/v1/checkout.js"
@@ -309,7 +308,6 @@ export default async function RootLayout({
             </CartProvider>
           </AuthProvider>
         </ThemeProvider>
-      </body>
-    </html>
+    </div>
   )
 }
