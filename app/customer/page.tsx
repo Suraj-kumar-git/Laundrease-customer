@@ -323,12 +323,12 @@ function TestimonialCard({ t }: { t: Testimonial }) {
 
 // ---- Static data -------------------------------------------------------------
 const WHY_CARDS = [
-  { title: 'On-Time Guarantee',     description: "Pickup within 2 hours, delivery in 24 hours or it's free.",              icon: ShieldCheck,   gradient: 'from-violet-500 to-fuchsia-600', bg: 'bg-violet-50 dark:bg-violet-950/30',   text: 'text-violet-600'  },
-  { title: 'Hotel-Quality Clean',   description: 'Professional washing, ironing, and folding every time — guaranteed.',     icon: WashingMachine,gradient: 'from-emerald-500 to-teal-600',   bg: 'bg-emerald-50 dark:bg-emerald-950/30', text: 'text-emerald-600' },
-  { title: 'Transparent Pricing',   description: 'No hidden fees, no surprises — clear per-kg and per-item rates upfront.',  icon: Zap,           gradient: 'from-amber-500 to-orange-500',  bg: 'bg-amber-50 dark:bg-amber-950/30',    text: 'text-amber-600'   },
-  { title: 'Eco-Friendly Process',  description: 'Water-efficient cleaning, biodegradable detergents, reusable packaging.',  icon: Droplets,      gradient: 'from-teal-500 to-cyan-600',     bg: 'bg-teal-50 dark:bg-teal-950/30',     text: 'text-teal-600'    },
-  { title: 'Flexible Scheduling',   description: 'Book pickups from 9 AM to 9 PM, 7 days a week, even on holidays.',        icon: Calendar,      gradient: 'from-blue-500 to-indigo-600',   bg: 'bg-blue-50 dark:bg-blue-950/30',     text: 'text-blue-600'    },
-  { title: 'Express 8-Hour Service',description: 'Need clothes fast? Our express service cleans and delivers in 8 hours.',   icon: Flame,         gradient: 'from-rose-500 to-red-600',      bg: 'bg-rose-50 dark:bg-rose-950/30',     text: 'text-rose-600'    },
+  { title: 'On-Time Guarantee',     description: "Pickup within 2 hours, delivery in 24 hours or it's free.",              icon: ShieldCheck,    gradient: 'from-violet-500 to-fuchsia-600' },
+  { title: 'Hotel-Quality Clean',   description: 'Professional washing, ironing, and folding every time — guaranteed.',     icon: WashingMachine, gradient: 'from-emerald-500 to-teal-600'   },
+  { title: 'Transparent Pricing',   description: 'No hidden fees, no surprises — clear per-kg and per-item rates upfront.',  icon: Zap,            gradient: 'from-amber-500 to-orange-500'   },
+  { title: 'Eco-Friendly Process',  description: 'Water-efficient cleaning, biodegradable detergents, reusable packaging.',  icon: Droplets,       gradient: 'from-teal-500 to-cyan-600'      },
+  { title: 'Flexible Scheduling',   description: 'Book pickups from 9 AM to 9 PM, 7 days a week, even on holidays.',        icon: Calendar,       gradient: 'from-blue-500 to-indigo-600'    },
+  { title: 'Express 8-Hour Service',description: 'Need clothes fast? Our express service cleans and delivers in 8 hours.',   icon: Flame,          gradient: 'from-rose-500 to-red-600'       },
 ]
 
 const PROTECTION_POINTS = [
@@ -409,7 +409,7 @@ export default function HomePage() {
     <div className="flex min-h-screen flex-col overflow-x-hidden">
 
       {/* ---- HERO ---- */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-violet-600 via-fuchsia-600 to-orange-400">
+      <section className="relative overflow-hidden bg-gradient-to-br from-violet-600 via-fuchsia-600 to-orange-400 dark:from-violet-950 dark:via-fuchsia-950 dark:to-orange-900">
         <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
           {BUBBLES.map((b, i) => (
             <div key={i} className="absolute rounded-full bg-white/20"
@@ -556,19 +556,19 @@ export default function HomePage() {
       </section>
 
       {/* ---- ITEM PROTECTION / GARMENT GUARANTEE ---- */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-violet-950 to-fuchsia-950 py-20 text-white">
+      <section className="relative overflow-hidden bg-gradient-to-br from-violet-100 via-fuchsia-50 to-violet-50 py-20 text-foreground dark:from-slate-900 dark:via-violet-950 dark:to-fuchsia-950 dark:text-white">
         <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
           {BUBBLES.slice(0, 6).map((b, i) => (
-            <div key={i} className="absolute rounded-full bg-white/10"
+            <div key={i} className="absolute rounded-full bg-violet-600/10 dark:bg-white/10"
               style={{ width: `${b.w * 1.3}px`, height: `${b.h * 1.3}px`, top: `${b.top}%`, left: `${b.left}%`,
                 animation: `float ${b.dur + 3}s ease-in-out infinite`, animationDelay: `${b.delay}s` }} />
           ))}
         </div>
         <div className="container relative mx-auto px-6">
           <div className="mb-12 text-center">
-            <Badge className="mb-3 bg-white/10 text-white border-white/20 backdrop-blur-sm">Garment Guarantee</Badge>
+            <Badge className="mb-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0">Garment Guarantee</Badge>
             <h2 className="text-3xl font-bold tracking-tight md:text-4xl">Your Clothes Are Protected</h2>
-            <p className="mt-3 mx-auto max-w-xl text-white/70">
+            <p className="mt-3 mx-auto max-w-xl text-muted-foreground dark:text-white/70">
               If an item is damaged, lost, or stolen while in our care, you&apos;re covered — no fine print, no runaround.
             </p>
           </div>
@@ -576,12 +576,12 @@ export default function HomePage() {
             {PROTECTION_POINTS.map((p, i) => {
               const Icon = p.icon
               return (
-                <div key={i} className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-sm">
+                <div key={i} className="rounded-2xl border border-border/50 bg-card/80 p-6 backdrop-blur-sm dark:border-white/10 dark:bg-white/5">
                   <div className={cn('mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg', p.gradient)}>
                     <Icon className="h-6 w-6" />
                   </div>
-                  <h3 className="mb-2 text-base font-bold">{p.title}</h3>
-                  <p className="text-sm text-white/70 leading-relaxed">{p.description}</p>
+                  <h3 className="mb-2 text-base font-bold text-foreground dark:text-white">{p.title}</h3>
+                  <p className="text-sm text-muted-foreground dark:text-white/70 leading-relaxed">{p.description}</p>
                 </div>
               )
             })}
@@ -592,7 +592,7 @@ export default function HomePage() {
       {/* ---- SAVE MORE: WALLET / REFERRAL / LOYALTY ---- */}
       <section className="container mx-auto px-6 py-20">
         <div className="mb-10 text-center">
-          <Badge className="mb-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white border-0">Save More</Badge>
+          <Badge className="mb-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white border-0">Save More</Badge>
           <h2 className="text-3xl font-bold tracking-tight md:text-4xl">More Ways to Save</h2>
           <p className="mt-3 mx-auto max-w-xl text-muted-foreground">Wallet credits, referral rewards, and loyalty points — all built in.</p>
         </div>
@@ -600,15 +600,12 @@ export default function HomePage() {
           {REWARDS_CARDS.map((card, i) => {
             const Icon = card.icon
             return (
-              <div key={i} className="h-full rounded-2xl border border-border/50 bg-card overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                <div className={`h-1 bg-gradient-to-r ${card.gradient}`} />
-                <div className="p-6">
-                  <div className={cn('mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-md', card.gradient)}>
-                    <Icon className="h-6 w-6" />
-                  </div>
-                  <h3 className="mb-2 text-base font-bold text-foreground">{card.title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{card.description}</p>
+              <div key={i} className="h-full rounded-2xl border border-border/50 bg-card p-6 shadow-sm hover:shadow-md transition-shadow">
+                <div className={cn('mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-md', card.gradient)}>
+                  <Icon className="h-6 w-6" />
                 </div>
+                <h3 className="mb-2 text-base font-bold text-foreground">{card.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{card.description}</p>
               </div>
             )
           })}
@@ -641,15 +638,12 @@ export default function HomePage() {
           {WHY_CARDS.map((card, i) => {
             const Icon = card.icon
             return (
-              <div key={i} className="h-full rounded-2xl border border-border/50 bg-card overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                <div className={`h-1 bg-gradient-to-r ${card.gradient}`} />
-                <div className="p-6">
-                  <div className={cn('mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl', card.bg, card.text)}>
-                    <Icon className="h-6 w-6" />
-                  </div>
-                  <h3 className="mb-2 text-base font-bold text-foreground">{card.title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{card.description}</p>
+              <div key={i} className="h-full rounded-2xl border border-border/50 bg-card p-6 shadow-sm hover:shadow-md transition-shadow">
+                <div className={cn('mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-md', card.gradient)}>
+                  <Icon className="h-6 w-6" />
                 </div>
+                <h3 className="mb-2 text-base font-bold text-foreground">{card.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{card.description}</p>
               </div>
             )
           })}

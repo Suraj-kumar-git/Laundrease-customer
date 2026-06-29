@@ -1,9 +1,9 @@
 import type React from "react"
 import { Inter } from "next/font/google"
 import Link from "next/link"
-import Image from "next/image"
 import { Bell, Menu, Search, ShoppingCart, MapPin } from "lucide-react"
 import { query } from "@/lib/db"
+import { BrandLogo } from "@/components/brand-logo"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,22 +26,6 @@ export const metadata = {
   description: "Laundrease is an online platform that connects users with local laundry services for convenient pickup and delivery.",
 }
 
-// Logo component that can accept dynamic logo URL from API
-const Logo = ({ logoUrl, className = "" }: { logoUrl?: string; className?: string }) => {
-  // Default to local logo, but can be replaced with API URL
-  const finalLogoUrl = logoUrl || "/laundrease-logo.PNG" // or "/images/logo.png" depending on your structure
-  
-  return (
-    <Image
-      src={finalLogoUrl}
-      alt="Laundrease Logo"
-      width={180}
-      height={60}
-      className={`h-auto w-auto max-h-10 ${className}`}
-      priority
-    />
-  )
-}
 
 async function getFooterConfig() {
   try {
@@ -144,7 +128,7 @@ export default async function RootLayout({
                 <div className="container mx-auto px-4">
                   <div className="mb-8 flex flex-col items-center justify-between gap-4 md:flex-row">
                     <Link href="/customer" className="flex items-center gap-2">
-                      <Logo />
+                      <BrandLogo width={180} height={60} className="h-auto w-auto max-h-10" priority />
                     </Link>
                     <div className="flex flex-wrap items-center gap-4">
                       <Link
