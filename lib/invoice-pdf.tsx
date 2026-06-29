@@ -123,7 +123,10 @@ const GRAY3 = '#6b7280'
 const GRAY4 = '#e5e7eb'
 const GREEN = '#059669'
 const WHITE = '#ffffff'
-const logoUrl= `${process.env.NEXT_PUBLIC_CUSTOMER_URL}/laundrease-logo.PNG`
+// S3 first so branding can be updated without a redeploy; falls back to the
+// app's own bundled public asset if that env var isn't set.
+const logoUrl = process.env.NEXT_PUBLIC_S3_LOGO_URL
+  || `${process.env.NEXT_PUBLIC_CUSTOMER_URL}/laundrease-logo.PNG`
 
 const s = StyleSheet.create({
   logoImage: {
