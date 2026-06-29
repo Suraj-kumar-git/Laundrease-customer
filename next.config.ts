@@ -9,6 +9,12 @@ const ROLE = process.env.ROLE;
 const nextConfig: NextConfig = {
   reactStrictMode: true,
 
+  // Pages like /customer/about, /customer/careers, /customer/help-center
+  // fetch their own public API routes during static generation, which in
+  // turn hit the DB — on Render that round trip (cross-region Neon
+  // cold-start + self HTTP hop) can exceed Next's 60s default.
+  staticPageGenerationTimeout: 180,
+
   env: {
     ROLE: ROLE,
     NEXT_PUBLIC_ROLE: ROLE,
@@ -18,6 +24,7 @@ const nextConfig: NextConfig = {
     remotePatterns: [
       { protocol: 'https', hostname: 'laundrease.in' },
       { protocol: 'http', hostname: 'localhost' },
+      { protocol: 'https', hostname: '*.s3.ap-south-1.amazonaws.com' },
     ],
     formats: ['image/avif', 'image/webp'],
   },

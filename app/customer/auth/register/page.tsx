@@ -342,10 +342,10 @@ function PageContent() {
                     errors.agreeTerms ? "text-destructive" : "text-foreground"
                   )}>
                   I agree to the{" "}
-                  <Link href="/terms-of-service" className="text-primary underline underline-offset-2 hover:no-underline">
+                  <Link href="/customer/terms-of-service" className="text-primary underline underline-offset-2 hover:no-underline">
                     Terms of Service
                   </Link>{" "}and{" "}
-                  <Link href="/privacy-policy" className="text-primary underline underline-offset-2 hover:no-underline">
+                  <Link href="/customer/privacy-policy" className="text-primary underline underline-offset-2 hover:no-underline">
                     Privacy Policy
                   </Link>
                 </label>

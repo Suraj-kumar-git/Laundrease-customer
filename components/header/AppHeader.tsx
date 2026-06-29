@@ -17,7 +17,7 @@ import {
 import { useAuth } from '@/components/auth-provider'
 import { useCart } from '@/components/cart-provider'
 import { cn } from '@/lib/utils'
-import Image from "next/image"
+import { BrandLogo } from '@/components/brand-logo'
 import { ThemeToggle } from "@/components/theme-toggle"
 
 // ---- Types --------------------------------------------------
@@ -44,20 +44,6 @@ const NAV_ITEMS_NOT_AUTH: NavItem[] = [
   { href: '/customer/quick-pickup', label: 'Quick Pickup', icon: Truck, authRequired: false  },
   { href: '/customer/faq', label: 'FAQ', icon: HelpCircle, authRequired: false  },
 ]
-const Logo = ({ logoUrl, className = "" }: { logoUrl?: string; className?: string }) => {
-    // Default to local logo, but can be replaced with API URL
-    const finalLogoUrl = logoUrl || "/laundrease-logo.PNG"
-    return (
-        <Image
-        src={finalLogoUrl}
-        alt="Laundrease Logo"
-        width={180}
-        height={60}
-        className={`h-auto w-auto max-h-10 ${className}`}
-        priority
-        />
-    )
-}
 
 // ---- Remove import of Theme toggle to use the below one only for light or dark-------------------------------------------
 // function ThemeToggle() {
@@ -262,7 +248,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
         <div className="container mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
           {/* Logo */}
           <Link href={user ? '/customer/dashboard' : '/customer'} className="flex shrink-0 items-center gap-2">
-            <Logo />
+            <BrandLogo width={180} height={60} className="h-auto w-auto max-h-10" priority />
           </Link>
 
           {/* Desktop nav-items only when logged in */}
