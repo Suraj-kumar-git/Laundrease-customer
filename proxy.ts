@@ -145,7 +145,7 @@ export async function proxy(request: NextRequest) {
   }
   const pathRole = getRoleFromPath(pathname)
 
-  if (pathRole !== 'customer') {
+  if (pathRole && pathRole !== 'customer') {
     if (pathname.startsWith('/api')) {
       return NextResponse.json(
         { success: false, error: 'Not Found' },
