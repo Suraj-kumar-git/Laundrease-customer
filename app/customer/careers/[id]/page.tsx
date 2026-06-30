@@ -224,7 +224,7 @@ export default function JobDetailPage() {
   return (
     <FooterPageLayout
       breadcrumbs={[
-        { label: 'Careers', href: '/careers' },
+        { label: 'Careers', href: '/customer/careers' },
         { label: job.title },
       ]}
     >
