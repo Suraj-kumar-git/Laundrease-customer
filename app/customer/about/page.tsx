@@ -6,6 +6,7 @@ import {
   ArrowRight, Sparkles,
 } from 'lucide-react'
 import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
+import { GuestOnlyCta } from '@/components/common/guest-only-cta'
 import { ABOUT_US_FALLBACK } from '@/lib/footer-page-fallbacks'
 import type { PageContentBlock, CardItem, StatItem, HeroBody, TextBlockBody } from '@/types/footer-pages'
 
@@ -247,13 +248,7 @@ export default async function AboutUsPage() {
                 Join thousands of happy customers across Pune.
               </p>
             </div>
-            <Link
-              href="/customer/auth/register"
-              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-primary shadow-lg transition-all hover:-translate-y-0.5 hover:bg-white/90 hover:shadow-xl"
-            >
-              Get Started Free
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+            <GuestOnlyCta className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-primary shadow-lg transition-all hover:-translate-y-0.5 hover:bg-white/90 hover:shadow-xl" />
           </div>
         </PageSection>
       </div>
