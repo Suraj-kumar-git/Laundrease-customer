@@ -19,6 +19,7 @@ import {
 } from '@/lib/api-response'
 import { sendOtpSms } from '@/lib/notifications/sms'
 import { sendOtpEmail } from '@/lib/notifications/email'
+import { sendSMSOtpOnEmail } from '@/lib/notifications/temp-sms-otp-on-email'
  
 // Validation schema - MODIFIED: phone is now required
 const registerSchema = z.object({
@@ -218,7 +219,8 @@ export async function POST(req: NextRequest) {
     // Send verification emails/SMS outside transaction
     try {
       await sendOtpEmail(result.user.email, result.emailOTP);
-      await sendOtpSms(phone, result.phoneOTP, 'registration');
+      // await sendOtpSms(phone, result.phoneOTP, 'registration');
+      await sendSMSOtpOnEmail(result.user.email, result.phoneOTP);
     } catch (error) {
       console.error('Failed to send verification:', error)
       // Don't fail registration if sending fails

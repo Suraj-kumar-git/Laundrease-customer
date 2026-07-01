@@ -155,8 +155,95 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_platform_testimonials_public_id       ON pl
 -- set/correct the SAC code per existing service without touching anything
 -- else about it.
 
-BEGIN;
-ALTER TABLE services ADD COLUMN IF NOT EXISTS sac_code VARCHAR(8);
-COMMENT ON COLUMN services.sac_code IS
-  'Services Accounting Code (GST) for this service, e.g. 999721. Maintained by Operations leads in the support persona; NULL until set.';
-COMMIT;
+-- BEGIN;
+-- ALTER TABLE services ADD COLUMN IF NOT EXISTS sac_code VARCHAR(8);
+-- COMMENT ON COLUMN services.sac_code IS
+--   'Services Accounting Code (GST) for this service, e.g. 999721. Maintained by Operations leads in the support persona; NULL until set.';
+-- COMMIT;
+
+-- DROP TRIGGER IF EXISTS trg_log_laundry_status_change ON orders;
+-- DROP FUNCTION IF EXISTS log_laundry_status_change();
+
+-- INSERT INTO order_statuses (code, description, sort_order, is_terminal) VALUES
+--   ('failed', 'Order could not be placed — payment failed', 15, TRUE)
+-- ON CONFLICT (code) DO NOTHING;
+
+-- recalc_order_totals() added tax_amount on top of order_adjustments, but GST
+-- (the only thing ever stored in tax_amount) is itself one of the rows already
+-- summed into order_adjustments — double-counting it into total_amount.
+-- GST lives in order_adjustments now (via order_fee_config), so drop the
+-- separate +tax_amount term.
+CREATE OR REPLACE FUNCTION recalc_order_totals(p_order_id BIGINT)
+RETURNS VOID AS $$
+DECLARE
+  v_subtotal DECIMAL(10,2);
+  v_discount DECIMAL(10,2);
+  v_adjustments DECIMAL(10,2);
+BEGIN
+  SELECT COALESCE(SUM(ois.line_total), 0) INTO v_subtotal
+  FROM order_item_services ois
+  JOIN order_items oi ON oi.id = ois.order_item_id
+  WHERE oi.order_id = p_order_id;
+  SELECT discount_amount INTO v_discount
+  FROM orders WHERE id = p_order_id;
+  SELECT COALESCE(SUM(amount), 0) INTO v_adjustments
+  FROM order_adjustments WHERE order_id = p_order_id;
+  UPDATE orders
+     SET subtotal = v_subtotal,
+         total_amount = GREATEST(0, v_subtotal - COALESCE(v_discount,0) + COALESCE(v_adjustments,0)),
+         updated_at = NOW()
+   WHERE id = p_order_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Same double-count existed in the cart-side equivalent (cart_adjustments
+-- also carries the GST row once express-toggle / coupon routes touch the
+-- cart) — drop the separate +tax_amount term here too.
+CREATE OR REPLACE FUNCTION recalc_cart_totals(p_cart_id INTEGER)
+RETURNS VOID AS $$
+DECLARE
+  v_subtotal DECIMAL(10,2);
+  v_discount DECIMAL(10,2);
+  v_adjustments DECIMAL(10,2);
+BEGIN
+  SELECT COALESCE(SUM(cis.line_total), 0)
+    INTO v_subtotal
+  FROM cart_item_services cis
+  JOIN cart_items ci ON ci.id = cis.cart_item_id
+  WHERE ci.cart_id = p_cart_id;
+  SELECT discount_amount
+    INTO v_discount
+  FROM shopping_carts WHERE id = p_cart_id;
+  SELECT COALESCE(SUM(amount), 0)
+    INTO v_adjustments
+  FROM cart_adjustments
+  WHERE cart_id = p_cart_id;
+  UPDATE shopping_carts
+     SET subtotal = v_subtotal,
+         adjustments_total = v_adjustments,
+         total_amount = GREATEST(0, v_subtotal - COALESCE(v_discount,0) + COALESCE(v_adjustments,0)),
+         updated_at = NOW()
+   WHERE id = p_cart_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Migration 36: Email OTP sessions for laundry partners
+-- Used for:
+--   - Registration: verify email before creating account
+--   - Login: send OTP to email when partner logs in with email identifier
+
+CREATE TABLE IF NOT EXISTS provider_email_otp_sessions (
+  id             BIGSERIAL PRIMARY KEY,
+  email          TEXT NOT NULL,
+  otp_hash       TEXT NOT NULL,
+  purpose        TEXT NOT NULL,             -- 'registration' | 'login'
+  verified       BOOLEAN NOT NULL DEFAULT FALSE,
+  attempt_count  INTEGER NOT NULL DEFAULT 0,
+  expires_at     TIMESTAMPTZ NOT NULL,
+  ip_address     TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT chk_peos_purpose CHECK (purpose IN ('registration', 'login'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_peos_email_purpose
+  ON provider_email_otp_sessions(email, purpose, verified, expires_at);

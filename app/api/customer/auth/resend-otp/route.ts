@@ -8,6 +8,7 @@ import {
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { sendOtpEmail } from '@/lib/notifications/email'
 import { sendOtpSms } from '@/lib/notifications/sms'
+import { sendSMSOtpOnEmail } from '@/lib/notifications/temp-sms-otp-on-email'
 
 export async function POST(req: NextRequest) {
   try {
@@ -70,7 +71,8 @@ export async function POST(req: NextRequest) {
     if (type === 'email') {
       await sendOtpEmail(identifier, newOtp)
     } else {
-      await sendOtpSms(identifier, newOtp, 'signin')
+      // await sendOtpSms(identifier, newOtp, 'signin')
+      await sendSMSOtpOnEmail(identifier, newOtp)
     }
 
     return successResponse({
