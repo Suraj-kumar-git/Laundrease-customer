@@ -68,16 +68,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const hasCheckedOnce = useRef(false)
 
+  // The refresh-token endpoint rotates the refresh token on every call and
+  // treats any mismatch as token theft, wiping ALL of the user's sessions
+  // (see app/api/customer/auth/refresh-token/route.ts). checkAuth() re-runs
+  // on every pathname change AND a separate interval below also calls
+  // tryRefresh() — without this dedup, two refresh calls firing close
+  // together (fast navigation, the interval landing mid-navigation, etc.)
+  // would race: the first rotates the token, the second still holds the
+  // now-stale token and gets treated as theft, force-logging the user out
+  // for no real reason. Sharing a single in-flight promise guarantees only
+  // one actual POST to /refresh-token is ever in flight at a time.
+  const refreshInFlight = useRef<Promise<boolean> | null>(null)
+
   // Plain (non-logout-on-failure) refresh attempt — used internally by
   // checkAuth's retry-after-401 and the periodic silent refresh below.
   // Returns whether the access token was successfully rotated.
   const tryRefresh = useCallback(async (): Promise<boolean> => {
-    try {
-      const res = await fetch(`/api/${role}/auth/refresh-token`, { method: "POST", credentials: "include" })
-      return res.ok
-    } catch {
-      return false
-    }
+    if (refreshInFlight.current) return refreshInFlight.current
+
+    const promise = (async () => {
+      try {
+        const res = await fetch(`/api/${role}/auth/refresh-token`, { method: "POST", credentials: "include" })
+        return res.ok
+      } catch {
+        return false
+      } finally {
+        refreshInFlight.current = null
+      }
+    })()
+
+    refreshInFlight.current = promise
+    return promise
   }, [])
 
   // Immediately syncs the header + localStorage to "logged out". Any

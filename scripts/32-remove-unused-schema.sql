@@ -33,9 +33,6 @@ DROP TABLE IF EXISTS laundry_status_history   CASCADE;
 -- ---- Dead table: barcode-bagging companion table, never wired to an API ----
 DROP TABLE IF EXISTS bag_service_items        CASCADE;
 
--- ---- Dead table: notification-preferences backend built, never exposed ----
-DROP TABLE IF EXISTS customer_notification_preferences CASCADE;
-
 -- ---- Dead functions: orphaned promotions-engine entry points ----
 -- (their triggers were on promotion_redemptions, already dropped above)
 DROP FUNCTION IF EXISTS promo_apply_to_order(character varying, integer, integer);
