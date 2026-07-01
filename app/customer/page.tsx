@@ -12,6 +12,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/components/auth-provider'
 
 // ---- Types -------------------------------------------------------------------
 interface Provider {
@@ -376,6 +377,7 @@ function useLocation() {
 
 // ---- Page --------------------------------------------------------------------
 export default function HomePage() {
+  const { user } = useAuth()
   const { coords, denied, asking, request } = useLocation()
   const [data,    setData]    = useState<HomeData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -430,11 +432,13 @@ export default function HomePage() {
             </p>
 
             <div className="flex flex-col items-center justify-center gap-4 sm:flex-row md:justify-start">
-              <Link href="/customer/auth/register">
-                <Button size="lg" className="group bg-white text-violet-700 hover:bg-white/90 shadow-lg shadow-violet-900/30 px-8 transition-all duration-300 hover:scale-105 hover:shadow-xl">
-                  Get Started Free <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-300 group-hover:translate-x-1.5" />
-                </Button>
-              </Link>
+              {!user && (
+                <Link href="/customer/auth/register">
+                  <Button size="lg" className="group bg-white text-violet-700 hover:bg-white/90 shadow-lg shadow-violet-900/30 px-8 transition-all duration-300 hover:scale-105 hover:shadow-xl">
+                    Get Started Free <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-300 group-hover:translate-x-1.5" />
+                  </Button>
+                </Link>
+              )}
               <Link href="/customer/quick-pickup">
                 <Button size="lg" variant="outline" className="group border-white/40 text-white bg-white/10 hover:bg-white/20 px-8 backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-white/10">
                   Schedule a Quick Pickup <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-300 group-hover:translate-x-1.5" />
