@@ -171,6 +171,9 @@ function PageContent() {
             router.push(`/${data.data.role}/auth/pending-approval?email=${encodeURIComponent(email!)}`)
           }, 1500)
         } else {
+          // No longer need the registration draft — clear it so a future
+          // fresh registration doesn't inherit stale data.
+          try { sessionStorage.removeItem("reg_draft") } catch { /* ignore */ }
           // Fetch authoritative user from server and set in auth state
           const meRes = await fetch("/api/customer/auth/me", { credentials: "include" })
           if (meRes.ok) {
@@ -434,7 +437,10 @@ function PageContent() {
           <div className="mt-6 pt-4 border-t text-center text-sm text-muted-foreground">
             <p>
               Wrong email or phone?{" "}
-              <Link href="/customer/auth/register" className="text-primary hover:underline">
+              <Link
+                href={`/customer/auth/register?email=${encodeURIComponent(email || "")}&phone=${encodeURIComponent(phone || "")}`}
+                className="text-primary hover:underline"
+              >
                 Update it here
               </Link>
             </p>
