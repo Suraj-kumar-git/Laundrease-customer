@@ -49,7 +49,6 @@ const AUTH_ITEMS = [
     items: [
       { label: 'My Orders', href: '/customer/orders', icon: ShoppingBag },
       { label: 'My Addresses', href: '/customer/addresses', icon: MapPin },
-      { label: 'Wallet & Rewards', href: '/customer/wallet', icon: Wallet },
       { label: 'Refer & Earn', href: '/customer/refer-and-earn', icon: Gift },
     ],
   },

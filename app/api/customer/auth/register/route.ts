@@ -97,20 +97,69 @@ export async function POST(req: NextRequest) {
     const result = await transaction(async (client) => {
       // Check if email already exists
       const existingUser = await client.query(
-        'SELECT id FROM users WHERE email = $1',
+        `SELECT id, email_verified, phone_verified, phone FROM users WHERE email = $1`,
         [email.toLowerCase()]
       )
- 
+
       if (existingUser.rows.length > 0) {
-        throw new Error('EMAIL_EXISTS')
+        const existing = existingUser.rows[0]
+
+        // If the account is already verified, reject normally.
+        if (existing.email_verified || existing.phone_verified) {
+          throw new Error('EMAIL_EXISTS')
+        }
+
+        // Unverified account — the user came back to update their details.
+        // If the new phone is taken by a DIFFERENT unverified account, reject.
+        const phoneConflict = await client.query(
+          `SELECT id FROM users WHERE phone = $1 AND id != $2`,
+          [phone, existing.id]
+        )
+        if (phoneConflict.rows.length > 0) {
+          throw new Error('PHONE_EXISTS')
+        }
+
+        const passwordHash = await hashPassword(password)
+        const emailOTP    = generateOTP(6)
+        const phoneOTP    = generateOTP(6)
+        const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000)
+
+        await client.query(
+          `UPDATE users
+           SET full_name     = $1,
+               phone         = $2,
+               password_hash = $3,
+               metadata      = $4,
+               updated_at    = NOW()
+           WHERE id = $5`,
+          [
+            full_name,
+            phone,
+            passwordHash,
+            JSON.stringify({
+              email_otp:            emailOTP,
+              phone_otp:            phoneOTP,
+              email_otp_expires_at: otpExpiresAt.toISOString(),
+              phone_otp_expires_at: otpExpiresAt.toISOString(),
+            }),
+            existing.id,
+          ]
+        )
+
+        const updatedUser = await client.query(
+          `SELECT id, email, full_name, role_id FROM users WHERE id = $1`,
+          [existing.id]
+        )
+
+        return { user: updatedUser.rows[0], emailOTP, phoneOTP, role, initialStatus: 'active', isUpdate: true }
       }
- 
+
       // Check if phone already exists - REMOVED condition, phone is required now
       const existingPhone = await client.query(
         'SELECT id FROM users WHERE phone = $1',
         [phone]
       )
- 
+
       if (existingPhone.rows.length > 0) {
         throw new Error('PHONE_EXISTS')
       }
@@ -134,7 +183,6 @@ export async function POST(req: NextRequest) {
       const phoneOTP = generateOTP(6) // Always generate phone OTP now
       const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
  
-      // NEW: Determine initial status based on role
       const initialStatus = role === 'customer' ? 'active' : 'pending_approval'
  
       // Insert user
@@ -179,14 +227,14 @@ export async function POST(req: NextRequest) {
       }
       // For other roles, profiles will be created after admin approval + profile completion
  
-      return { user, emailOTP, phoneOTP, role, initialStatus }
+      return { user, emailOTP, phoneOTP, role, initialStatus, isUpdate: false }
     })
  
     // ---- Referral code processing (customer only) -------------------------
     // Runs AFTER transaction so customer_profiles row is guaranteed to exist.
     // Both operations are non-fatal — a bad referral code never blocks registration.
 
-    if (result.role === 'customer') {
+    if (result.role === 'customer' && !result.isUpdate) {
       // 1. Apply referral code if provided
       if (referral_code) {
         try {

@@ -109,7 +109,6 @@ function DesktopUserMenu({ user, onLogout }: { user: any; onLogout: () => void }
   const menuItems = [
     { icon: User,      label: 'My Profile',    href: `/customer/profile/${user?.id}` },
     { icon: Package,   label: 'My Orders',     href: '/customer/orders' },
-    { icon: Wallet,    label: 'Wallet',        href: '/customer/wallet' },
     { icon: Gift,      label: 'Refer & Earn',  href: '/customer/refer-and-earn' },
     { icon: MapPin,    label: 'Addresses',     href: '/customer/addresses' },
     { icon: Settings,  label: 'Settings',      href: '/customer/settings' },
@@ -224,7 +223,6 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
     // divider placeholder â€” handled by index
     { href: '/customer/addresses',    label: 'Addresses',   icon: MapPin },
     { href: `/customer/profile/${user?.id}`, label: 'My Profile', icon: User },
-    { href: '/customer/wallet',       label: 'Wallet',      icon: Wallet },
     { href: '/customer/refer-and-earn', label: 'Refer & Earn', icon: Gift },
     { href: '/customer/settings',     label: 'Settings',    icon: Settings },
     { href: '/customer/feedback',     label: 'Feedback', icon: MessagesSquare },
