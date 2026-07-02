@@ -49,54 +49,43 @@ function formatPrice(p: number | null): string {
 }
 
 // ---- Carousel ----------------------------------------------------------------
-// Infinite circular carousel using clone-based looping.
-// - Prepends clone of last item, appends clone of first item
-// - After transition ends at a clone, jumps silently to the real item
-// - Columns: 1 on mobile, 2 on sm, 3 on md+
-// - translateX is computed purely from item index × (100 / cols)%
-// - Zero scroll APIs — cannot interfere with page scroll
+// Infinite clone-based carousel with swipe support.
+// Clone layout: [last, ...real, first] — visual index 1 = real[0].
+// After sliding into a clone we silently snap back to the real counterpart.
 function Carousel({ children, className }: { children: React.ReactNode[]; className?: string }) {
   const count = children.length
 
-  // cols: number of visible columns — kept in a ref for the interval closure
   const [cols, setCols] = useState(3)
   const colsRef = useRef(3)
   useEffect(() => {
     const update = () => {
       const c = window.innerWidth < 640 ? 1 : window.innerWidth < 1024 ? 2 : 3
-      setCols(c)
-      colsRef.current = c
+      setCols(c); colsRef.current = c
     }
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
   }, [])
 
-  // visual = position in the cloned array (1-based for real items)
-  // cloned array = [lastItem, ...realItems, firstItem]
-  const [visual,  setVisual]  = useState(1)       // start at real[0]
-  const [realIdx, setRealIdx] = useState(0)        // tracks which dot is active
+  const [visual,  setVisual]  = useState(1)
+  const [realIdx, setRealIdx] = useState(0)
   const [animate, setAnimate] = useState(true)
-  const pausedRef = useRef(false)
-  const countRef  = useRef(count)
+  const pausedRef   = useRef(false)
+  const countRef    = useRef(count)
+  const touchStartX = useRef<number | null>(null)
+  const touchStartY = useRef<number | null>(null)
   useEffect(() => { countRef.current = count }, [count])
 
   const cloned = count > 0 ? [children[count - 1], ...children, children[0]] : []
 
-  // After jumping to a clone, silently reset to the real position
   const onTransitionEnd = () => {
-    if (visual === count + 1) {          // went past last → jump to real first
-      setAnimate(false)
-      setVisual(1)
-      setRealIdx(0)
-    } else if (visual === 0) {           // went past first → jump to real last
-      setAnimate(false)
-      setVisual(count)
-      setRealIdx(count - 1)
+    if (visual === count + 1) {
+      setAnimate(false); setVisual(1); setRealIdx(0)
+    } else if (visual === 0) {
+      setAnimate(false); setVisual(count); setRealIdx(count - 1)
     }
   }
 
-  // Re-enable animation one frame after a silent jump
   useEffect(() => {
     if (!animate) {
       const t = requestAnimationFrame(() => setAnimate(true))
@@ -104,21 +93,35 @@ function Carousel({ children, className }: { children: React.ReactNode[]; classN
     }
   }, [animate])
 
-  const go = (v: number, r: number) => { setAnimate(true); setVisual(v); setRealIdx(r) }
+  const go   = (v: number, r: number) => { setAnimate(true); setVisual(v); setRealIdx(r) }
   const prev = () => go(visual - 1, (realIdx - 1 + count) % count)
   const next = () => go(visual + 1, (realIdx + 1) % count)
   const dot  = (i: number) => go(i + 1, i)
 
-  // Auto-advance on desktop only
+  const onTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX
+    touchStartY.current = e.touches[0].clientY
+    pausedRef.current = true
+  }
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX.current === null || touchStartY.current === null) return
+    const dx = e.changedTouches[0].clientX - touchStartX.current
+    const dy = e.changedTouches[0].clientY - touchStartY.current
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
+      dx < 0 ? next() : prev()
+    }
+    touchStartX.current = null
+    touchStartY.current = null
+    setTimeout(() => { pausedRef.current = false }, 1200)
+  }
+
   useEffect(() => {
-    const isTouch = window.matchMedia('(hover: none) and (pointer: coarse)').matches
-    if (isTouch) return
     const id = setInterval(() => {
       if (pausedRef.current) return
       setAnimate(true)
       setVisual(v => v + 1)
       setRealIdx(r => (r + 1) % countRef.current)
-    }, 5000)
+    }, 4500)
     return () => clearInterval(id)
   }, [])
 
@@ -133,23 +136,22 @@ function Carousel({ children, className }: { children: React.ReactNode[]; classN
       onMouseEnter={() => { pausedRef.current = true }}
       onMouseLeave={() => { pausedRef.current = false }}
     >
-      {/* Clip wrapper — overflow hidden stops clones from showing */}
-      <div className="overflow-hidden">
+      <div
+        className="overflow-hidden"
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+      >
         <div
           className="flex"
           style={{
             transform:  `translateX(${tx}%)`,
-            transition: animate ? 'transform 500ms ease-in-out' : 'none',
+            transition: animate ? 'transform 480ms cubic-bezier(0.25, 0.46, 0.45, 0.94)' : 'none',
             willChange: 'transform',
           }}
           onTransitionEnd={onTransitionEnd}
         >
           {cloned.map((child, i) => (
-            <div
-              key={i}
-              style={{ width: `${pct}%`, flexShrink: 0 }}
-              className="px-2"
-            >
+            <div key={i} style={{ width: `${pct}%`, flexShrink: 0 }} className="px-2">
               {child}
             </div>
           ))}
@@ -158,22 +160,22 @@ function Carousel({ children, className }: { children: React.ReactNode[]; classN
 
       {/* Desktop arrows */}
       <button onClick={prev} aria-label="Previous"
-        className="absolute -left-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-background border border-border/50 shadow-md hover:bg-muted z-10">
+        className="absolute -left-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-background border border-border/50 shadow-md hover:bg-muted transition-colors z-10">
         <ChevronLeft className="h-5 w-5" />
       </button>
       <button onClick={next} aria-label="Next"
-        className="absolute -right-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-background border border-border/50 shadow-md hover:bg-muted z-10">
+        className="absolute -right-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-background border border-border/50 shadow-md hover:bg-muted transition-colors z-10">
         <ChevronRight className="h-5 w-5" />
       </button>
 
-      {/* Mobile arrows */}
+      {/* Mobile: swipe hint arrows */}
       <div className="mt-5 flex justify-center gap-3 md:hidden">
         <button onClick={prev} aria-label="Previous"
-          className="h-9 w-9 flex items-center justify-center rounded-full bg-background border border-border/50 shadow-sm">
+          className="h-9 w-9 flex items-center justify-center rounded-full bg-background border border-border/50 shadow-sm active:scale-95 transition-transform">
           <ChevronLeft className="h-4 w-4" />
         </button>
         <button onClick={next} aria-label="Next"
-          className="h-9 w-9 flex items-center justify-center rounded-full bg-background border border-border/50 shadow-sm">
+          className="h-9 w-9 flex items-center justify-center rounded-full bg-background border border-border/50 shadow-sm active:scale-95 transition-transform">
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
@@ -433,16 +435,30 @@ export default function HomePage() {
 
             <div className="flex flex-col items-center justify-center gap-4 sm:flex-row md:justify-start">
               {!user && (
-                <Link href="/customer/auth/register">
-                  <Button size="lg" className="group bg-white text-violet-700 hover:bg-white/90 shadow-lg shadow-violet-900/30 px-8 transition-all duration-300 hover:scale-105 hover:shadow-xl">
-                    Get Started Free <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-300 group-hover:translate-x-1.5" />
-                  </Button>
-                </Link>
+                <div className="relative inline-flex">
+                  {/* Pulsing glow ring behind primary CTA */}
+                  <span className="absolute -inset-1 rounded-full bg-white/30 blur-md animate-pulse" style={{ animationDuration: '2.4s' }} />
+                  <Link href="/customer/auth/register">
+                    <button className="group relative overflow-hidden rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-violet-700 shadow-[0_4px_24px_rgba(255,255,255,0.35)] transition-all duration-300 hover:scale-[1.06] hover:shadow-[0_6px_36px_rgba(255,255,255,0.55)] active:scale-[0.97]">
+                      {/* Shimmer sweep */}
+                      <span className="pointer-events-none absolute inset-0 -translate-x-full skew-x-[-20deg] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full" />
+                      <span className="relative flex items-center gap-2">
+                        Get Started Free
+                        <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1.5" />
+                      </span>
+                    </button>
+                  </Link>
+                </div>
               )}
               <Link href="/customer/quick-pickup">
-                <Button size="lg" variant="outline" className="group border-white/40 text-white bg-white/10 hover:bg-white/20 px-8 backdrop-blur-sm transition-all duration-300 hover:scale-105 hover:shadow-xl hover:shadow-white/10">
-                  Schedule a Quick Pickup <ArrowRight className="ml-2 h-4 w-4 transition-transform duration-300 group-hover:translate-x-1.5" />
-                </Button>
+                <button className="group relative overflow-hidden rounded-full border-2 border-white/50 bg-white/10 px-8 py-3.5 text-sm font-semibold text-white shadow-[0_4px_18px_rgba(255,255,255,0.08)] backdrop-blur-sm transition-all duration-300 hover:scale-[1.06] hover:border-white/80 hover:bg-white/20 hover:shadow-[0_6px_28px_rgba(255,255,255,0.18)] active:scale-[0.97]">
+                  {/* Shimmer sweep */}
+                  <span className="pointer-events-none absolute inset-0 -translate-x-full skew-x-[-20deg] bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full" />
+                  <span className="relative flex items-center gap-2">
+                    Schedule a Quick Pickup
+                    <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1.5" />
+                  </span>
+                </button>
               </Link>
             </div>
             <div className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-4 md:max-w-md">
@@ -647,11 +663,13 @@ export default function HomePage() {
             return (
               <div key={i} className="h-full rounded-2xl border border-border/50 bg-card overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                 <div className={`h-1 bg-gradient-to-r ${card.gradient}`} />
-                <div className="p-6">
-                  <div className={cn('mb-4 inline-flex h-12 w-12 items-center justify-center rounded-2xl', card.bg, card.text)}>
-                    <Icon className="h-6 w-6" />
+                <div className="p-4">
+                  <div className="mb-2.5 flex items-center gap-3">
+                    <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', card.bg, card.text)}>
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <h3 className="text-sm font-bold text-foreground leading-tight">{card.title}</h3>
                   </div>
-                  <h3 className="mb-2 text-base font-bold text-foreground">{card.title}</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">{card.description}</p>
                 </div>
               </div>
