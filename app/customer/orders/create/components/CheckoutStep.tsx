@@ -658,34 +658,21 @@ export function CheckoutStep({
                     </p>
                   )}
 
-                  {/* Available coupons — eligible and ineligible shown separately */}
-                  {availableCoupons.length > 0 && (
+                  {/* Available coupons — only show eligible ones */}
+                  {availableCoupons.some(c => c.eligible) && (
                     <div className="space-y-2">
                       <p className="text-xs font-semibold text-muted-foreground">Available for you</p>
-                      {availableCoupons.map(c => (
+                      {availableCoupons.filter(c => c.eligible).map(c => (
                         <div
                           key={c.code}
-                          onClick={() => c.eligible && handleApplyCoupon(c.code)}
-                          className={cn(
-                            'flex items-center justify-between rounded-xl border px-3 py-2.5 transition-colors',
-                            c.eligible
-                              ? 'cursor-pointer border-border/40 bg-muted/30 hover:border-primary/30'
-                              : 'cursor-not-allowed border-border/20 bg-muted/10 opacity-60'
-                          )}
+                          onClick={() => handleApplyCoupon(c.code)}
+                          className="flex cursor-pointer items-center justify-between rounded-xl border border-border/40 bg-muted/30 px-3 py-2.5 transition-colors hover:border-primary/30"
                         >
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className={cn('text-xs font-bold font-mono', c.eligible ? 'text-foreground' : 'text-muted-foreground')}>
-                                {c.code}
-                              </p>
-                              {!c.eligible && <Lock className="h-3 w-3 text-muted-foreground" />}
-                            </div>
+                            <p className="text-xs font-bold font-mono text-foreground">{c.code}</p>
                             <p className="text-[11px] text-muted-foreground">{c.name}</p>
-                            {!c.eligible && c.ineligible_reason && (
-                              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">{c.ineligible_reason}</p>
-                            )}
                           </div>
-                          <span className={cn('shrink-0 ml-2 text-xs font-semibold', c.eligible ? 'text-primary' : 'text-muted-foreground')}>
+                          <span className="shrink-0 ml-2 text-xs font-semibold text-primary">
                             {c.discount_display}
                           </span>
                         </div>

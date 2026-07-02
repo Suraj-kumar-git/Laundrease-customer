@@ -24,6 +24,10 @@ function PaymentSuccessContent() {
   const [orderNumber, setOrderNumber] = useState<string | null>(null)
   const [loading,      setLoading]    = useState(true)
   const [error,        setError]      = useState<string | null>(null)
+  
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  }, [])
 
   useEffect(() => {
     if (!orderId) { setError('Missing order reference.'); setLoading(false); return }
