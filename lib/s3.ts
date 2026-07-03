@@ -139,6 +139,7 @@ export function buildDocKey(
 
 const PROVIDER_DOC_ALLOWED_MIME_TYPES = new Set([
   'image/jpeg', 'image/png', 'image/webp', 'application/pdf',
+  'image/heic', 'image/heif', // iPhone camera default format
 ])
 const PROVIDER_DOC_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10 MB
 
@@ -149,7 +150,7 @@ export async function uploadProviderDocument(
   docType:    string
 ): Promise<string> {
   if (!PROVIDER_DOC_ALLOWED_MIME_TYPES.has(file.type)) {
-    throw new Error(`Unsupported file type: ${file.type}. Allowed: JPEG, PNG, WEBP, PDF`)
+    throw new Error(`Unsupported file type: ${file.type}. Allowed: JPEG, PNG, WEBP, PDF, HEIC, HEIF`)
   }
   if (file.size > PROVIDER_DOC_MAX_FILE_SIZE_BYTES) {
     throw new Error(`File too large (max 10 MB): ${file.name}`)
@@ -243,7 +244,7 @@ export async function getJdSignedUrl(s3Key: string): Promise<string | null> {
 
 // ─── Item-protection claim photos ──────────────────────────────────────────
 
-const CLAIM_PHOTO_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const CLAIM_PHOTO_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
 const CLAIM_PHOTO_MAX_SIZE = 8 * 1024 * 1024 // 8 MB
 
 /** Upload a claim evidence photo. Returns the S3 key (stored in garment_claims.photo_urls). */
@@ -253,7 +254,7 @@ export async function uploadClaimPhoto(
   claimId: number
 ): Promise<string> {
   if (!CLAIM_PHOTO_ALLOWED_TYPES.has(file.type)) {
-    throw new Error(`Unsupported file type: ${file.type}. Allowed: JPEG, PNG, WEBP`)
+    throw new Error(`Unsupported file type: ${file.type}. Allowed: JPEG, PNG, WEBP, HEIC, HEIF`)
   }
   if (file.size > CLAIM_PHOTO_MAX_SIZE) {
     throw new Error('File too large (max 8 MB)')
