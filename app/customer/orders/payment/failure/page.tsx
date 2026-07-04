@@ -154,7 +154,7 @@ function PaymentFailureContent() {
       <div className="container mx-auto max-w-md px-4 py-16 text-center">
         <AlertCircle className="mx-auto mb-4 h-12 w-12 text-muted-foreground/40" />
         <p className="font-medium text-foreground">{loadError ?? 'Order not found'}</p>
-        <Button className="mt-6" onClick={() => router.push('/customer')}>Go to Home</Button>
+        <Button className="mt-6" onClick={() => router.push('/customer/dashboard')}>Go to Dashboard</Button>
       </div>
     )
   }
