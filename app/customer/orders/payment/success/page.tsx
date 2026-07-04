@@ -95,6 +95,7 @@ function PaymentSuccessContent() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const orderId       = searchParams.get('order_id')
+  const source        = searchParams.get('source') // 'cod_switch' | null
   const { clear: clearGuestCart } = useCart()
 
   const [orderNumber,    setOrderNumber]    = useState<string | null>(null)
@@ -152,7 +153,12 @@ function PaymentSuccessContent() {
     )
   }
 
-  // Flow B: paying existing COD order → brief overlay then back to order details
+  // Flow C: switched from failed online payment to COD → show order confirmation
+  if (source === 'cod_switch') {
+    return <OrderConfirmation orderId={orderId} orderNumber={orderNumber} />
+  }
+
+  // Flow B: paying existing COD order online later → brief overlay then back to order details
   if (isCodPay) {
     return (
       <PaymentConfirmedOverlay

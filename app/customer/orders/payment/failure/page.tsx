@@ -117,7 +117,7 @@ function PaymentFailureContent() {
       const res  = await fetch(`/api/customer/orders/${order.id}/switch-to-cod`, { method: 'POST', credentials: 'include' })
       const json = await res.json()
       if (!json.success) throw new Error(json.error ?? 'Failed to switch to COD')
-      router.push(`/customer/orders/payment/success?order_id=${order.id}`)
+      router.push(`/customer/orders/payment/success?order_id=${order.id}&source=cod_switch`)
     } catch (err: any) {
       setActionError(err.message || 'Could not switch to Cash on Delivery.')
       setActionLoading(null)

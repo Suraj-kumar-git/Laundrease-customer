@@ -203,7 +203,8 @@ function PageContent() {
     per_kg_services: KgService[]; per_unit_products: UnitProduct[]
   }>({ per_kg_services: [], per_unit_products: [] })
 
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmitting,       setIsSubmitting]       = useState(false)
+  const [gatewayRedirecting, setGatewayRedirecting] = useState(false)
   const [confirmed,    setConfirmed]    = useState(false)
   const [cartLoading,  setCartLoading]  = useState(true)
 
@@ -437,8 +438,10 @@ function PageContent() {
         // fails or the user dismisses it, send them to the failure page
         // (Retry Payment / Continue with COD / Cancel) instead of just a toast.
         try {
+          setGatewayRedirecting(true)
           await initiateOnlinePayment(result.data.order_id, result.data.order_number)
         } catch (gatewayErr: any) {
+          setGatewayRedirecting(false)
           router.push(`/customer/orders/payment/failure?order_id=${result.data.order_id}`)
           return
         }
@@ -468,6 +471,26 @@ function PageContent() {
 
   return (
     <>
+      {/* Gateway redirect overlay — shown while browser is loading the payment page */}
+      {gatewayRedirecting && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-background/90 backdrop-blur-sm">
+          <div className="relative flex items-center justify-center">
+            <div className="h-16 w-16 rounded-full border-4 border-primary/20"/>
+            <div className="absolute h-16 w-16 animate-spin rounded-full border-4 border-transparent border-t-primary"/>
+          </div>
+          <div className="text-center space-y-1.5 px-6 max-w-xs">
+            <p className="text-base font-semibold text-foreground">Connecting to payment partner…</p>
+            <p className="text-sm text-muted-foreground">You will be redirected to our secure payment page shortly. Please do not close or refresh this tab.</p>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs text-muted-foreground shadow-sm">
+            <svg className="h-3.5 w-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            256-bit SSL encrypted &amp; secure
+          </div>
+        </div>
+      )}
+
       <div className="min-h-screen bg-muted/20">
         {/* Step header */}
         <div className="sticky top-0 z-20 border-b border-border/50 bg-background/95 backdrop-blur">
