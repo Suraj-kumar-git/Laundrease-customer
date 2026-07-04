@@ -407,39 +407,33 @@ export function CheckoutStep({
               <Edit3 className="h-3 w-3" /> Edit
             </button>
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {orderState.selected_services.map((svc, i) => (
-              <div key={i} className="flex items-start justify-between gap-2 text-sm">
-                {/* Left: icon + name stack */}
-                <div className="flex min-w-0 items-start gap-2">
+              <div key={i} className="flex items-center justify-between gap-3 text-sm">
+                <div className="flex min-w-0 items-center gap-2">
                   {svc.type === 'per_unit' && (
                     <ProductIcon
                       src={resolveProductIconSrc(svc.product_type_name)}
                       fallbackEmoji={(svc as any).icon}
                       alt={svc.product_type_name}
                       size={24}
-                      className="shrink-0 rounded-md mt-0.5"
+                      className="shrink-0 rounded-md"
                     />
                   )}
-                  <div className="min-w-0">
-                    <span className="block truncate text-foreground leading-snug">
-                      {svc.type === 'per_unit' ? (svc as any).product_type_name : svc.service_name}
+                  <span className="truncate text-foreground">
+                    {svc.type === 'per_unit' ? (svc as any).product_type_name : svc.service_name}
+                  </span>
+                  {svc.type === 'per_unit' && (
+                    <span className="shrink-0 text-xs text-muted-foreground">({svc.service_name})</span>
+                  )}
+                  {svc.is_express && (
+                    <span className="shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-400 dark:bg-amber-500" title="Express">
+                      <Zap className="h-2.5 w-2.5 text-white fill-white" />
                     </span>
-                    <span className="block text-xs text-muted-foreground leading-snug">
-                      {svc.type === 'per_unit' ? svc.service_name : (
-                        svc.type === 'per_kg' ? `${(svc as any).weight_kg} kg` : null
-                      )}
-                    </span>
-                    {svc.is_express && (
-                      <span className="inline-flex items-center gap-0.5 mt-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                        <Zap className="h-2.5 w-2.5" /> Express
-                      </span>
-                    )}
-                  </div>
+                  )}
                 </div>
-                {/* Right: qty + price */}
-                <div className="shrink-0 text-right text-xs whitespace-nowrap">
-                  <span className="text-muted-foreground mr-1.5">
+                <div className="shrink-0 text-right text-xs">
+                  <span className="text-muted-foreground mr-2">
                     {svc.type === 'per_kg' ? `${(svc as any).weight_kg}kg` : `×${(svc as any).quantity}`}
                   </span>
                   {svc.mrp && svc.mrp > svc.unit_price && (
