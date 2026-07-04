@@ -68,10 +68,9 @@ export async function POST(req: NextRequest) {
 
     const row = result.rows[0]
 
-    // Always return a success-shaped response — never confirm whether an
-    // email was already subscribed (avoids user enumeration)
+    const alreadyActive = !row.is_new && row.status === 'active'
     return successResponse(
-      { subscribed: true },
+      { subscribed: true, already_subscribed: alreadyActive },
       row.is_new ? 201 : 200
     )
   } catch (error) {
