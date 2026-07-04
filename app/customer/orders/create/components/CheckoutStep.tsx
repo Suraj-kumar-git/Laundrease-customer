@@ -411,15 +411,6 @@ export function CheckoutStep({
             {orderState.selected_services.map((svc, i) => (
               <div key={i} className="flex items-center justify-between gap-3 text-sm">
                 <div className="flex min-w-0 items-center gap-2">
-                  {svc.type === 'per_unit' && (
-                    <ProductIcon
-                      src={resolveProductIconSrc(svc.product_type_name)}
-                      fallbackEmoji={(svc as any).icon}
-                      alt={svc.product_type_name}
-                      size={24}
-                      className="shrink-0 rounded-md"
-                    />
-                  )}
                   <span className="truncate text-foreground">
                     {svc.type === 'per_unit' ? (svc as any).product_type_name : svc.service_name}
                   </span>
@@ -436,11 +427,6 @@ export function CheckoutStep({
                   <span className="text-muted-foreground mr-2">
                     {svc.type === 'per_kg' ? `${(svc as any).weight_kg}kg` : `×${(svc as any).quantity}`}
                   </span>
-                  {svc.mrp && svc.mrp > svc.unit_price && (
-                    <span className="text-muted-foreground line-through mr-1">
-                      {formatINR(svc.mrp * (svc.type === 'per_kg' ? (svc as any).weight_kg : (svc as any).quantity))}
-                    </span>
-                  )}
                   <span className="font-semibold text-foreground">{formatINR(svc.line_total)}</span>
                 </div>
               </div>
@@ -485,14 +471,15 @@ export function CheckoutStep({
             <div className="space-y-1.5 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Services subtotal</span>
-                <span className="font-medium text-foreground">{formatINR(subtotal)}</span>
+                <span className="flex items-center gap-1.5">
+                  {totalMrpSavings > 0 && (
+                    <span className="text-xs text-muted-foreground line-through">
+                      {formatINR(subtotal + totalMrpSavings)}
+                    </span>
+                  )}
+                  <span className="font-medium text-foreground">{formatINR(subtotal)}</span>
+                </span>
               </div>
-              {totalMrpSavings > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-emerald-600">You saved</span>
-                  <span className="font-medium text-emerald-600">{formatINR(totalMrpSavings)}</span>
-                </div>
-              )}
               {feeBreakdown?.fees.map(fee => (
                 <div key={fee.code} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
