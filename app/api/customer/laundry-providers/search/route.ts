@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
 
     const result = await query(
       isPincode
-        ? `SELECT DISTINCT
+        ? `SELECT
              lp.id,
              lp.business_name,
              lp.business_address,
@@ -88,12 +88,15 @@ export async function GET(req: NextRequest) {
              ${minPriceKgExpr} AS min_price_kg,
              ${NORMALIZED_HOURS_SUBQUERY}
            FROM laundry_profiles lp
-           JOIN provider_service_areas psa ON psa.provider_id = lp.id
            WHERE lp.status = 'active'
              AND lp.is_verified = TRUE
              AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}
-             AND psa.is_active = TRUE
-             AND psa.postal_code = $1
+             AND EXISTS (
+               SELECT 1 FROM provider_service_areas psa
+               WHERE psa.provider_id = lp.id
+                 AND psa.is_active   = TRUE
+                 AND psa.postal_code = $1
+             )
            ORDER BY lp.rating DESC, lp.business_name ASC`
         : `SELECT
              lp.id, lp.business_name, lp.business_address, lp.city, lp.postal_code,
