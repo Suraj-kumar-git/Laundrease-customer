@@ -148,6 +148,10 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
     if (!/^\d{6}$/.test(form.postal_code.trim())) errs.postal_code = 'Enter a valid 6-digit PIN code'
     if (!form.city.trim())          errs.city           = 'City is required'
     if (!form.country_code.trim())  errs.country_code   = 'Country code is required'
+    if (form.contact_phone.trim()) {
+      const digits = form.contact_phone.replace(/^\+91/, '').replace(/\D/g, '')
+      if (!/^[6-9]\d{9}$/.test(digits)) errs.contact_phone = 'Enter a valid 10-digit Indian mobile number'
+    }
     setErrors(errs)
     return Object.keys(errs).length === 0
   }
@@ -304,9 +308,18 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
           <Input value={form.contact_name} onChange={set('contact_name')}
             placeholder="Person to contact" maxLength={100} />
         </Field>
-        <Field label="Contact Phone">
-          <Input value={form.contact_phone} onChange={set('contact_phone')}
-            placeholder="+91 98765 43210" type="tel" maxLength={20} />
+        <Field label="Contact Phone" error={errors.contact_phone}>
+          <Input
+            value={form.contact_phone}
+            onChange={e => {
+              const raw = e.target.value.replace(/[^\d+]/g, '')
+              if (raw.length <= 13) setForm(prev => ({ ...prev, contact_phone: raw }))
+            }}
+            placeholder="+91 98765 43210"
+            type="tel"
+            inputMode="tel"
+            maxLength={13}
+          />
         </Field>
       </div>
 
