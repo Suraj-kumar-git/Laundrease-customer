@@ -36,7 +36,7 @@ function formatINR(n: number) {
   return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 }
 function formatDate(d: string) {
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', {
+  return new Date(d.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-IN', {
     weekday: 'short', day: 'numeric', month: 'short',
   })
 }
