@@ -219,6 +219,7 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
           value={form.address_line1}
           onChange={v => setForm(prev => ({ ...prev, address_line1: v }))}
           placeholder="Flat / House No., Building / Street name"
+          types={['geocode']}
           onAddressComponents={({ address_line1, city, state, postal_code }) => {
             setForm(prev => ({
               ...prev,

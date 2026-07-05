@@ -1,9 +1,16 @@
 'use client'
 // components/common/PlaceAutocompleteInput.tsx
 //
-// Lightweight Google Places autocomplete text input. Type to search, pick a
-// suggestion from the dropdown. Degrades to a plain text input (no dropdown)
-// if NEXT_PUBLIC_GOOGLE_MAPS_API_KEY isn't configured.
+// Lightweight Google Places autocomplete text input.
+//
+// Uses the new google.maps.places.AutocompleteSuggestions API (required for
+// API keys created after March 1 2025). Falls back to the legacy
+// AutocompleteService for older keys. Place resolution uses the new
+// Place.fetchFields() first, falling back to Geocoder.
+//
+// Two usage modes:
+//   1. Service area / location picker — onPlaceSelected fires with lat/lng
+//   2. Address auto-fill — onAddressComponents fires with parsed street/city/state/pincode
 
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, MapPin } from 'lucide-react'
@@ -17,41 +24,187 @@ declare global {
   }
 }
 
+// Module-level singleton: all component instances share one load promise.
+// Without this, a second instance mounting while the first is still loading
+// would call loadScript, find the <script> tag already in the DOM, resolve
+// immediately, check window.google (not ready yet) and stay in mapsReady=false.
+let _mapsLoadPromise: Promise<void> | null = null
+
+function loadMapsOnce(): Promise<void> {
+  if (!MAPS_KEY) return Promise.resolve()
+  if (!_mapsLoadPromise) {
+    _mapsLoadPromise = loadScript(
+      `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async`
+    ).catch(err => {
+      _mapsLoadPromise = null // allow retry on next mount
+      throw err
+    })
+  }
+  return _mapsLoadPromise
+}
+
 export interface PlaceSelection {
   label: string
   lat: number
   lng: number
 }
 
-interface PlaceAutocompleteInputProps {
-  value: string
-  onChange: (value: string) => void
-  onPlaceSelected: (place: PlaceSelection) => void
-  placeholder?: string
-  className?: string
+export interface ParsedAddress {
+  address_line1: string
+  city: string
+  state: string
+  postal_code: string
 }
 
+export interface PlaceAutocompleteInputProps {
+  value: string
+  onChange: (value: string) => void
+  onPlaceSelected?: (place: PlaceSelection) => void
+  onAddressComponents?: (parsed: ParsedAddress) => void
+  placeholder?: string
+  className?: string
+  types?: string[]
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+async function fetchSuggestions(
+  input: string,
+  types: string[]
+): Promise<{ place_id: string; description: string }[]> {
+  const places = window.google?.maps?.places
+
+  // New API (available for all keys, required for keys post-March 2025)
+  if (places?.AutocompleteSuggestions) {
+    try {
+      const { suggestions } = await places.AutocompleteSuggestions.fetchAutocompleteSuggestions({
+        input,
+        includedRegionCodes: ['in'],
+      })
+      return (suggestions ?? []).map((s: any) => ({
+        place_id: s.placePrediction?.placeId ?? '',
+        description: s.placePrediction?.text?.text ?? s.placePrediction?.description ?? '',
+      })).filter((s: any) => s.place_id)
+    } catch {
+      // fall through to legacy
+    }
+  }
+
+  // Legacy fallback (still works for keys created before March 2025)
+  if (places?.AutocompleteService) {
+    return new Promise(resolve => {
+      new places.AutocompleteService().getPlacePredictions(
+        { input, componentRestrictions: { country: 'in' }, types },
+        (results: any[] | null) => {
+          resolve(results?.map(r => ({ place_id: r.place_id, description: r.description })) ?? [])
+        }
+      )
+    })
+  }
+
+  return []
+}
+
+async function resolvePlace(
+  placeId: string,
+  description: string,
+  onPlaceSelected?: (p: PlaceSelection) => void,
+  onAddressComponents?: (p: ParsedAddress) => void
+) {
+  const places = window.google?.maps?.places
+
+  // Try new Place.fetchFields() first
+  if (places?.Place) {
+    try {
+      const place = new places.Place({ id: placeId })
+      await place.fetchFields({ fields: ['location', 'addressComponents', 'formattedAddress', 'displayName'] })
+
+      if (place.location) {
+        onPlaceSelected?.({
+          label: description,
+          lat: place.location.lat(),
+          lng: place.location.lng(),
+        })
+      }
+
+      if (onAddressComponents && place.addressComponents) {
+        const comps: any[] = place.addressComponents
+        const get = (type: string) =>
+          comps.find((c: any) => c.types?.includes(type))?.longText ?? ''
+
+        const streetNumber = get('street_number')
+        const route        = get('route')
+        const sublocality  = get('sublocality_level_1') || get('sublocality')
+        const locality     = get('locality')
+        const district     = get('administrative_area_level_2')
+        const state        = get('administrative_area_level_1')
+        const postalCode   = get('postal_code')
+
+        const streetPart    = [streetNumber, route].filter(Boolean).join(' ')
+        const address_line1 = streetPart || description.split(',')[0].trim()
+        const city          = locality || district || sublocality
+
+        onAddressComponents({ address_line1, city, state, postal_code: postalCode })
+      }
+      return
+    } catch {
+      // fall through to Geocoder
+    }
+  }
+
+  // Fallback: legacy Geocoder
+  const geocoder = window.google?.maps?.Geocoder
+    ? new window.google.maps.Geocoder()
+    : null
+  if (!geocoder) return
+
+  geocoder.geocode({ placeId }, (results: any[] | null, status: string) => {
+    if (status !== 'OK' || !results?.[0]) return
+    const result = results[0]
+    const loc    = result.geometry.location
+
+    onPlaceSelected?.({ label: description, lat: loc.lat(), lng: loc.lng() })
+
+    if (onAddressComponents) {
+      const comps: any[] = result.address_components ?? []
+      const get = (type: string) =>
+        comps.find((c: any) => c.types.includes(type))?.long_name ?? ''
+
+      const streetNumber = get('street_number')
+      const route        = get('route')
+      const sublocality  = get('sublocality_level_1') || get('sublocality')
+      const locality     = get('locality')
+      const district     = get('administrative_area_level_2')
+      const state        = get('administrative_area_level_1')
+      const postalCode   = get('postal_code')
+
+      const streetPart    = [streetNumber, route].filter(Boolean).join(' ')
+      const address_line1 = streetPart || description.split(',')[0].trim()
+      const city          = locality || district || sublocality
+
+      onAddressComponents({ address_line1, city, state, postal_code: postalCode })
+    }
+  })
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export function PlaceAutocompleteInput({
-  value, onChange, onPlaceSelected, placeholder, className,
+  value, onChange, onPlaceSelected, onAddressComponents, placeholder, className, types = ['geocode'],
 }: PlaceAutocompleteInputProps) {
   const [predictions, setPredictions] = useState<{ place_id: string; description: string }[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
-  const [mapsReady, setMapsReady] = useState(false)
-  const [resolving, setResolving] = useState(false)
+  const [mapsReady, setMapsReady]       = useState(false)
+  const [resolving, setResolving]       = useState(false)
 
-  const autocompleteService = useRef<any>(null)
-  const geocoder = useRef<any>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const boxRef = useRef<HTMLDivElement>(null)
+  const boxRef      = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!MAPS_KEY) return
-    loadScript(`https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places`)
+    loadMapsOnce()
       .then(() => {
-        if (!window.google?.maps?.places) return
-        autocompleteService.current = new window.google.maps.places.AutocompleteService()
-        geocoder.current = new window.google.maps.Geocoder()
-        setMapsReady(true)
+        if (window.google?.maps) setMapsReady(true)
       })
       .catch(() => setMapsReady(false))
   }, [])
@@ -66,34 +219,27 @@ export function PlaceAutocompleteInput({
 
   function handleChange(v: string) {
     onChange(v)
-    if (!mapsReady || !autocompleteService.current) return
+    if (!mapsReady) return
 
     if (debounceRef.current) clearTimeout(debounceRef.current)
     if (!v.trim()) { setPredictions([]); setShowDropdown(false); return }
 
-    debounceRef.current = setTimeout(() => {
-      autocompleteService.current.getPlacePredictions(
-        { input: v, componentRestrictions: { country: 'in' }, types: ['geocode'] },
-        (results: any[] | null) => {
-          setPredictions(results?.map(r => ({ place_id: r.place_id, description: r.description })) ?? [])
-          setShowDropdown(true)
-        }
-      )
+    debounceRef.current = setTimeout(async () => {
+      const results = await fetchSuggestions(v, types)
+      setPredictions(results)
+      setShowDropdown(results.length > 0)
     }, 250)
   }
 
-  function selectPrediction(p: { place_id: string; description: string }) {
+  async function selectPrediction(p: { place_id: string; description: string }) {
     onChange(p.description)
     setShowDropdown(false)
-    if (!geocoder.current) return
     setResolving(true)
-    geocoder.current.geocode({ placeId: p.place_id }, (results: any[] | null, status: string) => {
+    try {
+      await resolvePlace(p.place_id, p.description, onPlaceSelected, onAddressComponents)
+    } finally {
       setResolving(false)
-      if (status === 'OK' && results?.[0]) {
-        const loc = results[0].geometry.location
-        onPlaceSelected({ label: p.description, lat: loc.lat(), lng: loc.lng() })
-      }
-    })
+    }
   }
 
   return (
