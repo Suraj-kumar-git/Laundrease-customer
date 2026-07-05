@@ -69,6 +69,19 @@ export function PlaceAutocompleteInput({
       .catch(() => setMapsReady(false))
   }, [])
 
+  // If Maps finishes loading after the user has already typed something,
+  // fire the prediction immediately so they don't have to type another char.
+  useEffect(() => {
+    if (!mapsReady || !value.trim() || !autocompleteService.current) return
+    autocompleteService.current.getPlacePredictions(
+      { input: value, componentRestrictions: { country: 'in' }, types },
+      (results: any[] | null) => {
+        setPredictions(results?.map((r: any) => ({ place_id: r.place_id, description: r.description })) ?? [])
+        setShowDropdown(true)
+      }
+    )
+  }, [mapsReady]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (boxRef.current && !boxRef.current.contains(e.target as Node)) setShowDropdown(false)

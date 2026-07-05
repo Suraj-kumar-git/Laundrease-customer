@@ -218,7 +218,8 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
         <PlaceAutocompleteInput
           value={form.address_line1}
           onChange={v => setForm(prev => ({ ...prev, address_line1: v }))}
-          placeholder="Flat / House No., Building / Street name"
+          placeholder="Search building, street or area…"
+          className="w-full rounded-xl border border-input bg-background pl-9 pr-3 py-2.5 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground/60"
           types={['geocode']}
           onAddressComponents={({ address_line1, city, state, postal_code }) => {
             setForm(prev => ({
