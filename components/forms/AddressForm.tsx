@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { Loader2, MapPin, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import PlaceAutocompleteInput from '@/components/common/PlaceAutocompleteInput'
 
 interface AddressFormProps {
   /** When editing — pass existing address values */
@@ -214,8 +215,21 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
       </Field>
 
       <Field label="Address Line 1" required error={errors.address_line1}>
-        <Input value={form.address_line1} onChange={set('address_line1')}
-          placeholder="Flat / House No., Building / Street name" maxLength={255} />
+        <PlaceAutocompleteInput
+          value={form.address_line1}
+          onChange={v => setForm(prev => ({ ...prev, address_line1: v }))}
+          placeholder="Flat / House No., Building / Street name"
+          types={['geocode']}
+          onAddressComponents={({ address_line1, city, state, postal_code }) => {
+            setForm(prev => ({
+              ...prev,
+              address_line1: address_line1 || prev.address_line1,
+              city: city || prev.city,
+              state: state || prev.state,
+              pincode: postal_code || prev.pincode,
+            }))
+          }}
+        />
       </Field>
 
       <Field label="Address Line 2">

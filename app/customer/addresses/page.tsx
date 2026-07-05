@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   MapPin, Plus, Home, Briefcase, Building2,
   Edit2, Trash2, Star, Loader2, AlertCircle,
-  Phone, Navigation, CheckCircle,
+  Phone, Navigation, CheckCircle, ArrowLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
@@ -129,6 +129,9 @@ export default function AddressesPage() {
     <>
       <div className="container mx-auto max-w-5xl px-4 py-6">
         {/* Header */}
+        <Link href="/customer/dashboard" className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-3.5 w-3.5" /> Dashboard
+        </Link>
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground">My Addresses</h1>

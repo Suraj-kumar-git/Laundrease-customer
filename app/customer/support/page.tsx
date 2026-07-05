@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Plus, RefreshCw, AlertCircle, MessageSquare, X,
@@ -643,6 +644,9 @@ function CustomerSupportContent() {
   return (
     <div className="container mx-auto max-w-2xl px-4 py-6 sm:py-8">
       {/* Header */}
+      <Link href="/customer/dashboard" className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+        <ArrowLeft className="h-3.5 w-3.5" /> Dashboard
+      </Link>
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold text-foreground">
