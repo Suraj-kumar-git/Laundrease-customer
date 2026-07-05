@@ -226,7 +226,7 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
               address_line1: address_line1 || prev.address_line1,
               city: city || prev.city,
               state: state || prev.state,
-              pincode: postal_code || prev.pincode,
+              postal_code: postal_code || prev.postal_code,
             }))
           }}
         />
