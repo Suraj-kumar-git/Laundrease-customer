@@ -1,5 +1,5 @@
 // Server-side geocoding via Google Maps Geocoding API.
-// Keeps GOOGLE_MAPS_API_KEY secret — never expose it to the client.
+// Keeps NEXT_PUBLIC_GOOGLE_MAPS_API_KEY secret — never expose it to the client.
 
 interface GeocodeAddressInput {
   address_line1?: string | null
@@ -17,9 +17,9 @@ export interface GeocodeResult {
 }
 
 export async function geocodeAddress(input: GeocodeAddressInput): Promise<GeocodeResult | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
   if (!apiKey) {
-    console.error('[geocodeAddress] GOOGLE_MAPS_API_KEY not configured')
+    console.error('[geocodeAddress] NEXT_PUBLIC_GOOGLE_MAPS_API_KEY not configured')
     return null
   }
 

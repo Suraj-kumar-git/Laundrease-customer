@@ -247,3 +247,35 @@ CREATE TABLE IF NOT EXISTS provider_email_otp_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_peos_email_purpose
   ON provider_email_otp_sessions(email, purpose, verified, expires_at);
+
+ALTER TABLE provider_service_areas
+  ADD COLUMN IF NOT EXISTS latitude  NUMERIC(10, 7),
+  ADD COLUMN IF NOT EXISTS longitude NUMERIC(10, 7);
+
+-- scripts/33-commission-limits.sql
+-- Commission override limits and subscription surcharge config.
+-- Stored in platform_config so admins can change directly in DB without a deploy.
+--
+-- commission_override_config (JSONB):
+--   min_percent                 — lowest allowed percent commission override (%)
+--   min_flat                    — lowest allowed flat commission override (₹/order)
+--   surcharge_per_percent_point — extra ₹ added to subscription price per 1% of commission
+--                                  below the plan's default (percent type only)
+--   surcharge_per_flat_unit     — extra ₹ added to subscription price per ₹1 of commission
+--                                  below the plan's default (flat type only)
+--
+-- Example: plan default = 20%, provider picks 12% → reduction = 8 points
+--   subscription surcharge = 8 * surcharge_per_percent_point
+
+INSERT INTO platform_config (key, value, description)
+VALUES (
+  'commission_override_config',
+  '{
+    "min_percent": 5,
+    "min_flat": 25,
+    "surcharge_per_percent_point": 100,
+    "surcharge_per_flat_unit": 5
+  }',
+  'Commission override floor (min_percent, min_flat) and subscription price surcharge rates when a provider chooses lower commission than the plan default.'
+)
+ON CONFLICT (key) DO NOTHING;
