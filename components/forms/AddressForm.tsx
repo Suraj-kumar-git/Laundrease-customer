@@ -2,12 +2,11 @@
 // components/forms/AddressForm.tsx
 // Reusable form used by both /customer/addresses/new and /customer/addresses/[id]/edit
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, MapPin, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
-import { PlaceAutocompleteInput } from '@/components/common/PlaceAutocompleteInput'
 
 interface AddressFormProps {
   /** When editing — pass existing address values */
@@ -75,6 +74,100 @@ function Input({
       )}
       {...rest}
     />
+  )
+}
+
+// ── Address Line 1 with server-side Google Places autocomplete ───────────────
+interface PlacePrediction { place_id: string; description: string }
+interface ParsedAddress { address_line1: string; city: string; state: string; postal_code: string }
+
+function AddressLine1Field({
+  value, onChange, onSelect, error,
+}: {
+  value: string
+  onChange: (v: string) => void
+  onSelect: (a: ParsedAddress) => void
+  error?: string
+}) {
+  const [predictions, setPredictions] = useState<PlacePrediction[]>([])
+  const [open, setOpen]               = useState(false)
+  const [loading, setLoading]         = useState(false)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const boxRef      = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const fetchPredictions = useCallback((input: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (!input.trim()) { setPredictions([]); setOpen(false); return }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res  = await fetch(`/api/customer/public/places?input=${encodeURIComponent(input)}`)
+        const json = await res.json()
+        const preds: PlacePrediction[] = json.data?.predictions ?? []
+        setPredictions(preds)
+        setOpen(preds.length > 0)
+      } catch { /* non-fatal */ }
+    }, 300)
+  }, [])
+
+  async function handleSelect(p: PlacePrediction) {
+    onChange(p.description)
+    setOpen(false)
+    setLoading(true)
+    try {
+      const res  = await fetch(`/api/customer/public/places?place_id=${encodeURIComponent(p.place_id)}`)
+      const json = await res.json()
+      if (json.data) onSelect(json.data as ParsedAddress)
+    } catch { /* non-fatal */ } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div ref={boxRef} className="relative">
+      <div className="relative">
+        <MapPin className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={value}
+          onChange={e => { onChange(e.target.value); fetchPredictions(e.target.value) }}
+          onFocus={() => predictions.length > 0 && setOpen(true)}
+          placeholder="Search building, street or area…"
+          className={cn(
+            'w-full rounded-xl border bg-background pl-10 pr-3.5 py-2.5 text-sm outline-none',
+            'transition-all focus:ring-2 focus:ring-primary/20',
+            'placeholder:text-muted-foreground/60',
+            error ? 'border-destructive focus:border-destructive' : 'border-input focus:border-primary'
+          )}
+        />
+        {loading && <Loader2 className="absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />}
+      </div>
+
+      {open && predictions.length > 0 && (
+        <div className="absolute z-50 mt-1 w-full overflow-hidden rounded-xl border border-border bg-card shadow-xl">
+          {predictions.map(p => (
+            <button
+              key={p.place_id}
+              type="button"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => handleSelect(p)}
+              className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-sm hover:bg-muted"
+            >
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <span className="truncate text-foreground">{p.description}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+    </div>
   )
 }
 
@@ -214,24 +307,25 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
         </div>
       </Field>
 
-      <Field label="Address Line 1" required error={errors.address_line1}>
-        <PlaceAutocompleteInput
+      <div>
+        <label className="mb-1.5 block text-sm font-medium text-foreground">
+          Address Line 1<span className="ml-0.5 text-destructive">*</span>
+        </label>
+        <AddressLine1Field
           value={form.address_line1}
           onChange={v => setForm(prev => ({ ...prev, address_line1: v }))}
-          placeholder="Search building, street or area…"
-          className="w-full rounded-xl border border-input bg-background pl-9 pr-3 py-2.5 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground/60"
-          types={['geocode']}
-          onAddressComponents={({ address_line1, city, state, postal_code }) => {
+          onSelect={({ address_line1, city, state, postal_code }) =>
             setForm(prev => ({
               ...prev,
               address_line1: address_line1 || prev.address_line1,
-              city: city || prev.city,
-              state: state || prev.state,
-              postal_code: postal_code || prev.postal_code,
+              city:          city          || prev.city,
+              state:         state         || prev.state,
+              postal_code:   postal_code   || prev.postal_code,
             }))
-          }}
+          }
+          error={errors.address_line1}
         />
-      </Field>
+      </div>
 
       <Field label="Address Line 2">
         <Input value={form.address_line2} onChange={set('address_line2')}
