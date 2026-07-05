@@ -211,7 +211,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
   }
 
   const isActive = (href: string) =>
-    href === '/customer/dashboard'
+    href === '/customer/dashboard' || href === '/customer/orders/create'
       ? pathname === href
       : pathname.startsWith(href)
 

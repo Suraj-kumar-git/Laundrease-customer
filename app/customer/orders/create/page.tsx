@@ -207,6 +207,37 @@ function PageContent() {
   const [isSubmitting,       setIsSubmitting]       = useState(false)
   const [gatewayRedirecting, setGatewayRedirecting] = useState(false)
   const [confirmed,    setConfirmed]    = useState(false)
+
+  // When the gateway overlay is active:
+  //  1. Push a dummy history entry so the back button fires popstate instead of leaving.
+  //  2. On popstate (back pressed), confirm cancellation then go to the failure page.
+  //  3. On pageshow with persisted=true (user returned via bfcache after PayU/Cashfree
+  //     redirect), clear the overlay so they're not frozen on the loader.
+  useEffect(() => {
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) setGatewayRedirecting(false)
+    }
+    window.addEventListener('pageshow', handlePageShow)
+    return () => window.removeEventListener('pageshow', handlePageShow)
+  }, [])
+
+  useEffect(() => {
+    if (!gatewayRedirecting) return
+    window.history.pushState({ gatewayRedirecting: true }, '')
+    const handlePopState = () => {
+      const cancel = window.confirm('Are you sure you want to cancel the payment? You can retry or switch to Cash on Delivery.')
+      if (cancel) {
+        setGatewayRedirecting(false)
+        const orderId = (state as any).order_id
+        if (orderId) router.push(`/customer/orders/payment/failure?order_id=${orderId}`)
+      } else {
+        window.history.pushState({ gatewayRedirecting: true }, '')
+      }
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gatewayRedirecting])
   const [cartLoading,  setCartLoading]  = useState(true)
 
   // Modal state
@@ -489,6 +520,20 @@ function PageContent() {
             </svg>
             256-bit SSL encrypted &amp; secure
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              const cancel = window.confirm('Are you sure you want to cancel the payment? You can retry or switch to Cash on Delivery.')
+              if (cancel) {
+                setGatewayRedirecting(false)
+                const orderId = (state as any).order_id
+                if (orderId) router.push(`/customer/orders/payment/failure?order_id=${orderId}`)
+              }
+            }}
+            className="mt-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+          >
+            Cancel payment
+          </button>
         </div>
       )}
 
