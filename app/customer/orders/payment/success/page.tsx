@@ -129,6 +129,10 @@ function PaymentSuccessContent() {
         setPaymentMethod(method)
         setIsCodPay(method.includes('cod'))
         clearGuestCart()
+        // Also delete the server-side cart so CartProvider's sync GET
+        // (which fires on full-page reload after PayU/Cashfree redirect)
+        // returns empty and doesn't race-overwrite the client clear.
+        fetch('/api/customer/cart', { method: 'DELETE', credentials: 'include' }).catch(() => {})
       })
       .catch((err: Error) => setError(err.message))
       .finally(() => setLoading(false))

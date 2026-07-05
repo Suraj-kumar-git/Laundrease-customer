@@ -75,6 +75,7 @@ export async function GET(req: NextRequest) {
          s.name            AS service_name,
          s.category        AS service_category,
          cis.unit_price,
+         s.mrp,
          cis.line_total,
          cis.is_express,
          cis.express_multiplier

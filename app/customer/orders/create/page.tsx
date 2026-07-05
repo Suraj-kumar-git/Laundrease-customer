@@ -170,6 +170,7 @@ function cartToFlowState(cartData: any, items: any[]): Partial<OrderFlowState> {
     quantity:          item.quantity,
     weight_kg:         item.weight_kg,
     unit_price:        item.unit_price,
+    mrp:               item.mrp,
     line_total:        item.line_total,
     is_express:        item.is_express,
     express_multiplier:item.express_multiplier,
