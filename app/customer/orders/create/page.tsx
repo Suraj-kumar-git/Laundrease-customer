@@ -208,19 +208,33 @@ function PageContent() {
   const [gatewayRedirecting, setGatewayRedirecting] = useState(false)
   const [confirmed,    setConfirmed]    = useState(false)
 
-  // When the gateway overlay is active:
-  //  1. Push a dummy history entry so the back button fires popstate instead of leaving.
-  //  2. On popstate (back pressed), confirm cancellation then go to the failure page.
-  //  3. On pageshow with persisted=true (user returned via bfcache after PayU/Cashfree
-  //     redirect), clear the overlay so they're not frozen on the loader.
+  // Ref so pageshow/popstate handlers always read the latest state without
+  // being re-registered on every render.
+  const gatewayStateRef = useRef<{ active: boolean; orderId: string | null }>({ active: false, orderId: null })
+  useEffect(() => {
+    gatewayStateRef.current = { active: gatewayRedirecting, orderId: (state as any).order_id ?? null }
+  }, [gatewayRedirecting, state])
+
+  // pageshow fires when the browser restores a bfcache snapshot (PayU/Cashfree
+  // redirect away then user presses back). Show the confirm dialog here too.
   useEffect(() => {
     const handlePageShow = (e: PageTransitionEvent) => {
-      if (e.persisted) setGatewayRedirecting(false)
+      if (!e.persisted || !gatewayStateRef.current.active) return
+      const cancel = window.confirm('Are you sure you want to cancel the payment? You can retry or switch to Cash on Delivery.')
+      setGatewayRedirecting(false)
+      if (cancel) {
+        const { orderId } = gatewayStateRef.current
+        if (orderId) router.push(`/customer/orders/payment/failure?order_id=${orderId}`)
+      }
+      // "No" keeps them on the checkout page (can't navigate forward back to payment partner)
     }
     window.addEventListener('pageshow', handlePageShow)
     return () => window.removeEventListener('pageshow', handlePageShow)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // popstate fires when the dummy history entry is popped (Razorpay modal case
+  // where the page never actually navigated away).
   useEffect(() => {
     if (!gatewayRedirecting) return
     window.history.pushState({ gatewayRedirecting: true }, '')
@@ -228,7 +242,7 @@ function PageContent() {
       const cancel = window.confirm('Are you sure you want to cancel the payment? You can retry or switch to Cash on Delivery.')
       if (cancel) {
         setGatewayRedirecting(false)
-        const orderId = (state as any).order_id
+        const { orderId } = gatewayStateRef.current
         if (orderId) router.push(`/customer/orders/payment/failure?order_id=${orderId}`)
       } else {
         window.history.pushState({ gatewayRedirecting: true }, '')

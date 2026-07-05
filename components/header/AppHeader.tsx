@@ -210,10 +210,11 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
     router.push('/')
   }
 
-  const isActive = (href: string) =>
-    href === '/customer/dashboard' || href === '/customer/orders/create'
-      ? pathname === href
-      : pathname.startsWith(href)
+  const isActive = (href: string) => {
+    if (href === '/customer/orders') return pathname === '/customer/orders' || (pathname.startsWith('/customer/orders/') && !pathname.startsWith('/customer/orders/create'))
+    if (href === '/customer/dashboard') return pathname === href
+    return pathname.startsWith(href)
+  }
 
   // Logged-in mobile menu items (nav + account merged)
   const mobileLoggedInItems = [
