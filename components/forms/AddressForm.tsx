@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation'
 import { Loader2, MapPin, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
-import PlaceAutocompleteInput from '@/components/common/PlaceAutocompleteInput'
+import { PlaceAutocompleteInput } from '@/components/common/PlaceAutocompleteInput'
 
 interface AddressFormProps {
   /** When editing — pass existing address values */

@@ -147,7 +147,10 @@ export async function POST(req: NextRequest) {
         await client.query(
           `UPDATE orders
            SET payment_status = $1,
-               status = CASE WHEN $3 THEN status ELSE 'failed' END,
+               status = CASE
+                 WHEN $3 THEN CASE WHEN status = 'failed' THEN 'pending' ELSE status END
+                 ELSE 'failed'
+               END,
                updated_at = NOW()
            WHERE id = $2`,
           [
