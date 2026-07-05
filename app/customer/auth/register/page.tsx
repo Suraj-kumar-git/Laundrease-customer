@@ -247,7 +247,7 @@ function PageContent() {
                   <Input id="phone" type="tel" placeholder="+919876543210" autoComplete="tel"
                     className={cn("pl-10", errors.phone && "border-destructive")}
                     value={form.phone}
-                    onChange={e => set("phone", e.target.value)}
+                    onChange={e => set("phone", e.target.value.replace(/[^\d+\s\-]/g, ''))}
                     disabled={submitting} />
                 </div>
                 {errors.phone
