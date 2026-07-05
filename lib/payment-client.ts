@@ -21,19 +21,11 @@ export interface GatewayCheckoutData {
 export function loadScript(src: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined') return resolve()
-    const existing = document.querySelector(`script[src="${src}"]`) as HTMLScriptElement | null
-    if (existing) {
-      // Tag already in DOM — may still be loading; wait for its events rather
-      // than resolving immediately (which would leave window.google undefined).
-      if ((existing as any).__loaded) return resolve()
-      existing.addEventListener('load', () => resolve())
-      existing.addEventListener('error', () => reject(new Error(`Failed to load ${src}`)))
-      return
-    }
+    if (document.querySelector(`script[src="${src}"]`)) return resolve()
     const s = document.createElement('script')
     s.src = src
     s.async = true
-    s.onload = () => { (s as any).__loaded = true; resolve() }
+    s.onload = () => resolve()
     s.onerror = () => reject(new Error(`Failed to load ${src}`))
     document.body.appendChild(s)
   })
