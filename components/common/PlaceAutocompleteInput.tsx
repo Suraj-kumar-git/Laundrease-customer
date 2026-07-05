@@ -33,10 +33,17 @@ let _mapsLoadPromise: Promise<void> | null = null
 function loadMapsOnce(): Promise<void> {
   if (!MAPS_KEY) return Promise.resolve()
   if (!_mapsLoadPromise) {
-    _mapsLoadPromise = loadScript(
-      `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async`
-    ).catch(err => {
-      _mapsLoadPromise = null // allow retry on next mount
+    _mapsLoadPromise = (async () => {
+      await loadScript(
+        `https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async`
+      )
+      // With loading=async the places library is not auto-populated on
+      // window.google.maps.places — it must be explicitly imported.
+      if (window.google?.maps?.importLibrary) {
+        await window.google.maps.importLibrary('places')
+      }
+    })().catch(err => {
+      _mapsLoadPromise = null
       throw err
     })
   }
