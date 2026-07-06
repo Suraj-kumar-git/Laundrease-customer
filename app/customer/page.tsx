@@ -359,33 +359,34 @@ function TestimonialCard({ t }: { t: Testimonial }) {
 }
 
 // ---- Feature card (shared by Why-Us / Protection / Rewards sections) ----------
-function FeatureCard({ icon: Icon, title, description, onDark, compact }: {
-  icon: React.ElementType; title: string; description: string; onDark?: boolean; compact?: boolean
+// Layout everywhere: icon + title on one line, description below.
+function FeatureCard({ icon: Icon, title, description, onDark, badge }: {
+  icon: React.ElementType; title: string; description: string; onDark?: boolean; badge?: string
 }) {
   if (onDark) {
     return (
-      <div className="h-full rounded-2xl border border-white/10 bg-white/5 p-5 sm:p-6 backdrop-blur-sm">
-        <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-lg">
-          <Icon className="h-5 w-5" />
+      <div className="h-full rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
+        <div className="mb-2.5 flex items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-lg">
+            <Icon className="h-5 w-5" />
+          </div>
+          <h3 className="text-sm font-bold text-white leading-tight">{title}</h3>
         </div>
-        <h3 className="mb-2 text-base font-bold text-white">{title}</h3>
         <p className="text-sm leading-relaxed text-white/70">{description}</p>
       </div>
     )
   }
   return (
-    <div className="h-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
+    <div className="relative h-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
       <div className="h-1 bg-gradient-to-r from-violet-600 to-fuchsia-600" />
-      <div className={compact ? 'p-4' : 'p-5 sm:p-6'}>
-        <div className={cn('mb-3 flex items-center gap-3', !compact && 'mb-4 flex-col items-start gap-0')}>
-          <div className={cn(
-            'flex shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary',
-            compact ? 'h-9 w-9' : 'mb-3 h-11 w-11'
-          )}>
-            <Icon className={compact ? 'h-5 w-5' : 'h-5 w-5'} />
+      <div className="p-4">
+        <div className="mb-2.5 flex items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+            <Icon className="h-5 w-5" />
           </div>
-          <h3 className={cn('font-bold text-foreground leading-tight', compact ? 'text-sm' : 'text-base')}>{title}</h3>
+          <h3 className="text-sm font-bold text-foreground leading-tight">{title}</h3>
         </div>
+        {badge && <div className="absolute right-4 top-4 text-4xl font-extrabold text-primary/[0.08] select-none">{badge}</div>}
         <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
       </div>
     </div>
@@ -422,16 +423,16 @@ const HOW_IT_WORKS = [
 ]
 
 const BUBBLES = [
-  { w: 8,  h: 8,  top: 10, left: 15, dur: 18, delay: 0   },
-  { w: 12, h: 12, top: 25, left: 75, dur: 22, delay: 2   },
-  { w: 6,  h: 6,  top: 60, left: 40, dur: 16, delay: 1   },
-  { w: 10, h: 10, top: 80, left: 85, dur: 20, delay: 3   },
-  { w: 7,  h: 7,  top: 45, left: 10, dur: 24, delay: 0.5 },
-  { w: 9,  h: 9,  top: 70, left: 60, dur: 19, delay: 1.5 },
-  { w: 5,  h: 5,  top: 30, left: 90, dur: 21, delay: 4   },
-  { w: 11, h: 11, top: 15, left: 50, dur: 17, delay: 2.5 },
-  { w: 6,  h: 6,  top: 90, left: 25, dur: 23, delay: 0.8 },
-  { w: 8,  h: 8,  top: 55, left: 70, dur: 15, delay: 3.5 },
+  { w: 8,  h: 8,  top: 10, left: 15, dur: 6,   delay: 0   },
+  { w: 12, h: 12, top: 25, left: 75, dur: 7.5, delay: 2   },
+  { w: 6,  h: 6,  top: 60, left: 40, dur: 5.5, delay: 1   },
+  { w: 10, h: 10, top: 80, left: 85, dur: 7,   delay: 3   },
+  { w: 7,  h: 7,  top: 45, left: 10, dur: 8,   delay: 0.5 },
+  { w: 9,  h: 9,  top: 70, left: 60, dur: 6.5, delay: 1.5 },
+  { w: 5,  h: 5,  top: 30, left: 90, dur: 7,   delay: 4   },
+  { w: 11, h: 11, top: 15, left: 50, dur: 5.8, delay: 2.5 },
+  { w: 6,  h: 6,  top: 90, left: 25, dur: 7.8, delay: 0.8 },
+  { w: 8,  h: 8,  top: 55, left: 70, dur: 5,   delay: 3.5 },
 ]
 
 // ---- Location hook -----------------------------------------------------------
@@ -488,12 +489,12 @@ export default function HomePage() {
     <div className="flex min-h-screen flex-col overflow-x-hidden bg-background">
 
       {/* ---- HERO ---- */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-violet-700 via-violet-600 to-fuchsia-600">
+      <section className="relative overflow-hidden bg-gradient-to-b from-violet-600 via-violet-600 to-fuchsia-600 md:bg-gradient-to-br md:from-violet-700 md:via-violet-600 md:to-fuchsia-600">
         <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
           {BUBBLES.map((b, i) => (
-            <div key={i} className="absolute rounded-full bg-white/20"
+            <div key={i} className="absolute rounded-full bg-white/30"
               style={{ width: `${b.w}px`, height: `${b.h}px`, top: `${b.top}%`, left: `${b.left}%`,
-                animation: `float ${b.dur}s ease-in-out infinite`, animationDelay: `${b.delay}s` }} />
+                animation: `hero-bubble ${b.dur}s ease-in-out infinite`, animationDelay: `${b.delay}s` }} />
           ))}
         </div>
 
@@ -548,7 +549,7 @@ export default function HomePage() {
           </div>
 
           <div className="hidden md:flex items-center justify-center">
-            <div className="w-full max-w-sm animate-[float_8s_ease-in-out_infinite]">
+            <div className="w-full max-w-sm animate-[hero-bob_3.5s_ease-in-out_infinite]">
               <HeroIllustration />
             </div>
           </div>
@@ -624,19 +625,9 @@ export default function HomePage() {
       <section className="container mx-auto px-4 sm:px-6 py-12 sm:py-16 md:py-20">
         <SectionHeader tag="Process" title="How It Works" sub="Our simple 4-step process makes laundry safe and easy." />
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
-          {HOW_IT_WORKS.map((step, i) => {
-            const Icon = step.icon
-            return (
-              <div key={i} className="relative overflow-hidden rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-sm">
-                <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-violet-600 to-fuchsia-600 text-white shadow-md">
-                  <Icon className="h-5 w-5" />
-                </div>
-                <div className="absolute right-4 top-3 text-5xl font-extrabold text-primary/[0.07] select-none">{i + 1}</div>
-                <h3 className="mb-1 text-base font-bold text-foreground">{step.title}</h3>
-                <p className="text-sm text-muted-foreground leading-relaxed">{step.desc}</p>
-              </div>
-            )
-          })}
+          {HOW_IT_WORKS.map((step, i) => (
+            <FeatureCard key={i} icon={step.icon} title={step.title} description={step.desc} badge={String(i + 1)} />
+          ))}
         </div>
       </section>
 
@@ -689,7 +680,7 @@ export default function HomePage() {
         <SectionHeader tag="Why Choose Us" title="Why Laundrease Stands Out" sub="We combine professional quality with the convenience of a tap." />
         <Carousel>
           {WHY_CARDS.map((card, i) => (
-            <FeatureCard key={i} icon={card.icon} title={card.title} description={card.description} compact />
+            <FeatureCard key={i} icon={card.icon} title={card.title} description={card.description} />
           ))}
         </Carousel>
       </section>

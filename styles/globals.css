@@ -151,6 +151,20 @@ body {
   animation: float 3s ease-in-out infinite;
 }
 
+/* Hero: noticeable bob for the washing machine illustration */
+@keyframes hero-bob {
+  0%   { transform: translateY(0px) rotate(0deg); }
+  50%  { transform: translateY(-22px) rotate(-1.2deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+/* Hero: bubbles rise upward with a sideways sway, fading as they go */
+@keyframes hero-bubble {
+  0%   { transform: translate(0, 0) scale(1);           opacity: 0.9; }
+  50%  { transform: translate(10px, -45px) scale(1.15); opacity: 0.6; }
+  100% { transform: translate(-6px, -90px) scale(0.85); opacity: 0; }
+}
+
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
   50% { box-shadow: 0 0 20px 5px rgba(139, 92, 246, 0.3); }
