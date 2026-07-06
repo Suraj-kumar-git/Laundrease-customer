@@ -68,16 +68,34 @@ export async function GET(req: NextRequest) {
         u.email as owner_email
     `
     
-    // Add distance calculation if coordinates provided
+    // Add distance calculation if coordinates provided — use nearest service area
     if (latitude && longitude) {
+      const lat = parseFloat(latitude)
+      const lng = parseFloat(longitude)
       sql += `,
-        (
-          6371 * acos(
-            cos(radians(${parseFloat(latitude)})) 
-            * cos(radians(lsp.latitude)) 
-            * cos(radians(lsp.longitude) - radians(${parseFloat(longitude)})) 
-            + sin(radians(${parseFloat(latitude)})) 
-            * sin(radians(lsp.latitude))
+        LEAST(
+          COALESCE((
+            SELECT MIN(
+              6371 * acos(LEAST(1, GREATEST(-1,
+                cos(radians(${lat})) * cos(radians(psa.latitude::float))
+                * cos(radians(psa.longitude::float) - radians(${lng}))
+                + sin(radians(${lat})) * sin(radians(psa.latitude::float))
+              )))
+            )
+            FROM provider_service_areas psa
+            WHERE psa.provider_id = lsp.id
+              AND psa.is_active = TRUE
+              AND psa.latitude IS NOT NULL
+          ), 99999),
+          COALESCE(
+            CASE WHEN lsp.latitude IS NOT NULL AND lsp.longitude IS NOT NULL THEN
+              6371 * acos(LEAST(1, GREATEST(-1,
+                cos(radians(${lat})) * cos(radians(lsp.latitude::float))
+                * cos(radians(lsp.longitude::float) - radians(${lng}))
+                + sin(radians(${lat})) * sin(radians(lsp.latitude::float))
+              )))
+            END,
+            99999
           )
         ) AS distance_km
       `
@@ -95,20 +113,41 @@ export async function GET(req: NextRequest) {
     const params: any[] = []
     let paramIndex = 1
     
-    // Filter by location
+    // Filter by location — check any active service area first, fall back to profile coords
     if (latitude && longitude) {
+      const lat = parseFloat(latitude)
+      const lng = parseFloat(longitude)
+      const rad = parseFloat(radius)
       sql += `
         AND (
-          6371 * acos(
-            cos(radians($${paramIndex})) 
-            * cos(radians(lsp.latitude)) 
-            * cos(radians(lsp.longitude) - radians($${paramIndex + 1})) 
-            + sin(radians($${paramIndex})) 
-            * sin(radians(lsp.latitude))
+          EXISTS (
+            SELECT 1 FROM provider_service_areas psa
+            WHERE psa.provider_id = lsp.id
+              AND psa.is_active = TRUE
+              AND psa.latitude  IS NOT NULL
+              AND psa.longitude IS NOT NULL
+              AND (
+                6371 * acos(LEAST(1, GREATEST(-1,
+                  cos(radians(${lat})) * cos(radians(psa.latitude::float))
+                  * cos(radians(psa.longitude::float) - radians(${lng}))
+                  + sin(radians(${lat})) * sin(radians(psa.latitude::float))
+                )))
+              ) <= ${rad}
           )
-        ) <= $${paramIndex + 2}
+          OR (
+            lsp.latitude  IS NOT NULL
+            AND lsp.longitude IS NOT NULL
+            AND (
+              6371 * acos(LEAST(1, GREATEST(-1,
+                cos(radians($${paramIndex})) * cos(radians(lsp.latitude::float))
+                * cos(radians(lsp.longitude::float) - radians($${paramIndex + 1}))
+                + sin(radians($${paramIndex})) * sin(radians(lsp.latitude::float))
+              )))
+            ) <= $${paramIndex + 2}
+          )
+        )
       `
-      params.push(parseFloat(latitude), parseFloat(longitude), parseFloat(radius))
+      params.push(lat, lng, rad)
       paramIndex += 3
     }
     
@@ -154,18 +193,39 @@ export async function GET(req: NextRequest) {
     let countParamIndex = 1
     
     if (latitude && longitude) {
+      const lat = parseFloat(latitude)
+      const lng = parseFloat(longitude)
+      const rad = parseFloat(radius)
       countSql += `
         AND (
-          6371 * acos(
-            cos(radians($${countParamIndex})) 
-            * cos(radians(lsp.latitude)) 
-            * cos(radians(lsp.longitude) - radians($${countParamIndex + 1})) 
-            + sin(radians($${countParamIndex})) 
-            * sin(radians(lsp.latitude))
+          EXISTS (
+            SELECT 1 FROM provider_service_areas psa
+            WHERE psa.provider_id = lsp.id
+              AND psa.is_active = TRUE
+              AND psa.latitude  IS NOT NULL
+              AND psa.longitude IS NOT NULL
+              AND (
+                6371 * acos(LEAST(1, GREATEST(-1,
+                  cos(radians(${lat})) * cos(radians(psa.latitude::float))
+                  * cos(radians(psa.longitude::float) - radians(${lng}))
+                  + sin(radians(${lat})) * sin(radians(psa.latitude::float))
+                )))
+              ) <= ${rad}
           )
-        ) <= $${countParamIndex + 2}
+          OR (
+            lsp.latitude  IS NOT NULL
+            AND lsp.longitude IS NOT NULL
+            AND (
+              6371 * acos(LEAST(1, GREATEST(-1,
+                cos(radians($${countParamIndex})) * cos(radians(lsp.latitude::float))
+                * cos(radians(lsp.longitude::float) - radians($${countParamIndex + 1}))
+                + sin(radians($${countParamIndex})) * sin(radians(lsp.latitude::float))
+              )))
+            ) <= $${countParamIndex + 2}
+          )
+        )
       `
-      countParams.push(parseFloat(latitude), parseFloat(longitude), parseFloat(radius))
+      countParams.push(lat, lng, rad)
       countParamIndex += 3
     }
     

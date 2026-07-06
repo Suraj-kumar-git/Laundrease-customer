@@ -75,6 +75,7 @@ export async function GET(req: NextRequest) {
          s.name            AS service_name,
          s.category        AS service_category,
          cis.unit_price,
+         ppsp.mrp,
          cis.line_total,
          cis.is_express,
          cis.express_multiplier
@@ -82,6 +83,10 @@ export async function GET(req: NextRequest) {
        JOIN cart_item_services cis ON cis.cart_item_id = ci.id
        JOIN product_types pt ON pt.id = ci.product_type_id
        JOIN services s ON s.id = cis.service_id
+       LEFT JOIN provider_product_service_prices ppsp
+         ON ppsp.provider_id = (SELECT provider_id FROM shopping_carts WHERE id = $1)
+         AND ppsp.product_type_id = ci.product_type_id
+         AND ppsp.service_id = cis.service_id
        WHERE ci.cart_id = $1
        ORDER BY ci.id, s.name`,
       [c.id]

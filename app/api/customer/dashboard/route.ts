@@ -120,14 +120,18 @@ export async function GET(req: NextRequest) {
       : { balance: 0, currency: 'INR' }
 
     // ---- 6. Coupons (global active + user-specific) -----------------
-    // Merges platform-wide coupons with personal ones (referral codes, etc.)
-    // Excludes coupons the user has already used up (usage_limit_per_user reached)
+    // Only returns coupons that are currently usable by this customer:
+    //   - Active and within date range
+    //   - first_order_only: only when user has no non-cancelled paid/COD orders
+    //   - usage_limit_per_user: user has not yet reached the per-user cap
+    //     (cancelled-order redemptions don't count against the limit)
     const couponsResult = await query(`
       WITH user_order_status AS (
         SELECT EXISTS (
           SELECT 1
           FROM orders o
-          WHERE o.customer_id = $1 AND o.status NOT IN ('cancelled', 'failed')
+          WHERE o.customer_id = $1
+            AND o.status NOT IN ('cancelled', 'failed')
             AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')
         ) AS has_placed_order
       )
@@ -141,23 +145,30 @@ export async function GET(req: NextRequest) {
         c.min_order_amount,
         c.usage_limit_per_user,
         c.first_order_only,
-        COALESCE((
-          SELECT COUNT(*)
-          FROM coupon_redemptions cr
-          LEFT JOIN orders o ON o.id = cr.order_id
-          WHERE cr.coupon_code = c.code
-            AND cr.user_id = $1
-            AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))
-        ), 0)::int AS times_used
+        c.ends_at
       FROM coupons c
       CROSS JOIN user_order_status uos
       WHERE c.is_active = TRUE
         AND (c.applicable_to_user IS NULL OR c.applicable_to_user = $1)
         AND (c.starts_at IS NULL OR c.starts_at <= NOW())
-        AND (c.ends_at IS NULL OR c.ends_at >= NOW())
+        AND (c.ends_at   IS NULL OR c.ends_at   >= NOW())
+        -- first_order_only coupons are hidden once the user has a real order in progress
         AND (
           COALESCE(c.first_order_only, FALSE) = FALSE
           OR uos.has_placed_order = FALSE
+        )
+        -- Per-user usage cap: hide coupon if the user has already redeemed it
+        -- (on a non-cancelled order). Cancelled-order redemptions don't count.
+        AND (
+          c.usage_limit_per_user IS NULL
+          OR (
+            SELECT COUNT(*)
+            FROM coupon_redemptions cr
+            LEFT JOIN orders o ON o.id = cr.order_id
+            WHERE cr.coupon_code = c.code
+              AND cr.user_id = $1
+              AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))
+          ) < c.usage_limit_per_user
         )
       ORDER BY c.min_order_amount ASC NULLS FIRST
       LIMIT 10;
@@ -245,7 +256,7 @@ export async function GET(req: NextRequest) {
         maxDiscount:    c.max_discount ? parseFloat(c.max_discount) : null,
         minOrderAmount: c.min_order_amount ? parseFloat(c.min_order_amount) : null,
         expiresAt:      c.ends_at ?? null,
-        isPersonal:     c.usage_limit_per_user === 1,  // hint for UI to show differently
+        isPersonal:     c.applicable_to_user != null,  // personal = targeted to this user specifically
       })),
 
       statistics: {

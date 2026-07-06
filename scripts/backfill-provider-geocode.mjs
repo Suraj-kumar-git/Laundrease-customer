@@ -6,7 +6,7 @@
 import { Client } from "pg";
 import "dotenv/config";
 
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 const REQUEST_DELAY_MS = 200; // stay well under Google's rate limits
 
 // Coarse city-centroid fallback — used only when the Google Geocoding API

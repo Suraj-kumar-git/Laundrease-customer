@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Package, Plus, ChevronRight, Calendar, Clock,
   Store, Zap, Loader2, AlertCircle, Filter,
-  ShoppingBag, CheckCircle, XCircle, Truck, Star,
+  ShoppingBag, CheckCircle, XCircle, Truck, Star, ArrowLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
@@ -305,6 +305,9 @@ function PageContent() {
     <>
       <div className="container mx-auto max-w-5xl px-4 py-6">
         {/* Header */}
+        <Link href="/customer/dashboard" className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-3.5 w-3.5" /> Dashboard
+        </Link>
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground">My Orders</h1>

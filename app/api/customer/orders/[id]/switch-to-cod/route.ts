@@ -59,7 +59,9 @@ export async function POST(
 
       const newPaymentMethod = walletPaid > 0 ? 'wallet+cod' : 'cod'
       await client.query(
-        `UPDATE orders SET payment_method = $1, payment_status = 'pending', updated_at = NOW() WHERE id = $2`,
+        `UPDATE orders SET payment_method = $1, payment_status = 'pending',
+          status = CASE WHEN status = 'failed' THEN 'pending' ELSE status END,
+          updated_at = NOW() WHERE id = $2`,
         [newPaymentMethod, orderId]
       )
 

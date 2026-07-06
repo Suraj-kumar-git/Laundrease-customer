@@ -38,6 +38,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
   const [invoiceError,   setInvoiceError]   = useState<string | null>(null)
 
   useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' })
     setWindowSize({ width: window.innerWidth, height: window.innerHeight })
     const timer = setTimeout(() => setShowConfetti(false), 5000)
     return () => clearTimeout(timer)

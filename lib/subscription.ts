@@ -63,7 +63,7 @@ export const PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL = `
     INNER JOIN laundry_subscription_plans lsp ON lsp.id = lps.plan_id
     WHERE lps.provider_id = lp.id
       AND lps.status = 'active'
-      AND lps.ends_at > NOW()
+      AND lps.grace_period_ends_at > NOW()  -- 3-day grace period after expiry
       AND (
         lsp.max_orders IS NULL
         OR (

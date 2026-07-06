@@ -276,7 +276,7 @@ export function AddressProviderStep({
               ))}
               <div className="border-t border-border/40 p-2">
                 <a
-                  href="/customer/addresses"
+                  href="/customer/addresses/new"
                   className="flex items-center justify-center gap-1.5 rounded-lg px-4 py-2 text-xs font-medium text-primary hover:bg-primary/5"
                 >
                   <Plus className="h-3.5 w-3.5" /> Add new address

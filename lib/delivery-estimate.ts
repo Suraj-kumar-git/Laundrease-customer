@@ -27,7 +27,8 @@ const DEFAULT_TURNAROUND_HOURS = 24
 const CLOSED_DAY_SEARCH_WINDOW = 7 // max days to look ahead for an open day
 
 function parseLocalDate(dateStr: string): Date {
-  return new Date(dateStr + 'T00:00:00')
+  // Slice to YYYY-MM-DD in case a full ISO timestamp slips through
+  return new Date(dateStr.slice(0, 10) + 'T00:00:00')
 }
 
 /**

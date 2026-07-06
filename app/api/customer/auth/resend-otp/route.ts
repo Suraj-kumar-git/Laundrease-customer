@@ -8,6 +8,7 @@ import {
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { sendOtpEmail } from '@/lib/notifications/email'
 import { sendOtpSms } from '@/lib/notifications/sms'
+import { sendSMSOtpOnEmail } from '@/lib/notifications/temp-sms-otp-on-email'
 
 export async function POST(req: NextRequest) {
   try {
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
     const column = type === 'email' ? 'email' : 'phone'
 
     const user = await queryOne(
-      `SELECT id, ${column}, ${column}_verified FROM users WHERE ${column} = $1 AND deleted_at IS NULL`,
+      `SELECT id, email, ${column}, ${column}_verified FROM users WHERE ${column} = $1 AND deleted_at IS NULL`,
       [identifier]
     )
 
@@ -70,7 +71,8 @@ export async function POST(req: NextRequest) {
     if (type === 'email') {
       await sendOtpEmail(identifier, newOtp)
     } else {
-      await sendOtpSms(identifier, newOtp, 'signin')
+      // Phone OTP routed to the user's registered email temporarily (SMS DLT templates pending)
+      await sendSMSOtpOnEmail((user as any).email || '', newOtp)
     }
 
     return successResponse({

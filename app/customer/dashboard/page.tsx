@@ -469,12 +469,12 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
   const handleCopy = async () => { await navigator.clipboard.writeText(coupon.code); setCopied(true); setTimeout(() => setCopied(false), 2000) }
   const discountLabel = coupon.discountType === 'percent' ? `${coupon.discountValue}% OFF` : `₹${coupon.discountValue} OFF`
   return (
-    <div className={cn('relative overflow-hidden rounded-xl border p-4',
-      coupon.isPersonal ? 'border-primary/30 bg-primary/5' : 'border-dashed border-border/60 bg-card')}>
+    <div className={cn('relative overflow-hidden rounded-xl border p-4 bg-primary/5',
+      coupon.isPersonal ? 'border-primary/30' : 'border-dashed border-border/60 bg-card')}>
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <div className={cn('mb-1 inline-block rounded-lg px-2.5 py-1 text-sm font-bold',
-            coupon.isPersonal ? 'bg-primary text-primary-foreground' : 'bg-foreground text-background')}>
+          <div className={cn('mb-1 inline-block rounded-lg px-2.5 py-1 text-sm font-bold bg-primary',
+            coupon.isPersonal ? 'text-primary-foreground' : 'text-background')}>
             {discountLabel}
           </div>
           <p className="text-sm font-semibold text-foreground leading-tight">{coupon.name}</p>

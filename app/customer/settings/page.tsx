@@ -5,13 +5,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Bell, Shield, Link2, Monitor, Trash2, Loader2,
   Check, Mail, MessageSquare, Smartphone, Save,
   AlertCircle, CheckCircle2, Construction, LogOut,
   Eye, BarChart3, Megaphone, RefreshCw, Chrome,
-  Facebook, ChevronRight,
+  Facebook, ChevronRight, ArrowLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
@@ -503,6 +504,9 @@ export default function SettingsPage() {
     <>
       <div className="container mx-auto max-w-3xl px-4 py-8 pb-24">
         {/* Header */}
+        <Link href="/customer/dashboard" className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-3.5 w-3.5" /> Dashboard
+        </Link>
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-foreground">Settings</h1>
           <p className="mt-1 text-sm text-muted-foreground">

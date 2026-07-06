@@ -50,14 +50,25 @@ export function NewsletterForm() {
         return
       }
 
-      toast({
-        title: "You're subscribed! 🎉",
-        description:
-          "You'll receive our latest updates and offers. You can unsubscribe anytime from the emails we send.",
-        duration: 5000,
-        className:
-          "bg-gradient-to-r from-violet-600 to-purple-600 text-white border-none",
-      })
+      if (data?.data?.already_subscribed) {
+        toast({
+          title: "You're already with us! ✨",
+          description:
+            "Great taste — you're already a subscribed member. Stay tuned, the best deals and updates are heading your way!",
+          duration: 6000,
+          className:
+            "bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-none",
+        })
+      } else {
+        toast({
+          title: "You're subscribed! 🎉",
+          description:
+            "You'll receive our latest updates and offers. You can unsubscribe anytime from the emails we send.",
+          duration: 5000,
+          className:
+            "bg-gradient-to-r from-violet-600 to-purple-600 text-white border-none",
+        })
+      }
 
       setEmail("")
     } catch {
