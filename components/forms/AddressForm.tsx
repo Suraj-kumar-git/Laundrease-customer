@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { Loader2, MapPin, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { PlaceAutocompleteInput } from '@/components/common/PlaceAutocompleteInput'
 
 interface AddressFormProps {
   /** When editing — pass existing address values */
@@ -147,6 +148,10 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
     if (!/^\d{6}$/.test(form.postal_code.trim())) errs.postal_code = 'Enter a valid 6-digit PIN code'
     if (!form.city.trim())          errs.city           = 'City is required'
     if (!form.country_code.trim())  errs.country_code   = 'Country code is required'
+    if (form.contact_phone.trim()) {
+      const digits = form.contact_phone.replace(/^\+91/, '').replace(/\D/g, '')
+      if (!/^[6-9]\d{9}$/.test(digits)) errs.contact_phone = 'Enter a valid 10-digit Indian mobile number'
+    }
     setErrors(errs)
     return Object.keys(errs).length === 0
   }
@@ -214,8 +219,22 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
       </Field>
 
       <Field label="Address Line 1" required error={errors.address_line1}>
-        <Input value={form.address_line1} onChange={set('address_line1')}
-          placeholder="Flat / House No., Building / Street name" maxLength={255} />
+        <PlaceAutocompleteInput
+          value={form.address_line1}
+          onChange={v => setForm(prev => ({ ...prev, address_line1: v }))}
+          placeholder="Search building, street or area…"
+          className="mt-1 w-full pl-9 pr-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+          types={['geocode']}
+          onAddressComponents={({ address_line1, city, state, postal_code }) => {
+            setForm(prev => ({
+              ...prev,
+              address_line1: address_line1 || prev.address_line1,
+              city:          city          || prev.city,
+              state:         state         || prev.state,
+              postal_code:   postal_code   || prev.postal_code,
+            }))
+          }}
+        />
       </Field>
 
       <Field label="Address Line 2">
@@ -289,9 +308,18 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
           <Input value={form.contact_name} onChange={set('contact_name')}
             placeholder="Person to contact" maxLength={100} />
         </Field>
-        <Field label="Contact Phone">
-          <Input value={form.contact_phone} onChange={set('contact_phone')}
-            placeholder="+91 98765 43210" type="tel" maxLength={20} />
+        <Field label="Contact Phone" error={errors.contact_phone}>
+          <Input
+            value={form.contact_phone}
+            onChange={e => {
+              const raw = e.target.value.replace(/[^\d+]/g, '')
+              if (raw.length <= 13) setForm(prev => ({ ...prev, contact_phone: raw }))
+            }}
+            placeholder="+91 98765 43210"
+            type="tel"
+            inputMode="tel"
+            maxLength={13}
+          />
         </Field>
       </div>
 

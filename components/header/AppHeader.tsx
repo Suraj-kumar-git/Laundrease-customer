@@ -109,7 +109,6 @@ function DesktopUserMenu({ user, onLogout }: { user: any; onLogout: () => void }
   const menuItems = [
     { icon: User,      label: 'My Profile',    href: `/customer/profile/${user?.id}` },
     { icon: Package,   label: 'My Orders',     href: '/customer/orders' },
-    { icon: Wallet,    label: 'Wallet',        href: '/customer/wallet' },
     { icon: Gift,      label: 'Refer & Earn',  href: '/customer/refer-and-earn' },
     { icon: MapPin,    label: 'Addresses',     href: '/customer/addresses' },
     { icon: Settings,  label: 'Settings',      href: '/customer/settings' },
@@ -211,10 +210,11 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
     router.push('/')
   }
 
-  const isActive = (href: string) =>
-    href === '/customer/dashboard'
-      ? pathname === href
-      : pathname.startsWith(href)
+  const isActive = (href: string) => {
+    if (href === '/customer/orders') return pathname === '/customer/orders' || (pathname.startsWith('/customer/orders/') && !pathname.startsWith('/customer/orders/create'))
+    if (href === '/customer/dashboard') return pathname === href
+    return pathname.startsWith(href)
+  }
 
   // Logged-in mobile menu items (nav + account merged)
   const mobileLoggedInItems = [
@@ -224,7 +224,6 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
     // divider placeholder â€” handled by index
     { href: '/customer/addresses',    label: 'Addresses',   icon: MapPin },
     { href: `/customer/profile/${user?.id}`, label: 'My Profile', icon: User },
-    { href: '/customer/wallet',       label: 'Wallet',      icon: Wallet },
     { href: '/customer/refer-and-earn', label: 'Refer & Earn', icon: Gift },
     { href: '/customer/settings',     label: 'Settings',    icon: Settings },
     { href: '/customer/feedback',     label: 'Feedback', icon: MessagesSquare },

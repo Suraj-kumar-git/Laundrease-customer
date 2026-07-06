@@ -8,6 +8,50 @@ import { PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL } from '@/lib/subscription'
 // Query params: ?location=411045 (pincode or city)
 // Returns providers serving that area with rating_count
 
+const SHORT_TO_FULL: Record<string, string> = {
+  sun: 'sunday', mon: 'monday', tue: 'tuesday', wed: 'wednesday',
+  thu: 'thursday', fri: 'friday', sat: 'saturday',
+}
+
+// Normalise operating hours to { monday: { open, close } | 'closed', ... }.
+// Accepts either the normalized form (already full names from provider_operating_hours
+// subquery) or the legacy registration form (3-letter keys with a `closed` boolean).
+function normalizeOperatingHours(hours: any): Record<string, { open: string; close: string } | 'closed'> {
+  if (!hours || typeof hours !== 'object') return {}
+  const result: Record<string, { open: string; close: string } | 'closed'> = {}
+  for (const [key, val] of Object.entries(hours)) {
+    const fullName = SHORT_TO_FULL[key.toLowerCase()] ?? key
+    if (val === 'closed') {
+      result[fullName] = 'closed'
+    } else if (typeof val === 'object' && val !== null) {
+      const v = val as any
+      if (v.closed === true) {
+        result[fullName] = 'closed'
+      } else {
+        result[fullName] = { open: v.open ?? v.open_time ?? '09:00', close: v.close ?? v.close_time ?? '18:00' }
+      }
+    }
+  }
+  return result
+}
+
+// Subquery: build normalized hours from provider_operating_hours table.
+// Returns null if no rows exist for that provider (falls back to legacy column).
+const NORMALIZED_HOURS_SUBQUERY = `(
+  SELECT json_object_agg(
+    CASE day_of_week
+      WHEN 0 THEN 'sunday'  WHEN 1 THEN 'monday' WHEN 2 THEN 'tuesday'
+      WHEN 3 THEN 'wednesday' WHEN 4 THEN 'thursday'
+      WHEN 5 THEN 'friday'  WHEN 6 THEN 'saturday'
+    END,
+    CASE WHEN is_closed THEN to_json('closed'::text)
+         ELSE json_build_object('open', open_time::text, 'close', close_time::text)
+    END
+  )
+  FROM provider_operating_hours
+  WHERE provider_id = lp.id
+) AS normalized_hours`
+
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const location = searchParams.get('location')?.trim()
@@ -27,7 +71,7 @@ export async function GET(req: NextRequest) {
 
     const result = await query(
       isPincode
-        ? `SELECT DISTINCT
+        ? `SELECT
              lp.id,
              lp.business_name,
              lp.business_address,
@@ -41,20 +85,25 @@ export async function GET(req: NextRequest) {
              lp.services_offered,
              lp.operating_hours,
              lp.is_verified,
-             ${minPriceKgExpr} AS min_price_kg
+             ${minPriceKgExpr} AS min_price_kg,
+             ${NORMALIZED_HOURS_SUBQUERY}
            FROM laundry_profiles lp
-           JOIN provider_service_areas psa ON psa.provider_id = lp.id
            WHERE lp.status = 'active'
              AND lp.is_verified = TRUE
              AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}
-             AND psa.is_active = TRUE
-             AND psa.postal_code = $1
+             AND EXISTS (
+               SELECT 1 FROM provider_service_areas psa
+               WHERE psa.provider_id = lp.id
+                 AND psa.is_active   = TRUE
+                 AND psa.postal_code = $1
+             )
            ORDER BY lp.rating DESC, lp.business_name ASC`
         : `SELECT
              lp.id, lp.business_name, lp.business_address, lp.city, lp.postal_code,
              lp.service_area, lp.rating, lp.rating_count, lp.capacity,
              lp.certifications, lp.services_offered, lp.operating_hours, lp.is_verified,
-             ${minPriceKgExpr} AS min_price_kg
+             ${minPriceKgExpr} AS min_price_kg,
+             ${NORMALIZED_HOURS_SUBQUERY}
            FROM laundry_profiles lp
            WHERE lp.status = 'active'
              AND lp.is_verified = TRUE
@@ -77,7 +126,7 @@ export async function GET(req: NextRequest) {
         capacity: r.capacity,
         certifications: r.certifications ?? [],
         services_offered: r.services_offered ?? [],
-        operating_hours: r.operating_hours ?? {},
+        operating_hours: normalizeOperatingHours(r.normalized_hours ?? r.operating_hours),
         is_verified: r.is_verified,
         min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
       })),

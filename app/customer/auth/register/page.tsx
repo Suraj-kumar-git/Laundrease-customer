@@ -89,10 +89,33 @@ function PageContent() {
     reason?: string
   }>({ status: "idle" })
 
-  // Pre-fill referral code from URL
+  // Pre-fill from sessionStorage draft (set when coming back from verify page)
+  // then layer URL params on top (ref=, email=, phone= override saved values).
   useEffect(() => {
-    const ref = searchParams.get("ref")
-    if (ref) setForm(prev => ({ ...prev, referral_code: ref.toUpperCase() }))
+    try {
+      const saved = sessionStorage.getItem("reg_draft")
+      if (saved) {
+        const draft = JSON.parse(saved)
+        setForm(prev => ({
+          ...prev,
+          full_name:     draft.full_name     || prev.full_name,
+          email:         draft.email         || prev.email,
+          phone:         draft.phone         || prev.phone,
+          referral_code: draft.referral_code || prev.referral_code,
+        }))
+      }
+    } catch { /* sessionStorage unavailable */ }
+
+    // URL params override the draft (verify page passes email/phone back)
+    const ref   = searchParams.get("ref")
+    const email = searchParams.get("email")
+    const phone = searchParams.get("phone")
+    setForm(prev => ({
+      ...prev,
+      ...(ref   ? { referral_code: ref.toUpperCase() } : {}),
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+    }))
   }, [searchParams])
 
   // Validate the referral code against the server, debounced — only once it
@@ -146,7 +169,16 @@ function PageContent() {
     setSubmitting(true)
     try {
       await register(form.full_name.trim(), form.email.trim().toLowerCase(), form.password, form.phone.trim(), form.referral_code.trim() || undefined)
-      // Registration succeeded — navigate to verify page
+      // Save non-sensitive fields so the register form is pre-filled if the
+      // user comes back via "Update it here" on the verify page.
+      try {
+        sessionStorage.setItem("reg_draft", JSON.stringify({
+          full_name:     form.full_name.trim(),
+          email:         form.email.trim().toLowerCase(),
+          phone:         form.phone.trim(),
+          referral_code: form.referral_code.trim(),
+        }))
+      } catch { /* sessionStorage unavailable */ }
       router.push(`/customer/auth/verify?email=${encodeURIComponent(form.email)}&phone=${encodeURIComponent(form.phone)}`)
     } catch (err: any) {
       setServerError(err.message || "Registration failed")
@@ -215,7 +247,7 @@ function PageContent() {
                   <Input id="phone" type="tel" placeholder="+919876543210" autoComplete="tel"
                     className={cn("pl-10", errors.phone && "border-destructive")}
                     value={form.phone}
-                    onChange={e => set("phone", e.target.value)}
+                    onChange={e => set("phone", e.target.value.replace(/[^\d+\s\-]/g, ''))}
                     disabled={submitting} />
                 </div>
                 {errors.phone

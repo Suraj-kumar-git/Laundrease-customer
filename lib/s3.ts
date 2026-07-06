@@ -139,27 +139,39 @@ export function buildDocKey(
 
 const PROVIDER_DOC_ALLOWED_MIME_TYPES = new Set([
   'image/jpeg', 'image/png', 'image/webp', 'application/pdf',
+  'image/heic', 'image/heif', // iPhone camera default format
 ])
 const PROVIDER_DOC_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10 MB
 
 /** Upload a provider document. Returns the S3 key (stored in laundry_profiles.documents JSONB). */
+const EXT_TO_MIME: Record<string, string> = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+  webp: 'image/webp', heic: 'image/jpeg', heif: 'image/jpeg', pdf: 'application/pdf',
+}
+
 export async function uploadProviderDocument(
   file:       File,
   providerId: string,
   docType:    string
 ): Promise<string> {
-  if (!PROVIDER_DOC_ALLOWED_MIME_TYPES.has(file.type)) {
-    throw new Error(`Unsupported file type: ${file.type}. Allowed: JPEG, PNG, WEBP, PDF`)
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? 'bin'
+
+  // iOS often sends HEIC/HEIF as empty string or image/heic — normalise to jpeg
+  // (S3 stores the bytes correctly; HEIC is just a container for JPEG-XT data)
+  let contentType = file.type || EXT_TO_MIME[ext] || 'application/octet-stream'
+  if (contentType === 'image/heic' || contentType === 'image/heif') contentType = 'image/jpeg'
+
+  if (!PROVIDER_DOC_ALLOWED_MIME_TYPES.has(contentType) && contentType !== 'application/octet-stream') {
+    throw new Error(`Unsupported file type: ${contentType}. Allowed: JPEG, PNG, WEBP, PDF`)
   }
   if (file.size > PROVIDER_DOC_MAX_FILE_SIZE_BYTES) {
     throw new Error(`File too large (max 10 MB): ${file.name}`)
   }
 
-  const ext   = file.name.split('.').pop()?.toLowerCase() ?? 'bin'
   const uuid  = crypto.randomUUID()
   const s3Key = `laundry/${providerId}/${docType}/${uuid}.${ext}`
 
-  await uploadBuffer(s3Key, Buffer.from(await file.arrayBuffer()), file.type, {
+  await uploadBuffer(s3Key, Buffer.from(await file.arrayBuffer()), contentType, {
     metadata: {
       provider_id: providerId,
       doc_type:    docType,
@@ -243,7 +255,7 @@ export async function getJdSignedUrl(s3Key: string): Promise<string | null> {
 
 // ─── Item-protection claim photos ──────────────────────────────────────────
 
-const CLAIM_PHOTO_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const CLAIM_PHOTO_ALLOWED_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic', 'image/heif'])
 const CLAIM_PHOTO_MAX_SIZE = 8 * 1024 * 1024 // 8 MB
 
 /** Upload a claim evidence photo. Returns the S3 key (stored in garment_claims.photo_urls). */
@@ -253,7 +265,7 @@ export async function uploadClaimPhoto(
   claimId: number
 ): Promise<string> {
   if (!CLAIM_PHOTO_ALLOWED_TYPES.has(file.type)) {
-    throw new Error(`Unsupported file type: ${file.type}. Allowed: JPEG, PNG, WEBP`)
+    throw new Error(`Unsupported file type: ${file.type}. Allowed: JPEG, PNG, WEBP, HEIC, HEIF`)
   }
   if (file.size > CLAIM_PHOTO_MAX_SIZE) {
     throw new Error('File too large (max 8 MB)')

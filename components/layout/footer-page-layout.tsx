@@ -1,4 +1,6 @@
-import React from 'react'
+'use client'
+
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -14,6 +16,18 @@ interface FooterPageLayoutProps {
   className?: string
 }
 
+// Resolves the correct "Home" href: /customer/dashboard for logged-in users,
+// /customer for guests. Checked once on mount via a lightweight API call.
+function useHomeHref() {
+  const [href, setHref] = useState('/customer')
+  useEffect(() => {
+    fetch('/api/customer/auth/me', { credentials: 'include' })
+      .then(r => { if (r.ok) setHref('/customer/dashboard') })
+      .catch(() => {})
+  }, [])
+  return href
+}
+
 /**
  * Shared wrapper for all footer-linked public pages.
  * Provides consistent top padding, breadcrumb nav, and max-width container.
@@ -24,6 +38,8 @@ export function FooterPageLayout({
   breadcrumbs,
   className,
 }: FooterPageLayoutProps) {
+  const homeHref = useHomeHref()
+
   return (
     <div className={cn('min-h-screen bg-background', className)}>
       {/* Breadcrumb */}
@@ -32,7 +48,7 @@ export function FooterPageLayout({
           <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
             <nav className="flex items-center gap-1.5 py-3 text-sm text-muted-foreground">
               <Link
-                href="/"
+                href={homeHref}
                 className="transition-colors hover:text-foreground"
               >
                 Home

@@ -117,7 +117,7 @@ function PaymentFailureContent() {
       const res  = await fetch(`/api/customer/orders/${order.id}/switch-to-cod`, { method: 'POST', credentials: 'include' })
       const json = await res.json()
       if (!json.success) throw new Error(json.error ?? 'Failed to switch to COD')
-      router.push(`/customer/orders/payment/success?order_id=${order.id}`)
+      router.push(`/customer/orders/payment/success?order_id=${order.id}&source=cod_switch`)
     } catch (err: any) {
       setActionError(err.message || 'Could not switch to Cash on Delivery.')
       setActionLoading(null)
@@ -154,7 +154,7 @@ function PaymentFailureContent() {
       <div className="container mx-auto max-w-md px-4 py-16 text-center">
         <AlertCircle className="mx-auto mb-4 h-12 w-12 text-muted-foreground/40" />
         <p className="font-medium text-foreground">{loadError ?? 'Order not found'}</p>
-        <Button className="mt-6" onClick={() => router.push('/customer')}>Go to Home</Button>
+        <Button className="mt-6" onClick={() => router.push('/customer/dashboard')}>Go to Dashboard</Button>
       </div>
     )
   }

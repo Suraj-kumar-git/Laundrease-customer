@@ -4,6 +4,10 @@
 // Lightweight Google Places autocomplete text input. Type to search, pick a
 // suggestion from the dropdown. Degrades to a plain text input (no dropdown)
 // if NEXT_PUBLIC_GOOGLE_MAPS_API_KEY isn't configured.
+//
+// Two usage modes:
+//   1. Service area / location picker — onPlaceSelected fires with lat/lng
+//   2. Address auto-fill — onAddressComponents fires with parsed street/city/state/pincode
 
 import { useEffect, useRef, useState } from 'react'
 import { Loader2, MapPin } from 'lucide-react'
@@ -23,16 +27,25 @@ export interface PlaceSelection {
   lng: number
 }
 
-interface PlaceAutocompleteInputProps {
+export interface ParsedAddress {
+  address_line1: string
+  city: string
+  state: string
+  postal_code: string
+}
+
+export interface PlaceAutocompleteInputProps {
   value: string
   onChange: (value: string) => void
-  onPlaceSelected: (place: PlaceSelection) => void
+  onPlaceSelected?: (place: PlaceSelection) => void
+  onAddressComponents?: (parsed: ParsedAddress) => void
   placeholder?: string
   className?: string
+  types?: string[]
 }
 
 export function PlaceAutocompleteInput({
-  value, onChange, onPlaceSelected, placeholder, className,
+  value, onChange, onPlaceSelected, onAddressComponents, placeholder, className, types = ['geocode'],
 }: PlaceAutocompleteInputProps) {
   const [predictions, setPredictions] = useState<{ place_id: string; description: string }[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
@@ -56,6 +69,19 @@ export function PlaceAutocompleteInput({
       .catch(() => setMapsReady(false))
   }, [])
 
+  // If Maps finishes loading after the user has already typed something,
+  // fire the prediction immediately so they don't have to type another char.
+  useEffect(() => {
+    if (!mapsReady || !value.trim() || !autocompleteService.current) return
+    autocompleteService.current.getPlacePredictions(
+      { input: value, componentRestrictions: { country: 'in' }, types },
+      (results: any[] | null) => {
+        setPredictions(results?.map((r: any) => ({ place_id: r.place_id, description: r.description })) ?? [])
+        setShowDropdown(true)
+      }
+    )
+  }, [mapsReady]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (boxRef.current && !boxRef.current.contains(e.target as Node)) setShowDropdown(false)
@@ -73,7 +99,7 @@ export function PlaceAutocompleteInput({
 
     debounceRef.current = setTimeout(() => {
       autocompleteService.current.getPlacePredictions(
-        { input: v, componentRestrictions: { country: 'in' }, types: ['geocode'] },
+        { input: v, componentRestrictions: { country: 'in' }, types },
         (results: any[] | null) => {
           setPredictions(results?.map(r => ({ place_id: r.place_id, description: r.description })) ?? [])
           setShowDropdown(true)
@@ -89,9 +115,31 @@ export function PlaceAutocompleteInput({
     setResolving(true)
     geocoder.current.geocode({ placeId: p.place_id }, (results: any[] | null, status: string) => {
       setResolving(false)
-      if (status === 'OK' && results?.[0]) {
-        const loc = results[0].geometry.location
-        onPlaceSelected({ label: p.description, lat: loc.lat(), lng: loc.lng() })
+      if (status !== 'OK' || !results?.[0]) return
+
+      const result = results[0]
+      const loc = result.geometry.location
+
+      onPlaceSelected?.({ label: p.description, lat: loc.lat(), lng: loc.lng() })
+
+      if (onAddressComponents) {
+        const comps: any[] = result.address_components ?? []
+        const get = (type: string) =>
+          comps.find((c: any) => c.types.includes(type))?.long_name ?? ''
+
+        const streetNumber = get('street_number')
+        const route        = get('route')
+        const sublocality  = get('sublocality_level_1') || get('sublocality')
+        const locality     = get('locality')
+        const district     = get('administrative_area_level_2')
+        const state        = get('administrative_area_level_1')
+        const postalCode   = get('postal_code')
+
+        const streetPart    = [streetNumber, route].filter(Boolean).join(' ')
+        const address_line1 = streetPart || p.description.split(',')[0].trim()
+        const city          = locality || district || sublocality
+
+        onAddressComponents({ address_line1, city, state, postal_code: postalCode })
       }
     })
   }

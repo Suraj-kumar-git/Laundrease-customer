@@ -693,6 +693,26 @@ export default function OrderDetailPage() {
 
   return (
     <>
+      {/* Full-page payment redirect overlay */}
+      {payLoading && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-background/90 backdrop-blur-sm">
+          <div className="relative flex items-center justify-center">
+            <div className="h-16 w-16 rounded-full border-4 border-primary/20"/>
+            <div className="absolute h-16 w-16 animate-spin rounded-full border-4 border-transparent border-t-primary"/>
+          </div>
+          <div className="text-center space-y-1.5 px-6">
+            <p className="text-base font-semibold text-foreground">Connecting to payment partner…</p>
+            <p className="text-sm text-muted-foreground">You will be redirected to our secure payment page shortly. Please do not close or refresh this tab.</p>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs text-muted-foreground shadow-sm">
+            <svg className="h-3.5 w-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            256-bit SSL encrypted &amp; secure
+          </div>
+        </div>
+      )}
+
       <div className="container mx-auto max-w-5xl px-4 py-6">
         {/* Back + header */}
         <div className="mb-6">
@@ -824,7 +844,6 @@ export default function OrderDetailPage() {
                     <Clock className="h-3 w-3" /> {order.pickup_time_slot}
                   </p>
                 )}
-                {/* Reschedule button */}
                 {order.can_reschedule && (
                   <button
                     type="button"
@@ -836,28 +855,31 @@ export default function OrderDetailPage() {
                 )}
               </div>
               <div className="rounded-xl bg-muted/30 p-3">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Delivery</p>
                 {order.delivered_at ? (
+                  // Actual delivery — show exact timestamp from delivered_at
                   <>
-                    <p className="text-sm font-semibold text-foreground">{formatDateTime(order.delivered_at)}</p>
-                    <p className="mt-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">Delivered</p>
-                  </>
-                ) : order.delivery_date ? (
-                  <>
-                    <p className="text-sm font-semibold text-foreground">{formatDate(order.delivery_date)}</p>
-                    {order.delivery_time_slot && (
-                      <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="h-3 w-3" /> {order.delivery_time_slot}
-                      </p>
-                    )}
-                  </>
-                ) : order.estimated_delivery_date ? (
-                  <>
-                    <p className="text-sm font-semibold text-foreground">{formatDate(order.estimated_delivery_date)}</p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">Estimated — exact time slot confirmed once out for delivery</p>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Delivered</p>
+                    <p className="text-sm font-semibold text-foreground">
+                      {new Date(order.delivered_at).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                    </p>
+                    <p className="mt-0.5 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+                      <Clock className="h-3 w-3" />
+                      {new Date(order.delivered_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
                   </>
                 ) : (
-                  <p className="text-sm text-muted-foreground">To be scheduled</p>
+                  // Not yet delivered — show estimated delivery date when available
+                  <>
+                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Estimated Delivery</p>
+                    {order.estimated_delivery_date ? (
+                      <>
+                        <p className="text-sm font-semibold text-foreground">{formatDate(order.estimated_delivery_date)}</p>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">Time slot confirmed once out for delivery</p>
+                      </>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">To be scheduled</p>
+                    )}
+                  </>
                 )}
               </div>
             </div>

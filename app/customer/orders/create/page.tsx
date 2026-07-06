@@ -170,6 +170,7 @@ function cartToFlowState(cartData: any, items: any[]): Partial<OrderFlowState> {
     quantity:          item.quantity,
     weight_kg:         item.weight_kg,
     unit_price:        item.unit_price,
+    mrp:               item.mrp,
     line_total:        item.line_total,
     is_express:        item.is_express,
     express_multiplier:item.express_multiplier,
@@ -203,8 +204,54 @@ function PageContent() {
     per_kg_services: KgService[]; per_unit_products: UnitProduct[]
   }>({ per_kg_services: [], per_unit_products: [] })
 
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmitting,       setIsSubmitting]       = useState(false)
+  const [gatewayRedirecting, setGatewayRedirecting] = useState(false)
   const [confirmed,    setConfirmed]    = useState(false)
+
+  // Ref so pageshow/popstate handlers always read the latest state without
+  // being re-registered on every render.
+  const gatewayStateRef = useRef<{ active: boolean; orderId: string | null }>({ active: false, orderId: null })
+  useEffect(() => {
+    gatewayStateRef.current = { active: gatewayRedirecting, orderId: (state as any).order_id ?? null }
+  }, [gatewayRedirecting, state])
+
+  // pageshow fires when the browser restores a bfcache snapshot (PayU/Cashfree
+  // redirect away then user presses back). Show the confirm dialog here too.
+  useEffect(() => {
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted || !gatewayStateRef.current.active) return
+      const cancel = window.confirm('Are you sure you want to cancel the payment? You can retry or switch to Cash on Delivery.')
+      setGatewayRedirecting(false)
+      if (cancel) {
+        const { orderId } = gatewayStateRef.current
+        if (orderId) router.push(`/customer/orders/payment/failure?order_id=${orderId}`)
+      }
+      // "No" keeps them on the checkout page (can't navigate forward back to payment partner)
+    }
+    window.addEventListener('pageshow', handlePageShow)
+    return () => window.removeEventListener('pageshow', handlePageShow)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // popstate fires when the dummy history entry is popped (Razorpay modal case
+  // where the page never actually navigated away).
+  useEffect(() => {
+    if (!gatewayRedirecting) return
+    window.history.pushState({ gatewayRedirecting: true }, '')
+    const handlePopState = () => {
+      const cancel = window.confirm('Are you sure you want to cancel the payment? You can retry or switch to Cash on Delivery.')
+      if (cancel) {
+        setGatewayRedirecting(false)
+        const { orderId } = gatewayStateRef.current
+        if (orderId) router.push(`/customer/orders/payment/failure?order_id=${orderId}`)
+      } else {
+        window.history.pushState({ gatewayRedirecting: true }, '')
+      }
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gatewayRedirecting])
   const [cartLoading,  setCartLoading]  = useState(true)
 
   // Modal state
@@ -437,8 +484,10 @@ function PageContent() {
         // fails or the user dismisses it, send them to the failure page
         // (Retry Payment / Continue with COD / Cancel) instead of just a toast.
         try {
+          setGatewayRedirecting(true)
           await initiateOnlinePayment(result.data.order_id, result.data.order_number)
         } catch (gatewayErr: any) {
+          setGatewayRedirecting(false)
           router.push(`/customer/orders/payment/failure?order_id=${result.data.order_id}`)
           return
         }
@@ -468,6 +517,40 @@ function PageContent() {
 
   return (
     <>
+      {/* Gateway redirect overlay — shown while browser is loading the payment page */}
+      {gatewayRedirecting && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-background/90 backdrop-blur-sm">
+          <div className="relative flex items-center justify-center">
+            <div className="h-16 w-16 rounded-full border-4 border-primary/20"/>
+            <div className="absolute h-16 w-16 animate-spin rounded-full border-4 border-transparent border-t-primary"/>
+          </div>
+          <div className="text-center space-y-1.5 px-6 max-w-xs">
+            <p className="text-base font-semibold text-foreground">Connecting to payment partner…</p>
+            <p className="text-sm text-muted-foreground">You will be redirected to our secure payment page shortly. Please do not close or refresh this tab.</p>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs text-muted-foreground shadow-sm">
+            <svg className="h-3.5 w-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            256-bit SSL encrypted &amp; secure
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const cancel = window.confirm('Are you sure you want to cancel the payment? You can retry or switch to Cash on Delivery.')
+              if (cancel) {
+                setGatewayRedirecting(false)
+                const orderId = (state as any).order_id
+                if (orderId) router.push(`/customer/orders/payment/failure?order_id=${orderId}`)
+              }
+            }}
+            className="mt-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+          >
+            Cancel payment
+          </button>
+        </div>
+      )}
+
       <div className="min-h-screen bg-muted/20">
         {/* Step header */}
         <div className="sticky top-0 z-20 border-b border-border/50 bg-background/95 backdrop-blur">

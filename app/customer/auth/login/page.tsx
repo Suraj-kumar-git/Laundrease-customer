@@ -157,7 +157,9 @@ function PageContent() {
                       setEmail(e.target.value)
                       clearError("email")
                     } else {
-                      setPhone(e.target.value)
+                      // Allow only digits, leading +, spaces and dashes
+                      const raw = e.target.value.replace(/[^\d+\s\-]/g, '')
+                      setPhone(raw)
                       clearError("phone")
                     }
                     setServerError("")

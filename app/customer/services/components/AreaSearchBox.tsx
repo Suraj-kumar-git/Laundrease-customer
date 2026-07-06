@@ -48,7 +48,7 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
   // Load Google Maps (places) only if a publishable key is configured.
   useEffect(() => {
     if (!MAPS_KEY) return
-    loadScript(`https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places`)
+    loadScript(`https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async`)
       .then(() => {
         if (!window.google?.maps?.places) return
         autocompleteService.current = new window.google.maps.places.AutocompleteService()
