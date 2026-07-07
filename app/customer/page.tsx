@@ -184,7 +184,7 @@ function Carousel({ children, className }: { children: React.ReactNode[]; classN
         {children.map((_, i) => (
           <button key={i} onClick={() => dot(i)} aria-label={`Go to slide ${i + 1}`}
             className={cn('h-2 rounded-full transition-all duration-300',
-              i === realIdx ? 'w-6 bg-primary' : 'w-2 bg-muted-foreground/30 hover:bg-muted-foreground/60'
+              i === realIdx ? 'w-6 bg-blue-600' : 'w-2 bg-muted-foreground/30 hover:bg-muted-foreground/60'
             )} />
         ))}
       </div>
@@ -212,7 +212,7 @@ function SectionHeader({ tag, title, sub, onDark }: { tag: string; title: string
         'mb-3 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-wider',
         onDark
           ? 'bg-white/10 text-white border border-white/20'
-          : 'bg-primary/10 text-primary'
+          : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'
       )}>
         {tag}
       </span>
@@ -235,11 +235,11 @@ function HeroIllustration() {
       <defs>
         <linearGradient id="machineBody" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
-          <stop offset="100%" stopColor="#f3e8ff" stopOpacity="0.85" />
+          <stop offset="100%" stopColor="#dbeafe" stopOpacity="0.85" />
         </linearGradient>
         <linearGradient id="drumGlass" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="#7c3aed" />
-          <stop offset="100%" stopColor="#db2777" />
+          <stop offset="0%" stopColor="#2563eb" />
+          <stop offset="100%" stopColor="#06b6d4" />
         </linearGradient>
       </defs>
 
@@ -249,8 +249,8 @@ function HeroIllustration() {
       {/* Washing machine body */}
       <rect x="60" y="70" width="240" height="230" rx="28" fill="url(#machineBody)" />
       {/* Control strip */}
-      <rect x="90" y="92" width="180" height="16" rx="8" fill="#a855f7" opacity="0.5" />
-      <circle cx="100" cy="100" r="4" fill="#db2777" />
+      <rect x="90" y="92" width="180" height="16" rx="8" fill="#3b82f6" opacity="0.5" />
+      <circle cx="100" cy="100" r="4" fill="#06b6d4" />
       <circle cx="118" cy="100" r="4" fill="#f59e0b" />
       <circle cx="136" cy="100" r="4" fill="#10b981" />
 
@@ -283,7 +283,7 @@ function HeroIllustration() {
 function ProviderCard({ p }: { p: Provider }) {
   return (
     <Link href={`/customer/orders/create?provider=${p.id}`} className="block h-full">
-      <div className="group h-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-primary/40">
+      <div className="group h-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl hover:border-blue-400/60">
 
         {/* Shop photo (uploaded at registration) with branded fallback */}
         <div className="relative h-44 overflow-hidden bg-muted">
@@ -295,8 +295,8 @@ function ProviderCard({ p }: { p: Provider }) {
               className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
             />
           ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-primary/15 via-fuchsia-500/10 to-primary/5">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-600 shadow-lg">
+            <div className="flex h-full flex-col items-center justify-center gap-2 bg-gradient-to-br from-blue-500/15 via-cyan-500/10 to-blue-500/5">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-600 shadow-lg">
                 <Store className="h-8 w-8 text-white" />
               </div>
               <span className="text-xs font-medium text-muted-foreground">{p.name.split(' ')[0]}</span>
@@ -309,14 +309,14 @@ function ProviderCard({ p }: { p: Provider }) {
           </div>
           {p.distance_km !== null && (
             <div className="absolute bottom-2 right-2 flex items-center gap-1 rounded-full bg-background/90 px-2.5 py-0.5 text-[11px] font-medium text-foreground backdrop-blur-sm">
-              <MapPin className="h-3 w-3 text-primary" /> {formatDistance(p.distance_km)}
+              <MapPin className="h-3 w-3 text-blue-600 dark:text-blue-400" /> {formatDistance(p.distance_km)}
             </div>
           )}
         </div>
 
         <div className="p-4">
           <div className="mb-1 flex items-start justify-between gap-2">
-            <h3 className="text-sm font-semibold leading-snug text-foreground group-hover:text-primary transition-colors line-clamp-2">{p.name}</h3>
+            <h3 className="text-sm font-semibold leading-snug text-foreground group-hover:text-blue-600 transition-colors line-clamp-2">{p.name}</h3>
             <div className="flex shrink-0 items-center gap-1 text-xs">
               <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
               <span className="font-semibold text-foreground">{p.rating.toFixed(1)}</span>
@@ -325,8 +325,8 @@ function ProviderCard({ p }: { p: Provider }) {
           </div>
           {p.city && <p className="mb-2 flex items-center gap-1 text-xs text-muted-foreground"><MapPin className="h-3 w-3" /> {p.city}</p>}
           <div className="flex items-center justify-between">
-            {p.min_price_kg && <span className="text-sm font-bold text-primary">from {formatPrice(p.min_price_kg)}</span>}
-            <span className="ml-auto rounded-lg bg-gradient-to-r from-violet-600 to-fuchsia-600 px-2.5 py-1 text-xs font-semibold text-white">Book Now →</span>
+            {p.min_price_kg && <span className="text-sm font-bold text-blue-600 dark:text-blue-400">from {formatPrice(p.min_price_kg)}</span>}
+            <span className="ml-auto rounded-lg bg-gradient-to-r from-blue-600 to-cyan-600 px-2.5 py-1 text-xs font-semibold text-white">Book Now →</span>
           </div>
         </div>
       </div>
@@ -344,7 +344,7 @@ function TestimonialCard({ t }: { t: Testimonial }) {
       <div className="mt-5 flex items-center gap-3">
         {t.avatar_url
           ? <img src={t.avatar_url} alt={t.display_name} className="h-10 w-10 rounded-full object-cover" />
-          : <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-violet-600 to-fuchsia-600 text-xs font-bold text-white">{initials}</div>
+          : <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-cyan-600 text-xs font-bold text-white">{initials}</div>
         }
         <div className="min-w-0">
           <p className="text-sm font-semibold text-foreground truncate">{t.display_name}</p>
@@ -367,7 +367,7 @@ function FeatureCard({ icon: Icon, title, description, onDark, badge }: {
     return (
       <div className="h-full rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
         <div className="mb-2.5 flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-violet-500 to-fuchsia-600 text-white shadow-lg">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-cyan-600 text-white shadow-lg">
             <Icon className="h-5 w-5" />
           </div>
           <h3 className="text-sm font-bold text-white leading-tight">{title}</h3>
@@ -378,15 +378,15 @@ function FeatureCard({ icon: Icon, title, description, onDark, badge }: {
   }
   return (
     <div className="relative h-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
-      <div className="h-1 bg-gradient-to-r from-violet-600 to-fuchsia-600" />
+      <div className="h-1 bg-gradient-to-r from-blue-600 to-cyan-600" />
       <div className="p-4">
         <div className="mb-2.5 flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
             <Icon className="h-5 w-5" />
           </div>
           <h3 className="text-sm font-bold text-foreground leading-tight">{title}</h3>
         </div>
-        {badge && <div className="absolute right-4 top-4 text-4xl font-extrabold text-primary/[0.08] select-none">{badge}</div>}
+        {badge && <div className="absolute right-4 top-4 text-4xl font-extrabold text-blue-600/[0.08] select-none">{badge}</div>}
         <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
       </div>
     </div>
@@ -489,7 +489,7 @@ export default function HomePage() {
     <div className="flex min-h-screen flex-col overflow-x-hidden bg-background">
 
       {/* ---- HERO ---- */}
-      <section className="relative overflow-hidden bg-gradient-to-b from-violet-600 via-violet-600 to-fuchsia-600 md:bg-gradient-to-br md:from-violet-700 md:via-violet-600 md:to-fuchsia-600">
+      <section className="relative overflow-hidden bg-gradient-to-b from-blue-600 via-blue-600 to-cyan-600 md:bg-gradient-to-br md:from-blue-700 md:via-blue-600 md:to-cyan-600">
         <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
           {BUBBLES.map((b, i) => (
             <div key={i} className="absolute rounded-full bg-white/30"
@@ -515,7 +515,7 @@ export default function HomePage() {
                   {/* Pulsing glow ring behind primary CTA */}
                   <span className="absolute -inset-1 rounded-full bg-white/30 blur-md animate-pulse" style={{ animationDuration: '2.4s' }} />
                   <Link href="/customer/auth/register" className="w-full sm:w-auto">
-                    <button className="group relative w-full overflow-hidden rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-violet-700 shadow-[0_4px_24px_rgba(255,255,255,0.35)] transition-all duration-300 hover:scale-[1.04] hover:shadow-[0_6px_36px_rgba(255,255,255,0.55)] active:scale-[0.97]">
+                    <button className="group relative w-full overflow-hidden rounded-full bg-white px-8 py-3.5 text-sm font-semibold text-blue-700 shadow-[0_4px_24px_rgba(255,255,255,0.35)] transition-all duration-300 hover:scale-[1.04] hover:shadow-[0_6px_36px_rgba(255,255,255,0.55)] active:scale-[0.97]">
                       {/* Shimmer sweep */}
                       <span className="pointer-events-none absolute inset-0 -translate-x-full skew-x-[-20deg] bg-gradient-to-r from-transparent via-white/40 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full" />
                       <span className="relative flex items-center justify-center gap-2">
@@ -596,7 +596,7 @@ export default function HomePage() {
               <button onClick={request} className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">Allow</button>
             </div>
           )}
-          {(asking || loading) && !data && <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
+          {(asking || loading) && !data && <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-400" /></div>}
           {error && (
             <div className="flex flex-col items-center gap-3 py-12 text-center">
               <AlertCircle className="h-10 w-10 text-muted-foreground/40" />
@@ -613,7 +613,7 @@ export default function HomePage() {
           )}
           <div className="mt-8 sm:mt-10 text-center">
             <Link href="/customer/services">
-              <Button size="lg" className="bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white hover:opacity-90 shadow-md shadow-violet-500/20">
+              <Button size="lg" className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white hover:opacity-90 shadow-md shadow-blue-500/20">
                 View All Providers <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
             </Link>
@@ -632,7 +632,7 @@ export default function HomePage() {
       </section>
 
       {/* ---- ITEM PROTECTION / GARMENT GUARANTEE ---- */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-violet-950 to-fuchsia-950 py-12 sm:py-16 md:py-20">
+      <section className="relative overflow-hidden bg-gradient-to-br from-slate-900 via-blue-950 to-cyan-950 py-12 sm:py-16 md:py-20">
         <div className="absolute inset-0 overflow-hidden pointer-events-none" aria-hidden>
           {BUBBLES.slice(0, 6).map((b, i) => (
             <div key={i} className="absolute rounded-full bg-white/10"
@@ -668,7 +668,7 @@ export default function HomePage() {
       <section className="bg-muted/40 py-12 sm:py-16 md:py-20 dark:bg-muted/10">
         <div className="container mx-auto px-4 sm:px-6">
           <SectionHeader tag="Testimonials" title="What Our Customers Say" sub="Trusted by thousands of households across Pune." />
-          {loading && !data && <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>}
+          {loading && !data && <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-400" /></div>}
           {data && data.testimonials.length > 0 && (
             <Carousel>{data.testimonials.map(t => <TestimonialCard key={t.id} t={t} />)}</Carousel>
           )}
@@ -688,9 +688,9 @@ export default function HomePage() {
       {/* ---- MOBILE FLOATING QUICK PICKUP BUTTON ---- */}
       <Link
         href="/customer/quick-pickup"
-        className="fixed right-4 top-16 z-30 flex items-center gap-1.5 rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg shadow-violet-600/30 md:hidden"
+        className="fixed right-4 top-16 z-30 flex items-center gap-1.5 rounded-full bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg shadow-blue-600/30 md:hidden"
       >
-        <span className="absolute inset-0 -z-10 rounded-full bg-fuchsia-500 animate-ping opacity-40" />
+        <span className="absolute inset-0 -z-10 rounded-full bg-cyan-500 animate-ping opacity-40" />
         <Zap className="h-3.5 w-3.5" />
         Quick Pickup
       </Link>
