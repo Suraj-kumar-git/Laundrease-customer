@@ -57,6 +57,44 @@ export async function sendOtpSms(phone: string, otp: string, template:string): P
   } 
 }
 
+// Sent when the delivery partner heads out to collect the order from the
+// customer (first leg). Same mock/dev-stub vs. MSG91-template pattern as
+// sendOutForDeliverySms — fire-and-forget, never block the status update.
+export async function sendOutForPickupSms(phone: string, orderNumber: string): Promise<void> {
+  const provider = (process.env.SMS_PROVIDER || '').toLowerCase() as SmsProvider
+  const to = normalizeIndianPhone(phone)
+  if (provider === 'mock' || process.env.NODE_ENV === 'development') {
+    console.log(`
+      ========================================
+      [SMS DEV] Out-for-pickup SMS (${provider})
+      PHONE : ${to}
+      ORDER : ${orderNumber}
+      ========================================
+    `)
+    return
+  }
+  const template_id = process.env.OUT_FOR_PICKUP_SMS_TEMPLATE_ID
+  const payload = {
+    template_id,
+    short_url: '0',
+    recipients: [{ mobiles: to, var1: orderNumber }],
+  }
+  const response = await fetch('https://control.msg91.com/api/v5/flow', {
+    method: 'POST',
+    headers: {
+      accept: 'application/json',
+      authkey: process.env.MSG91_AUTH_KEY || '',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    cache: 'no-store',
+  })
+  const data = await response.json()
+  if (!response.ok || data?.status === 'fail' || data?.hasError) {
+    throw new Error(`Failed to send out-for-pickup SMS: ${JSON.stringify(data)}`)
+  }
+}
+
 // Fire-and-forget notification sent when a delivery partner picks an order
 // up from the laundry and starts the delivery leg. Mirrors sendOtpSms's
 // mock/dev-stub vs. MSG91-template pattern — callers should not await this

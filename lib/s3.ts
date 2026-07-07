@@ -31,6 +31,11 @@ function getS3Client(): S3Client {
   const config: ConstructorParameters<typeof S3Client>[0] = {
     region,
     credentials: { accessKeyId, secretAccessKey },
+    // Since SDK v3.729 presigned URLs get a CRC32 checksum of the (empty) body
+    // baked in by default, which breaks browser PUT uploads with
+    // SignatureDoesNotMatch. Only compute checksums when the operation requires it.
+    requestChecksumCalculation:  'WHEN_REQUIRED',
+    responseChecksumValidation:  'WHEN_REQUIRED',
   }
   if (process.env.AWS_S3_ENDPOINT) {
     config.endpoint       = process.env.AWS_S3_ENDPOINT
@@ -87,13 +92,16 @@ export async function getSignedDownloadUrl(
 export async function getSignedUploadUrl(
   key:         string,
   contentType: string,
-  opts: { expiresIn?: number; maxBytes?: number; metadata?: Record<string, string> } = {}
+  opts: { expiresIn?: number; metadata?: Record<string, string> } = {}
 ): Promise<string> {
+  // NOTE: never sign ContentLength here — the presigner would bake a fixed
+  // content-length into the signature, and the browser's actual file size
+  // will never match it (SignatureDoesNotMatch). Size limits are enforced
+  // by the API route before this URL is issued.
   const command = new PutObjectCommand({
     Bucket:        BUCKET,
     Key:           key,
     ContentType:   contentType,
-    ...(opts.maxBytes  ? { ContentLength: opts.maxBytes } : {}),
     ...(opts.metadata  ? { Metadata: opts.metadata }      : {}),
   })
   return getSignedUrl(getS3Client(), command, { expiresIn: opts.expiresIn ?? 900 })
@@ -115,11 +123,14 @@ export async function getDocUploadUrl(
   s3Key:       string,
   contentType: string,
   role:        string,
-  maxBytes:    number = 10 * 1024 * 1024  // 10 MB
+  // Accepted for backwards compatibility but intentionally NOT signed into the
+  // URL — signing a content-length breaks browser PUT uploads whenever the
+  // actual file size differs (SignatureDoesNotMatch). Size limits are enforced
+  // by the API routes before the URL is issued.
+  _maxBytes?:  number
 ): Promise<string> {
   return getSignedUploadUrl(s3Key, contentType, {
     expiresIn: 900,
-    maxBytes,
     metadata: { 'x-uploaded-by': `${role}-upload` },
   })
 }

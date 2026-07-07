@@ -469,8 +469,10 @@ export async function POST(req: NextRequest) {
     })
 
     // ---- Post-transaction --------------------------------------------------
-    try { await query(`SELECT auto_assign_delivery_partner($1)`, [result.orderId]) }
-    catch (e) { console.warn('[orders/create] Auto-assign skipped:', (e as Error).message) }
+    // NOTE: delivery auto-assignment intentionally does NOT run here anymore.
+    // It runs when the laundry provider CONFIRMS the order
+    // (app/api/laundry/orders/[id]/status) so partners are only assigned to
+    // orders that are actually going ahead.
 
     const needsGatewayPayment = !result.paymentFullyCovered && !isCodBased
 
