@@ -2,6 +2,13 @@
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
+/* Tailwind v4: make the `dark:` variant follow the `.dark` class set by the
+   theme toggles (next-themes / custom toggles) instead of the OS media query.
+   Without this, token colors (.dark { --foreground: … }) flip with the toggle
+   while `dark:*` utilities flip with the OS — mismatched states produce
+   white-on-white / black-on-black text (e.g. dashboard stat values). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Map your HSL tuple variables to Tailwind v4 color tokens via @theme.
    This enables classes like bg-background, text-foreground, border-border, ring-ring, etc. */
 @theme {

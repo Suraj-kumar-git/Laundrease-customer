@@ -208,3 +208,19 @@ BEGIN
   RETURN v_best_profile_id;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ============================================================
+--'out_for_pickup' order status
+-- ============================================================
+-- New lifecycle step between assignment and pickup:
+--   assigned_for_pickup → out_for_pickup → picked_up
+-- Set by the delivery partner when they head out to collect the
+-- order from the customer. Customer is notified (SMS + email).
+-- ============================================================
+
+INSERT INTO order_statuses (code, description, sort_order, is_terminal) VALUES
+  ('out_for_pickup', 'Delivery partner heading to customer for pickup', 27, FALSE)
+ON CONFLICT (code) DO NOTHING;
+
+ALTER TABLE delivery_profiles ALTER COLUMN vehicle_type   DROP NOT NULL;
+ALTER TABLE delivery_profiles ALTER COLUMN license_number DROP NOT NULL;

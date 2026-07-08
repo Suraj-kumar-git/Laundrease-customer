@@ -67,7 +67,8 @@ interface StatusEntry { status: string; notes: string | null; created_at: string
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; step: number }> = {
   pending:          { label: 'Order Placed',     color: 'text-amber-700',   bg: 'bg-amber-100 dark:bg-amber-950/40',   step: 1 },
   confirmed:        { label: 'Confirmed',        color: 'text-blue-700',    bg: 'bg-blue-100 dark:bg-blue-950/40',     step: 2 },
-  assigned_for_pickup: { label: 'Delivery Partner Assigned', color: 'text-blue-700', bg: 'bg-green-100 dark:bg-blue-950/40',     step: 2 },
+  assigned_for_pickup: { label: 'Delivery Partner Assigned', color: 'text-blue-700', bg: 'bg-blue-100 dark:bg-blue-950/40',     step: 2 },
+  out_for_pickup:   { label: 'Partner On the Way for Pickup', color: 'text-cyan-700', bg: 'bg-cyan-100 dark:bg-cyan-950/40',   step: 3 },
   picked_up:        { label: 'Picked Up',        color: 'text-violet-700',  bg: 'bg-violet-100 dark:bg-violet-950/40', step: 3 },
   at_laundry:       { label: 'Delivered to Laundry',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 7 },
   processing:       { label: 'Being Cleaned',    color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40', step: 4 },
@@ -844,6 +845,7 @@ export default function OrderDetailPage() {
                     <Clock className="h-3 w-3" /> {order.pickup_time_slot}
                   </p>
                 )}
+                {/* Reschedule button */}
                 {order.can_reschedule && (
                   <button
                     type="button"
@@ -855,31 +857,28 @@ export default function OrderDetailPage() {
                 )}
               </div>
               <div className="rounded-xl bg-muted/30 p-3">
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Delivery</p>
                 {order.delivered_at ? (
-                  // Actual delivery — show exact timestamp from delivered_at
                   <>
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">Delivered</p>
-                    <p className="text-sm font-semibold text-foreground">
-                      {new Date(order.delivered_at).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
-                    </p>
-                    <p className="mt-0.5 flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                      <Clock className="h-3 w-3" />
-                      {new Date(order.delivered_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                    </p>
+                    <p className="text-sm font-semibold text-foreground">{formatDateTime(order.delivered_at)}</p>
+                    <p className="mt-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">Delivered</p>
                   </>
-                ) : (
-                  // Not yet delivered — show estimated delivery date when available
+                ) : order.delivery_date ? (
                   <>
-                    <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Estimated Delivery</p>
-                    {order.estimated_delivery_date ? (
-                      <>
-                        <p className="text-sm font-semibold text-foreground">{formatDate(order.estimated_delivery_date)}</p>
-                        <p className="mt-0.5 text-[11px] text-muted-foreground">Time slot confirmed once out for delivery</p>
-                      </>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">To be scheduled</p>
+                    <p className="text-sm font-semibold text-foreground">{formatDate(order.delivery_date)}</p>
+                    {order.delivery_time_slot && (
+                      <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                        <Clock className="h-3 w-3" /> {order.delivery_time_slot}
+                      </p>
                     )}
                   </>
+                ) : order.estimated_delivery_date ? (
+                  <>
+                    <p className="text-sm font-semibold text-foreground">{formatDate(order.estimated_delivery_date)}</p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">Estimated — exact time slot confirmed once out for delivery</p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">To be scheduled</p>
                 )}
               </div>
             </div>

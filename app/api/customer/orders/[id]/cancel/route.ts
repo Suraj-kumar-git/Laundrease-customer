@@ -19,7 +19,7 @@ import {
   successResponse, errorResponse, notFoundResponse,
   serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
-import { sendOrderUpdateEmail } from '@/lib/notifications/email'
+import { sendOrderCancelledEmail, sendProviderOrderCancelledEmail } from '@/lib/notifications/email'
 import { CANCELLABLE_STATUSES } from '@/lib/order-status'
 import { initiateOriginalMethodRefund } from '@/lib/payment/refund'
 
@@ -139,11 +139,35 @@ export async function POST(
         [userId]
       )
       if (customerRes?.email) {
-        await sendOrderUpdateEmail({
+        const refundNote = result.refunded
+          ? `₹${result.refund_amount.toFixed(2)} has been credited to your Laundrease wallet.`
+          : result.refund_to_original && !originalRefundError
+            ? `₹${result.refund_amount.toFixed(2)} refund initiated to your original payment method (5–7 business days).`
+            : 'No payment was captured for this order.'
+        await sendOrderCancelledEmail({
           to: customerRes.email,
           customerName: customerRes.full_name,
-          orderId: result.order_number,
-          status: 'cancelled',
+          orderNumber: result.order_number,
+          cancelledBy: 'customer',
+          refundNote,
+        })
+      }
+
+      // Tell the laundry provider too — they may already be processing it.
+      const providerRes = await queryOne<{ email: string | null; business_name: string }>(
+        `SELECT pu.email, lp.business_name
+         FROM orders o
+         INNER JOIN laundry_profiles lp ON lp.id = o.laundry_profile_id
+         INNER JOIN users pu ON pu.id = lp.user_id
+         WHERE o.id = $1`,
+        [result.order_id]
+      )
+      if (providerRes?.email) {
+        await sendProviderOrderCancelledEmail({
+          to: providerRes.email,
+          providerName: providerRes.business_name,
+          orderNumber: result.order_number,
+          cancelledBy: 'the customer',
         })
       }
     } catch (notifyErr) {

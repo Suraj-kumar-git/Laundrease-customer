@@ -39,7 +39,14 @@ export async function GET(req: NextRequest) {
     }
     
     const user = userResult.rows[0]
-    
+
+    // A valid JWT is not enough — suspension must take effect on existing
+    // sessions too, not only at the next login. The auth provider treats a
+    // 403 here as "logged out".
+    if (user.status === 'suspended') {
+      return errorResponse('Your account has been suspended. Please contact support.', 403, 'ACCOUNT_SUSPENDED')
+    }
+
     return successResponse({
       user: {
         id: user.id,
