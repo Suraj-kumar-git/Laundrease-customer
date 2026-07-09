@@ -221,14 +221,14 @@ export async function sendOrderCancelledEmail(params: {
   })
 }
 
-// NOTE: no code path emits this yet — it needs either a scheduled job that
-// detects orders stuck in 'pending' or an explicit admin "cancel unconfirmed
-// order" action. The helper is ready for whichever trigger gets built.
+// Sent when the laundry provider rejects a brand-new ('pending') order
+// instead of confirming it — includes the provider's reason and nudges the
+// customer to place a new order.
 export async function sendOrderNotConfirmedEmail(params: {
-  to: string; customerName: string; orderNumber: string
+  to: string; customerName: string; orderNumber: string; reason: string; refundNote?: string
 }): Promise<void> {
   if (getEmailProvider() === 'mock') {
-    console.log(`[EMAIL DEV] ORDER NOT CONFIRMED → ${params.to} | order ${params.orderNumber}`)
+    console.log(`[EMAIL DEV] ORDER REJECTED → ${params.to} | order ${params.orderNumber} | reason: ${params.reason} | ${params.refundNote || ''}`)
     return
   }
   await sendMsg91TemplateEmail({
@@ -237,6 +237,8 @@ export async function sendOrderNotConfirmedEmail(params: {
     variables: {
       customerName: params.customerName,
       orderNumber:  params.orderNumber,
+      reason:       params.reason,
+      refundNote:   params.refundNote || 'No payment was captured for this order.',
     },
   })
 }

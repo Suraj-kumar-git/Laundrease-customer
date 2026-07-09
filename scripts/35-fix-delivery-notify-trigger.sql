@@ -224,3 +224,15 @@ ON CONFLICT (code) DO NOTHING;
 
 ALTER TABLE delivery_profiles ALTER COLUMN vehicle_type   DROP NOT NULL;
 ALTER TABLE delivery_profiles ALTER COLUMN license_number DROP NOT NULL;
+
+ALTER TABLE partner_monthly_payouts
+  ADD COLUMN IF NOT EXISTS payslip_s3_key VARCHAR(500);
+
+INSERT INTO order_statuses (code, description, sort_order, is_terminal) VALUES
+  ('rejected', 'Order rejected by the laundry provider before confirmation', 3, TRUE)
+ON CONFLICT (code) DO NOTHING;
+
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ;
+
+ALTER TABLE provider_payouts ADD COLUMN IF NOT EXISTS payslip_s3_key VARCHAR(500);

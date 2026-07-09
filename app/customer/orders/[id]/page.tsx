@@ -27,6 +27,7 @@ interface OrderDetail {
   delivery_date: string | null; delivery_time_slot: string | null
   estimated_delivery_date: string | null
   delivered_at: string | null
+  rejection_reason: string | null; rejected_at: string | null
   special_instructions: string | null; is_express: boolean
   subtotal: number; tax_amount: number; discount_amount: number; total_amount: number
   payment_status: string; payment_method: string
@@ -78,6 +79,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   completed:        { label: 'Completed',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 8 },
   cancelled:        { label: 'Cancelled',        color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
   failed:           { label: 'Order Failed',     color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
+  rejected:         { label: 'Rejected',         color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
   // returned:         { label: 'Returned',         color: 'text-orange-700',  bg: 'bg-orange-100 dark:bg-orange-950/40', step: -1 },
 }
 
@@ -681,7 +683,7 @@ export default function OrderDetailPage() {
   }
 
   const statusCfg = STATUS_CONFIG[order.status] ?? { label: order.status, color: 'text-foreground', bg: 'bg-muted', step: 0 }
-  const isCancelled = order.status === 'cancelled' || order.status === 'returned' || order.status === 'failed'
+  const isCancelled = order.status === 'cancelled' || order.status === 'returned' || order.status === 'failed' || order.status === 'rejected'
   const currentStep = statusCfg.step
 
   // Group items by service category for display
@@ -791,6 +793,37 @@ export default function OrderDetailPage() {
             )}
           </div>
         </div>
+
+        {/* Rejection banner — laundry provider declined this order before confirming it */}
+        {order.status === 'rejected' && (
+          <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-950/30">
+            <div className="flex items-start gap-3">
+              <XCircle className="h-5 w-5 shrink-0 text-red-600 mt-0.5" />
+              <div className="flex-1 space-y-2">
+                <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+                  This order was rejected by the laundry provider
+                </p>
+                {order.rejection_reason && (
+                  <p className="text-sm text-red-700 dark:text-red-400">
+                    <span className="font-medium">Reason: </span>{order.rejection_reason}
+                  </p>
+                )}
+                <p className="text-sm text-red-700/90 dark:text-red-400/90">
+                  {order.payment_status === 'refunded'
+                    ? `₹${order.total_amount.toLocaleString('en-IN')} has been credited to your Laundrease wallet. `
+                    : ''}
+                  Please place a new order and we&apos;ll match you with another laundry provider.
+                </p>
+                <Link
+                  href="/customer/orders/create"
+                  className="mt-1 inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
+                >
+                  Place a New Order
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Progress tracker — hidden if cancelled/returned */}
         {!isCancelled && (
