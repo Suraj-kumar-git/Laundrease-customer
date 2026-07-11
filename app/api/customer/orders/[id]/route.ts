@@ -10,6 +10,7 @@ import {
 } from '@/lib/api-response'
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from '@/lib/order-status'
 import { calculateEstimatedDeliveryDate } from '@/lib/delivery-estimate'
+import { getRefundBreakdown } from '@/lib/payment/refund'
 
 export async function GET(
   req: NextRequest,
@@ -36,8 +37,11 @@ export async function GET(
          o.pickup_date, o.pickup_time_slot,
          o.delivery_date, o.delivery_time_slot, o.estimated_delivery_date,
          o.delivered_at,
+         o.rejection_reason, o.rejected_at,
          o.special_instructions, o.is_express,
          o.subtotal, o.tax_amount, o.discount_amount, o.total_amount,
+         o.original_subtotal, o.original_total_amount,
+         o.modified_by_delivery, o.delivery_modified_at,
          o.payment_status, o.payment_method,
          o.created_at, o.updated_at,
          -- Provider
@@ -64,6 +68,9 @@ export async function GET(
     const itemsRes = await query(
       `SELECT
          oi.id, oi.quantity, oi.weight_kg, oi.garment_label,
+         oi.status        AS item_status,
+         oi.modification_note,
+         oi.modified_at,
          pt.name          AS product_type_name,
          pt.icon,
          s.id             AS service_id,
@@ -116,10 +123,15 @@ export async function GET(
     // Item-protection claims already filed on this order, plus the policy
     // (cap/window) so the UI can show the right deadline without a second call.
     const claimsRes = await query(
-      `SELECT id, order_item_id, claim_type, description, status,
-              cleaning_charge_snapshot, cap_amount, compensation_amount,
-              decision_note, created_at
-       FROM garment_claims WHERE order_id = $1 ORDER BY created_at DESC`,
+      `SELECT gc.id, gc.order_item_id, gc.claim_type, gc.description, gc.status,
+              gc.cleaning_charge_snapshot, gc.cap_amount, gc.compensation_amount,
+              gc.decision_note, gc.created_at, gc.paid_at,
+              gc.provider_comment, gc.provider_decided_at,
+              lp.business_name AS provider_name
+       FROM garment_claims gc
+       LEFT JOIN orders o2 ON o2.id = gc.order_id
+       LEFT JOIN laundry_profiles lp ON lp.id = o2.laundry_profile_id
+       WHERE gc.order_id = $1 ORDER BY gc.created_at DESC`,
       [orderId]
     )
     const policy = await queryOne<{
@@ -129,6 +141,14 @@ export async function GET(
     // Can the order be rescheduled / cancelled?
     const canReschedule = RESCHEDULABLE_STATUSES.has(order.status)
     const canCancel     = CANCELLABLE_STATUSES.has(order.status)
+
+    // Captured so far (wallet + gateway) vs the current total — a positive
+    // balance means the customer can pay online (or in cash at delivery).
+    // Relevant after the delivery partner modifies items at pickup.
+    const { totalRefundable: amountPaid } = await getRefundBreakdown(
+      (text, p) => query(text, p), orderId
+    )
+    const balanceDue = Math.max(0, Math.round((parseFloat(order.total_amount) - amountPaid) * 100) / 100)
 
     return successResponse({
       order: {
@@ -144,12 +164,20 @@ export async function GET(
         delivery_time_slot: order.delivery_time_slot,
         estimated_delivery_date: order.estimated_delivery_date,
         delivered_at:       order.delivered_at,
+        rejection_reason:   order.rejection_reason,
+        rejected_at:        order.rejected_at,
         special_instructions: order.special_instructions,
         is_express:         order.is_express,
         subtotal:           parseFloat(order.subtotal),
         tax_amount:         parseFloat(order.tax_amount),
         discount_amount:    parseFloat(order.discount_amount),
         total_amount:       parseFloat(order.total_amount),
+        original_subtotal:     order.original_subtotal != null ? parseFloat(order.original_subtotal) : null,
+        original_total_amount: order.original_total_amount != null ? parseFloat(order.original_total_amount) : null,
+        modified_by_delivery:  order.modified_by_delivery,
+        delivery_modified_at:  order.delivery_modified_at,
+        amount_paid:        amountPaid,
+        balance_due:        balanceDue,
         payment_status:     order.payment_status,
         payment_method:     order.payment_method,
         created_at:         order.created_at,
