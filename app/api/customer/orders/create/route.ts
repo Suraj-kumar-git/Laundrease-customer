@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
-import { transaction, query } from '@/lib/db'
+import { transaction, query, queryOne } from '@/lib/db'
 import { enqueueOrderConfirmationEmail } from '@/lib/sqs'
+import { sendProviderNewOrderEmail } from '@/lib/notifications/email'
 import { calculateEstimatedDeliveryDate } from '@/lib/delivery-estimate'
 import { getActiveGateway } from '@/lib/payment'
 import { getMixedLoadProductTypeId } from '@/lib/product-types'
@@ -157,12 +158,17 @@ export async function POST(req: NextRequest) {
 
       // ---- Customer ---------------------------------------------------------
       const custRes = await client.query(
-        `SELECT u.email, u.full_name
+        `SELECT u.email, u.full_name, u.status
          FROM users u JOIN customer_profiles cp ON cp.user_id = u.id WHERE u.id = $1`,
         [userId]
       )
       if (custRes.rowCount === 0) throw new Error('CUSTOMER_NOT_FOUND')
       const customer = custRes.rows[0]
+
+      // Suspension must block ordering even for sessions issued before the
+      // suspension (the JWT alone doesn't reflect account status).
+      if (customer.status === 'suspended')
+        throw new Error('Your account has been suspended. Please contact support.')
 
       // ---- Subtotal ---------------------------------------------------------
       const subtotal = Math.round(
@@ -469,8 +475,10 @@ export async function POST(req: NextRequest) {
     })
 
     // ---- Post-transaction --------------------------------------------------
-    try { await query(`SELECT auto_assign_delivery_partner($1)`, [result.orderId]) }
-    catch (e) { console.warn('[orders/create] Auto-assign skipped:', (e as Error).message) }
+    // NOTE: delivery auto-assignment intentionally does NOT run here anymore.
+    // It runs when the laundry provider CONFIRMS the order
+    // (app/api/laundry/orders/[id]/status) so partners are only assigned to
+    // orders that are actually going ahead.
 
     const needsGatewayPayment = !result.paymentFullyCovered && !isCodBased
 
@@ -497,6 +505,31 @@ export async function POST(req: NextRequest) {
         paymentMethod: body.payment_method,
       })
     } catch (e) { console.warn('[orders/create] SQS error:', e) }
+
+    // Email the provider about the new order — but only when no gateway
+    // payment is still pending, so providers never hear about orders whose
+    // payment might be abandoned. (Gateway-paid orders currently reach the
+    // provider via the dashboard/in-app notification once paid.)
+    if (!needsGatewayPayment) {
+      try {
+        const providerContact = await queryOne<{ email: string | null; business_name: string }>(
+          `SELECT pu.email, lp.business_name
+           FROM laundry_profiles lp INNER JOIN users pu ON pu.id = lp.user_id
+           WHERE lp.id = $1`,
+          [result.provider.id]
+        )
+        if (providerContact?.email) {
+          sendProviderNewOrderEmail({
+            to: providerContact.email,
+            providerName: providerContact.business_name,
+            orderNumber: result.orderNumber,
+            pickupDate: result.pickupDate,
+          }).catch(e => console.error('[orders/create] provider new-order email failed:', e))
+        }
+      } catch (e) {
+        console.error('[orders/create] provider new-order lookup failed:', e)
+      }
+    }
 
     return successResponse({
       order_id:              result.orderPublicId,

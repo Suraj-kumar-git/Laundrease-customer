@@ -15,6 +15,38 @@ export interface InitiateRefundResult {
   error?: string
 }
 
+// How much of an order was actually captured, split by source. Cancellation
+// refunds must treat the two buckets differently: the wallet-paid portion can
+// only ever go back to the wallet, while the gateway-paid portion may go to
+// the wallet OR back to the original payment method (customer's choice).
+// Works off completed payment rows rather than orders.payment_status so
+// partially-paid orders (wallet+COD, wallet+online with pending gateway leg)
+// still get their captured wallet slice refunded.
+export interface RefundBreakdown {
+  walletPaid:      number
+  gatewayPaid:     number
+  totalRefundable: number
+}
+
+type QueryFn = (text: string, params?: any[]) => Promise<{ rows: any[] }>
+
+export async function getRefundBreakdown(
+  runQuery: QueryFn,
+  orderId: number | string
+): Promise<RefundBreakdown> {
+  const res = await runQuery(
+    `SELECT
+       COALESCE(SUM(amount) FILTER (WHERE payment_method = 'wallet'), 0)::TEXT           AS wallet_paid,
+       COALESCE(SUM(amount) FILTER (WHERE provider IN ('payu', 'cashfree')), 0)::TEXT    AS gateway_paid
+     FROM payments
+     WHERE order_id = $1 AND status = 'completed'`,
+    [orderId]
+  )
+  const walletPaid  = parseFloat(res.rows[0]?.wallet_paid  || '0')
+  const gatewayPaid = parseFloat(res.rows[0]?.gateway_paid || '0')
+  return { walletPaid, gatewayPaid, totalRefundable: walletPaid + gatewayPaid }
+}
+
 export async function initiateOriginalMethodRefund(params: {
   orderId: number
   amount: number

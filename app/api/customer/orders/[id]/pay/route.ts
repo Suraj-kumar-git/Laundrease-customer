@@ -63,7 +63,8 @@ export async function POST(
       `SELECT id, amount, merchant_txn_id, provider
        FROM payments
        WHERE order_id = $1 AND provider <> 'cod' AND provider <> 'wallet'
-         AND status IN ('initiated', 'failed')
+         AND payment_method <> 'wallet'
+         AND status IN ('initiated', 'failed', 'pending')
        ORDER BY created_at DESC
        LIMIT 1`,
       [orderId]

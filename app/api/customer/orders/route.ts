@@ -29,12 +29,12 @@ export async function GET(req: NextRequest) {
     // order becomes visible normally.
     const conditions = [
       'o.customer_id = $1',
-      // 'failed' (payment never completed) and 'cancelled' orders are always
-      // shown to the customer regardless of payment_status — cancelling a
-      // paid order flips payment_status to 'refunded'/'refund_processing',
-      // which wouldn't match payment_status = 'paid' below. Only the
-      // still-pending, payment-not-yet-resolved drafts stay invisible.
-      `(o.payment_method LIKE '%cod%' OR o.payment_status = 'paid' OR o.status IN ('failed', 'cancelled'))`,
+      // 'failed', 'cancelled' and 'rejected' orders are always shown to the
+      // customer regardless of payment_status — cancelling/rejecting a paid
+      // order flips payment_status to 'refunded', which wouldn't match
+      // payment_status = 'paid' below. Only the still-pending,
+      // payment-not-yet-resolved drafts stay invisible.
+      `(o.payment_method LIKE '%cod%' OR o.payment_status = 'paid' OR o.status IN ('failed', 'cancelled', 'rejected'))`,
     ]
     const params: any[] = [userId]
     let pi = 2

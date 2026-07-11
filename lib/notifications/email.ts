@@ -141,7 +141,7 @@ export async function sendTicketUpdateEmail(params: {
   await sendMsg91TemplateEmail({
     to: params.to,
     toName: params.customerName,
-    templateId: getTemplateId('SUPPORT_TICKET_UPDATE_EMAIL_TEMPATE_ID'),
+    templateId: getTemplateId('SUPPORT_TICKET_UPDATE_EMAIL_TEMPLATE_ID'),
     variables: {
       customerName: params.customerName,
       ticketId: params.ticketId,
@@ -166,10 +166,314 @@ export async function sendPasswordResetEmail(to: string, customerName: string, r
   await sendMsg91TemplateEmail({
     to: to,
     toName: customerName,
-    templateId: getTemplateId('PASSWORD_RESET_EMAIL_TEMPATE_ID'),
+    templateId: getTemplateId('PASSWORD_RESET_EMAIL_TEMPLATE_ID'),
     variables: {
       customerName: customerName,
       resetLink: resetLink,
+    },
+  })
+}
+
+// ─── Order lifecycle emails ──────────────────────────────────────────────────
+// Each event gets its own MSG91 template env so the templates can be crafted
+// independently. All follow the same mock/dev pattern as sendOtpEmail.
+
+export async function sendOrderConfirmedEmail(params: {
+  to: string; customerName: string; orderNumber: string; pickupDate?: string | null
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] ORDER CONFIRMED → ${params.to} | order ${params.orderNumber} | pickup ${params.pickupDate || 'TBD'}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('ORDER_CONFIRMED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName: params.customerName,
+      orderNumber:  params.orderNumber,
+      pickupDate:   params.pickupDate || 'to be scheduled',
+    },
+  })
+}
+
+export async function sendOrderCancelledEmail(params: {
+  to: string; customerName: string; orderNumber: string
+  cancelledBy: 'customer' | 'delivery_partner' | 'platform'
+  refundNote?: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] ORDER CANCELLED → ${params.to} | order ${params.orderNumber} | by ${params.cancelledBy} | ${params.refundNote || ''}`)
+    return
+  }
+  const cancelledByText =
+    params.cancelledBy === 'customer'         ? 'at your request'
+    : params.cancelledBy === 'delivery_partner' ? 'by the delivery partner at your request'
+    : 'by Laundrease'
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('ORDER_CANCELLED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName: params.customerName,
+      orderNumber:  params.orderNumber,
+      cancelledBy:  cancelledByText,
+      refundNote:   params.refundNote || 'No payment was captured for this order.',
+    },
+  })
+}
+
+// Sent when the laundry provider rejects a brand-new ('pending') order
+// instead of confirming it — includes the provider's reason and nudges the
+// customer to place a new order.
+export async function sendOrderNotConfirmedEmail(params: {
+  to: string; customerName: string; orderNumber: string; reason: string; refundNote?: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] ORDER REJECTED → ${params.to} | order ${params.orderNumber} | reason: ${params.reason} | ${params.refundNote || ''}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('ORDER_NOT_CONFIRMED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName: params.customerName,
+      orderNumber:  params.orderNumber,
+      reason:       params.reason,
+      refundNote:   params.refundNote || 'No payment was captured for this order.',
+    },
+  })
+}
+
+export async function sendOrderDeliveredEmail(params: {
+  to: string; customerName: string; orderNumber: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] ORDER DELIVERED → ${params.to} | order ${params.orderNumber}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('ORDER_DELIVERED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName: params.customerName,
+      orderNumber:  params.orderNumber,
+    },
+  })
+}
+
+export async function sendOrderItemsModifiedEmail(params: {
+  to: string; customerName: string; orderNumber: string; changesSummary: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] ORDER ITEMS MODIFIED → ${params.to} | order ${params.orderNumber} | ${params.changesSummary}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('ORDER_ITEMS_MODIFIED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName:   params.customerName,
+      orderNumber:    params.orderNumber,
+      changesSummary: params.changesSummary,
+    },
+  })
+}
+
+// ─── Partner / admin emails ──────────────────────────────────────────────────
+
+export async function sendProviderNewOrderEmail(params: {
+  to: string; providerName: string; orderNumber: string; pickupDate?: string | null
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] PROVIDER NEW ORDER → ${params.to} | order ${params.orderNumber} | pickup ${params.pickupDate || 'TBD'}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.providerName,
+    templateId: getTemplateId('PROVIDER_NEW_ORDER_EMAIL_TEMPLATE_ID'),
+    variables: {
+      providerName: params.providerName,
+      orderNumber:  params.orderNumber,
+      pickupDate:   params.pickupDate || 'to be scheduled',
+    },
+  })
+}
+
+export async function sendProviderOrderCancelledEmail(params: {
+  to: string; providerName: string; orderNumber: string; cancelledBy: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] PROVIDER ORDER CANCELLED → ${params.to} | order ${params.orderNumber} | by ${params.cancelledBy}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.providerName,
+    templateId: getTemplateId('PROVIDER_ORDER_CANCELLED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      providerName: params.providerName,
+      orderNumber:  params.orderNumber,
+      cancelledBy:  params.cancelledBy,
+    },
+  })
+}
+
+export async function sendPartnerAccountActivatedEmail(params: {
+  to: string; name: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] DELIVERY ACCOUNT ACTIVATED → ${params.to}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.name,
+    templateId: getTemplateId('DELIVERY_ACTIVATED_EMAIL_TEMPLATE_ID'),
+    variables: { name: params.name },
+  })
+}
+
+export async function sendPartnerDocRejectedEmail(params: {
+  to: string; name: string; docLabel: string; reason: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] DELIVERY DOC REJECTED → ${params.to} | ${params.docLabel} | ${params.reason}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.name,
+    templateId: getTemplateId('DELIVERY_DOC_REJECTED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      name:     params.name,
+      docLabel: params.docLabel,
+      reason:   params.reason,
+    },
+  })
+}
+
+export async function sendAdminNewRegistrationEmail(params: {
+  to: string; adminName: string; partnerType: 'laundry' | 'delivery'; partnerName: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] ADMIN NEW REGISTRATION → ${params.to} | ${params.partnerType}: ${params.partnerName}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.adminName,
+    templateId: getTemplateId('ADMIN_NEW_REGISTRATION_EMAIL_TEMPLATE_ID'),
+    variables: {
+      adminName:   params.adminName,
+      partnerType: params.partnerType === 'laundry' ? 'Laundry provider' : 'Delivery partner',
+      partnerName: params.partnerName,
+    },
+  })
+}
+
+export async function sendPayoutProcessedEmail(params: {
+  to: string; name: string; amount: string; periodLabel: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] PAYOUT PROCESSED → ${params.to} | ₹${params.amount} | ${params.periodLabel}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.name,
+    templateId: getTemplateId('PAYOUT_PROCESSED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      name:        params.name,
+      amount:      params.amount,
+      periodLabel: params.periodLabel,
+    },
+  })
+}
+
+export async function sendDeliveryCompletionLinkEmail(to: string, name: string, completionLink: string): Promise<void> {
+  const provider = getEmailProvider()
+  if (provider === 'mock') {
+    console.log(`
+      ========================================
+      [EMAIL DEV] DELIVERY PROFILE COMPLETION LINK
+      TO      : ${to}
+      NAME    : ${name}
+      LINK    : ${completionLink}
+      ========================================
+    `)
+    return
+  }
+
+  await sendMsg91TemplateEmail({
+    to: to,
+    toName: name,
+    templateId: getTemplateId('DELIVERY_COMPLETION_LINK_TEMPLATE_ID'),
+    variables: {
+      name: name,
+      completionLink: completionLink,
+      validity_hours: '72',
+    },
+  })
+}
+// ─── Item-protection claim emails ────────────────────────────────────────────
+// One helper per stage the customer needs to hear about. Same mock/dev vs
+// MSG91-template pattern as everything above; all call sites fire these
+// best-effort so a mail hiccup never blocks the claim action itself.
+
+export async function sendClaimSubmittedEmail(params: {
+  to: string; customerName: string; orderNumber: string
+  itemLabel: string; claimType: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] CLAIM SUBMITTED → ${params.to} | order ${params.orderNumber} | ${params.claimType} | item: ${params.itemLabel}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('CLAIM_SUBMITTED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName: params.customerName,
+      orderNumber:  params.orderNumber,
+      itemLabel:    params.itemLabel,
+      claimType:    params.claimType,
+    },
+  })
+}
+
+export async function sendClaimProviderDecisionEmail(params: {
+  to: string; customerName: string; orderNumber: string
+  itemLabel: string; approved: boolean; providerComment: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] CLAIM ${params.approved ? 'APPROVED' : 'REJECTED'} BY PROVIDER → ${params.to} | order ${params.orderNumber} | comment: ${params.providerComment}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('CLAIM_PROVIDER_DECISION_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName:    params.customerName,
+      orderNumber:     params.orderNumber,
+      itemLabel:       params.itemLabel,
+      decision:        params.approved ? 'approved' : 'rejected',
+      providerComment: params.providerComment,
+      nextStep:        params.approved
+        ? 'Our team is now determining your compensation amount — we will keep you posted.'
+        : 'This decision is final. If you believe it is incorrect, please contact our support team.',
+    },
+  })
+}
+
+export async function sendClaimResolvedEmail(params: {
+  to: string; customerName: string; orderNumber: string
+  itemLabel: string; amount: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] CLAIM RESOLVED (PAID) → ${params.to} | order ${params.orderNumber} | ₹${params.amount} credited to wallet`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('CLAIM_RESOLVED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName: params.customerName,
+      orderNumber:  params.orderNumber,
+      itemLabel:    params.itemLabel,
+      amount:       params.amount,
     },
   })
 }

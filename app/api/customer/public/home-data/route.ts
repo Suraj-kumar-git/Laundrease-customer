@@ -9,7 +9,7 @@
 
 import { NextRequest } from 'next/server'
 import { query, queryOne } from '@/lib/db'
-import { resolveProfileImageUrl } from '@/lib/s3'
+import { resolveProfileImageUrl, getDocSignedUrl } from '@/lib/s3'
 import { successResponse, serverErrorResponse } from '@/lib/api-response'
 
 // Haversine distance in km (SQL approximation — good enough for city-level sorting)
@@ -52,6 +52,15 @@ export async function GET(req: NextRequest) {
            lp.postal_code,
            -- Profile image if set (S3 key or URL)
            u.profile_image  AS provider_image,
+           -- Latest shop photo uploaded during registration (preferred card image)
+           (
+             SELECT pd.s3_key FROM provider_documents pd
+             WHERE pd.laundry_profile_id = lp.id
+               AND pd.doc_key = 'shop_photo'
+               AND pd.review_status <> 'rejected'
+             ORDER BY pd.version DESC
+             LIMIT 1
+           )                AS shop_photo_key,
            -- Cheapest per-kg service price as a quick display value
            (
              SELECT MIN(COALESCE(ps.price_override, s.base_price))
@@ -86,6 +95,14 @@ export async function GET(req: NextRequest) {
            lp.postal_code,
            u.profile_image  AS provider_image,
            (
+             SELECT pd.s3_key FROM provider_documents pd
+             WHERE pd.laundry_profile_id = lp.id
+               AND pd.doc_key = 'shop_photo'
+               AND pd.review_status <> 'rejected'
+             ORDER BY pd.version DESC
+             LIMIT 1
+           )                AS shop_photo_key,
+           (
              SELECT MIN(COALESCE(ps.price_override, s.base_price))
              FROM provider_services ps
              JOIN services s ON s.id = ps.service_id
@@ -111,6 +128,21 @@ export async function GET(req: NextRequest) {
       partner_count:  string
     }>(`SELECT * FROM home_platform_stats`)
 
+    // Live coverage: pincodes + cities actually served by active providers
+    // (derived from provider_service_areas, not a manually maintained list).
+    const coverageRow = await queryOne<{
+      service_areas: string; cities: string; city_names: string[] | null
+    }>(`
+      SELECT
+        COUNT(DISTINCT psa.postal_code)::TEXT AS service_areas,
+        COUNT(DISTINCT LOWER(psa.city)) FILTER (WHERE psa.city IS NOT NULL)::TEXT AS cities,
+        (ARRAY_AGG(DISTINCT INITCAP(psa.city)) FILTER (WHERE psa.city IS NOT NULL))[1:5] AS city_names
+      FROM provider_service_areas psa
+      INNER JOIN laundry_profiles lp ON lp.id = psa.provider_id
+      WHERE psa.is_active = TRUE
+        AND lp.status = 'active' AND lp.is_verified = TRUE
+    `)
+
     // ---- 3. Testimonials (active, ordered) ----------------------------
     const testimonialsRes = await query(
       `SELECT id, display_name, role, avatar_url, content, rating, is_featured
@@ -132,17 +164,23 @@ export async function GET(req: NextRequest) {
       config[row.key] = row.value
     }
 
-    const providers = await Promise.all(providersRes.rows.map(async r => ({
-      id:           r.id,
-      name:         r.business_name,
-      city:         r.city,
-      rating:       parseFloat(r.rating) || 0,
-      rating_count: r.rating_count || 0,
-      image:        await resolveProfileImageUrl(r.provider_image),
-      min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
-      distance_km:  r.distance_km  ? parseFloat(r.distance_km)  : null,
-      postal_code:  r.postal_code,
-    })))
+    const providers = await Promise.all(providersRes.rows.map(async r => {
+      // Prefer the shop photo uploaded during registration; fall back to profile image
+      let image: string | null = null
+      if (r.shop_photo_key) image = await getDocSignedUrl(r.shop_photo_key)
+      if (!image)           image = await resolveProfileImageUrl(r.provider_image)
+      return {
+        id:           r.id,
+        name:         r.business_name,
+        city:         r.city,
+        rating:       parseFloat(r.rating) || 0,
+        rating_count: r.rating_count || 0,
+        image,
+        min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
+        distance_km:  r.distance_km  ? parseFloat(r.distance_km)  : null,
+        postal_code:  r.postal_code,
+      }
+    }))
 
     const testimonials = await Promise.all(testimonialsRes.rows.map(async t => ({
       ...t,
@@ -157,6 +195,9 @@ export async function GET(req: NextRequest) {
         monthly_orders: parseInt(statsRow?.monthly_orders ?? '0'),
         success_rate:   parseFloat(statsRow?.success_rate  ?? '100'),
         partner_count:  parseInt(statsRow?.partner_count  ?? '0'),
+        service_areas:  parseInt(coverageRow?.service_areas ?? '0'),
+        cities_covered: parseInt(coverageRow?.cities        ?? '0'),
+        city_names:     coverageRow?.city_names ?? [],
       },
       testimonials,
       platform: {
