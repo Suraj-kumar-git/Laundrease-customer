@@ -5,12 +5,14 @@
 // has not yet started processing it (i.e. status is still one of
 // CANCELLABLE_STATUSES — see app/api/customer/orders/[id]/route.ts).
 //
-// If the order was already paid online (PayU/Cashfree), the customer can
-// choose where the refund goes:
-//  - 'wallet' (default): instant credit to the in-app wallet.
-//  - 'original': initiates a gateway refund back to the card/UPI/bank.
-//    This is async — the order moves to 'refund_processing' until an
-//    admin confirms completion (see lib/payment/refund.ts).
+// Refunds work off the completed payment rows (not orders.payment_status),
+// split by source — see getRefundBreakdown:
+//  - The wallet-paid portion (wallet-only or the wallet slice of a
+//    wallet+online / wallet+COD order) can only go back to the wallet.
+//  - The gateway-paid portion (PayU/Cashfree) goes to the wallet by default,
+//    or back to the original method when refund_method = 'original'. That
+//    path is async — the order moves to 'refund_processing' until an admin
+//    confirms completion (see lib/payment/refund.ts).
 // COD orders with no payment captured are simply marked cancelled.
 
 import { NextRequest } from 'next/server'
@@ -21,7 +23,7 @@ import {
 } from '@/lib/api-response'
 import { sendOrderCancelledEmail, sendProviderOrderCancelledEmail } from '@/lib/notifications/email'
 import { CANCELLABLE_STATUSES } from '@/lib/order-status'
-import { initiateOriginalMethodRefund } from '@/lib/payment/refund'
+import { initiateOriginalMethodRefund, getRefundBreakdown } from '@/lib/payment/refund'
 
 export async function POST(
   req: NextRequest,
@@ -62,18 +64,23 @@ export async function POST(
         throw new Error('NOT_CANCELLABLE')
       }
 
-      const wasPaid = order.payment_status === 'paid'
-      const refundAmount = parseFloat(order.total_amount)
-      const refundToOriginal = wasPaid && refundAmount > 0 && refundMethod === 'original'
+      // What was actually captured, by source. Covers partially-paid orders
+      // (wallet+COD, wallet+online) whose payment_status never reached 'paid'
+      // but whose wallet slice was debited at checkout.
+      const { walletPaid, gatewayPaid, totalRefundable } = await getRefundBreakdown(
+        (text, params) => client.query(text, params), orderId
+      )
+      const refundToOriginal = refundMethod === 'original' && gatewayPaid > 0
 
       let walletTxnId: number | null = null
-      if (wasPaid && refundAmount > 0 && !refundToOriginal) {
+      if (totalRefundable > 0 && !refundToOriginal) {
+        // Everything captured (wallet + gateway slices) back to the wallet, instantly.
         const txn = await client.query(
           `SELECT wallet_credit_for_order($1, $2, $3, $4) AS txn_id`,
           [
             order.customer_id,
             orderId,
-            refundAmount,
+            totalRefundable,
             `Refund for cancelled order ${order.order_number}`,
           ]
         )
@@ -99,7 +106,7 @@ export async function POST(
              END,
              updated_at = NOW()
          WHERE id = $1`,
-        [orderId, wasPaid && !refundToOriginal, refundToOriginal]
+        [orderId, totalRefundable > 0 && !refundToOriginal, refundToOriginal]
       )
 
       await client.query(
@@ -111,24 +118,47 @@ export async function POST(
       return {
         order_id: orderId,
         order_number: order.order_number,
-        refunded: wasPaid && !refundToOriginal,
-        refund_amount: wasPaid ? refundAmount : 0,
+        refunded: totalRefundable > 0 && !refundToOriginal,
+        refund_amount: totalRefundable,
+        wallet_paid: walletPaid,
+        gateway_paid: gatewayPaid,
         wallet_transaction_id: walletTxnId,
         refund_to_original: refundToOriginal,
       }
     })
 
     let originalRefundError: string | null = null
+    let walletPortionError: string | null = null
     if (result.refund_to_original) {
+      // Only the gateway-captured slice can go back through the gateway —
+      // the helper clamps to the captured amount anyway, but be explicit.
       const refundResult = await initiateOriginalMethodRefund({
-        orderId: result.order_id, amount: result.refund_amount, initiatedBy: userId, initiatedByRole: 'customer',
+        orderId: result.order_id, amount: result.gateway_paid, initiatedBy: userId, initiatedByRole: 'customer',
       })
       if (!refundResult.success) {
         originalRefundError = refundResult.error || 'Refund could not be initiated'
         // Cancellation already went through — only the refund failed to start.
-        // Revert to 'paid' (nothing is actually processing at the gateway)
-        // so the customer can retry, e.g. via the wallet option instead.
+        // Revert to 'paid' (nothing is actually processing at the gateway,
+        // and the wallet slice hasn't been credited yet either) so the
+        // customer can retry, e.g. via the wallet option instead.
         await queryOne(`UPDATE orders SET payment_status = 'paid', updated_at = NOW() WHERE id = $1`, [result.order_id])
+      } else if (result.wallet_paid > 0) {
+        // The wallet-paid slice of a split order can't go back through the
+        // gateway — credit it back to the wallet now that the gateway leg
+        // is safely initiated.
+        try {
+          await queryOne(
+            `SELECT wallet_credit_for_order($1, $2, $3, $4) AS txn_id`,
+            [userId, result.order_id, result.wallet_paid, `Wallet-paid portion refund for cancelled order ${result.order_number}`]
+          )
+          await queryOne(
+            `UPDATE payments SET status = 'refunded' WHERE order_id = $1 AND status = 'completed' AND payment_method = 'wallet'`,
+            [result.order_id]
+          )
+        } catch (walletErr) {
+          console.error('[POST /api/customer/orders/:id/cancel] wallet-portion credit failed:', walletErr)
+          walletPortionError = 'The wallet-paid portion could not be credited automatically — please contact support.'
+        }
       }
     }
 
@@ -142,7 +172,9 @@ export async function POST(
         const refundNote = result.refunded
           ? `₹${result.refund_amount.toFixed(2)} has been credited to your Laundrease wallet.`
           : result.refund_to_original && !originalRefundError
-            ? `₹${result.refund_amount.toFixed(2)} refund initiated to your original payment method (5–7 business days).`
+            ? result.wallet_paid > 0
+              ? `₹${result.gateway_paid.toFixed(2)} refund initiated to your original payment method (5–7 business days) and ₹${result.wallet_paid.toFixed(2)} credited back to your wallet.`
+              : `₹${result.gateway_paid.toFixed(2)} refund initiated to your original payment method (5–7 business days).`
             : 'No payment was captured for this order.'
         await sendOrderCancelledEmail({
           to: customerRes.email,
@@ -177,12 +209,14 @@ export async function POST(
     const message = result.refunded
       ? `Order cancelled. ₹${result.refund_amount.toFixed(2)} has been credited to your wallet.`
       : result.refund_to_original && !originalRefundError
-        ? `Order cancelled. ₹${result.refund_amount.toFixed(2)} refund has been initiated to your original payment method — it can take 5-7 business days to reflect.`
+        ? (result.wallet_paid > 0
+            ? `Order cancelled. ₹${result.gateway_paid.toFixed(2)} refund initiated to your original payment method (5-7 business days)${walletPortionError ? `. ${walletPortionError}` : ` and ₹${result.wallet_paid.toFixed(2)} credited back to your wallet.`}`
+            : `Order cancelled. ₹${result.gateway_paid.toFixed(2)} refund has been initiated to your original payment method — it can take 5-7 business days to reflect.`)
         : result.refund_to_original && originalRefundError
           ? `Order cancelled, but the refund to your original payment method could not be started (${originalRefundError}). Please contact support or try again from your order history.`
           : 'Order cancelled successfully.'
 
-    return successResponse({ message, ...result, refund_error: originalRefundError })
+    return successResponse({ message, ...result, refund_error: originalRefundError || walletPortionError })
   } catch (error: any) {
     if (error.message === 'NOT_FOUND') return notFoundResponse('Order not found')
     if (error.message === 'NOT_CANCELLABLE') {

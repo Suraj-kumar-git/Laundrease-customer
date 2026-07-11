@@ -236,3 +236,9 @@ ALTER TABLE orders ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMPTZ;
 
 ALTER TABLE provider_payouts ADD COLUMN IF NOT EXISTS payslip_s3_key VARCHAR(500);
+
+INSERT INTO platform_config (key, value, description) VALUES
+  ('default_support_password', '"Support@123"', 'Default password assigned to newly created support agents — they must change it on first login')
+ON CONFLICT (key) DO NOTHING;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE;

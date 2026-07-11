@@ -30,6 +30,9 @@ interface OrderDetail {
   rejection_reason: string | null; rejected_at: string | null
   special_instructions: string | null; is_express: boolean
   subtotal: number; tax_amount: number; discount_amount: number; total_amount: number
+  original_subtotal: number | null; original_total_amount: number | null
+  modified_by_delivery: boolean; delivery_modified_at: string | null
+  amount_paid: number; balance_due: number
   payment_status: string; payment_method: string
   created_at: string; updated_at: string; can_reschedule: boolean; can_cancel: boolean
   provider: { id: number; name: string; address: string; city: string; phone: string } | null
@@ -40,6 +43,21 @@ interface GarmentClaim {
   id: number; order_item_id: number; claim_type: 'damaged' | 'lost' | 'stolen'
   description: string; status: string; cleaning_charge_snapshot: number; cap_amount: number
   compensation_amount: number | null; decision_note: string | null; created_at: string
+  paid_at: string | null
+  provider_comment: string | null; provider_decided_at: string | null
+  provider_name: string | null
+}
+
+// Customer-friendly labels + styling per claim status (new multi-stage flow)
+const CLAIM_STATUS_META: Record<string, { label: string; cls: string }> = {
+  submitted:         { label: 'Awaiting laundry review',   cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' },
+  under_review:      { label: 'Under review',              cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' },
+  provider_approved: { label: 'Approved by laundry',       cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400' },
+  provider_rejected: { label: 'Rejected by laundry',       cls: 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400' },
+  amount_issued:     { label: 'Compensation processing',   cls: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400' },
+  approved:          { label: 'Approved',                  cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400' },
+  paid:              { label: 'Credited to wallet',        cls: 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400' },
+  rejected:          { label: 'Rejected',                  cls: 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400' },
 }
 
 interface ItemProtectionPolicy {
@@ -48,6 +66,7 @@ interface ItemProtectionPolicy {
 
 interface OrderItem {
   id: number; quantity: number; weight_kg: number | null; garment_label: string | null
+  item_status: string | null; modification_note: string | null
   product_type_name: string; icon: string
   service_id: number; service_name: string; service_category: string
   unit_price: number; line_total: number; is_express: boolean; express_multiplier: number
@@ -273,9 +292,9 @@ function RescheduleModal({
 
 // ---- Cancel order modal ---------------------------------------
 function CancelOrderModal({
-  orderId, totalAmount, paymentStatus, gatewayProvider, onClose, onSuccess,
+  orderId, payments, onClose, onSuccess,
 }: {
-  orderId: string; totalAmount: number; paymentStatus: string; gatewayProvider: string | null
+  orderId: string; payments: Payment[]
   onClose: () => void; onSuccess: (message: string) => void
 }) {
   const { toast }     = useToast()
@@ -283,10 +302,17 @@ function CancelOrderModal({
   const [cancelling, setCancelling] = useState(false)
   const [error,    setError]    = useState<string | null>(null)
   const [refundMethod, setRefundMethod] = useState<'wallet' | 'original'>('wallet')
-  const willRefund = paymentStatus === 'paid'
-  // Only PayU/Cashfree-paid orders can be refunded back to the original
-  // method — wallet-paid or COD orders have nothing else to refund to.
-  const canRefundToOriginal = willRefund && ['payu', 'cashfree'].includes(gatewayProvider || '')
+
+  // What was actually captured, by source (mirrors the backend's
+  // getRefundBreakdown). The wallet-paid slice can only return to the
+  // wallet; only the gateway slice offers a destination choice — this is
+  // what gives wallet+online split orders the choice too.
+  const completed   = payments.filter(p => p.status === 'completed')
+  const walletPaid  = completed.filter(p => p.payment_method === 'wallet').reduce((s, p) => s + p.amount, 0)
+  const gatewayPaid = completed.filter(p => ['payu', 'cashfree'].includes(p.provider || '')).reduce((s, p) => s + p.amount, 0)
+  const totalRefundable = walletPaid + gatewayPaid
+  const willRefund = totalRefundable > 0
+  const canRefundToOriginal = gatewayPaid > 0
 
   const handleConfirm = async () => {
     setCancelling(true)
@@ -343,28 +369,42 @@ function CancelOrderModal({
         <p className="mb-3 text-sm text-muted-foreground">
           Are you sure you want to cancel this order?
           {willRefund && !canRefundToOriginal && (
-            <> ₹{totalAmount.toFixed(2)} will be credited to your Laundrease wallet.</>
+            <> ₹{totalRefundable.toFixed(2)} will be credited to your Laundrease wallet.</>
           )}
         </p>
 
         {canRefundToOriginal && (
           <div className="mb-4 space-y-2">
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Refund ₹{totalAmount.toFixed(2)} to
+              Refund ₹{gatewayPaid.toFixed(2)} to
             </label>
             <div className="grid grid-cols-2 gap-2">
               {[
                 { key: 'wallet' as const, label: 'Laundrease wallet', hint: 'Instant credit' },
                 { key: 'original' as const, label: 'Original payment method', hint: '5-7 business days' },
-              ].map(opt => (
-                <button key={opt.key} type="button" onClick={() => setRefundMethod(opt.key)}
-                  className={`rounded-xl border p-3 text-left transition-colors
-                    ${refundMethod === opt.key ? 'border-primary bg-primary/5' : 'border-border/50 hover:bg-muted'}`}>
-                  <p className="text-sm font-medium text-foreground">{opt.label}</p>
-                  <p className="text-[10px] text-muted-foreground">{opt.hint}</p>
-                </button>
-              ))}
+              ].map(opt => {
+                const selected = refundMethod === opt.key
+                return (
+                  <button key={opt.key} type="button" onClick={() => setRefundMethod(opt.key)}
+                    aria-pressed={selected}
+                    className={`relative rounded-xl border-2 p-3 pr-8 text-left transition-all
+                      ${selected
+                        ? 'border-primary bg-primary/10 ring-2 ring-primary/25 shadow-sm'
+                        : 'border-border/50 hover:border-border hover:bg-muted'}`}>
+                    {selected && (
+                      <CheckCircle className="absolute right-2 top-2 h-4 w-4 text-primary"/>
+                    )}
+                    <p className={`text-sm font-medium ${selected ? 'text-primary' : 'text-foreground'}`}>{opt.label}</p>
+                    <p className="text-[10px] text-muted-foreground">{opt.hint}</p>
+                  </button>
+                )
+              })}
             </div>
+            {walletPaid > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                ₹{walletPaid.toFixed(2)} paid from your wallet will be credited back to your wallet in both cases.
+              </p>
+            )}
           </div>
         )}
 
@@ -399,6 +439,117 @@ function CancelOrderModal({
           </button>
         </div>
       </motion.div>
+    </div>
+  )
+}
+
+// ---- Claim status detail modal --------------------------------
+// Shows the customer where their report stands: a stage timeline, the
+// laundry provider's decision comment, and the credited amount once paid.
+function ClaimStatusModal({ claim, itemName, onClose }: {
+  claim: GarmentClaim; itemName: string; onClose: () => void
+}) {
+  const meta = CLAIM_STATUS_META[claim.status] ?? { label: claim.status.replace(/_/g, ' '), cls: 'bg-muted text-foreground' }
+  const isRejected = ['provider_rejected', 'rejected'].includes(claim.status)
+
+  // Ordered stages for the progress timeline (rejection short-circuits it)
+  const stages = [
+    { key: 'submitted', label: 'Report submitted', done: true, at: claim.created_at },
+    {
+      key: 'provider',
+      label: isRejected && claim.status === 'provider_rejected' ? 'Rejected by laundry provider' : 'Laundry provider review',
+      done: !!claim.provider_decided_at || ['provider_approved', 'amount_issued', 'paid', 'approved'].includes(claim.status),
+      at: claim.provider_decided_at,
+      failed: claim.status === 'provider_rejected',
+    },
+    {
+      key: 'amount',
+      label: 'Compensation determined',
+      done: ['amount_issued', 'paid'].includes(claim.status),
+      at: null,
+      hidden: isRejected,
+    },
+    {
+      key: 'paid',
+      label: claim.compensation_amount != null && claim.status === 'paid'
+        ? `${formatINR(claim.compensation_amount)} credited to your wallet`
+        : 'Amount credited to wallet',
+      done: claim.status === 'paid',
+      at: claim.paid_at,
+      hidden: isRejected,
+    },
+  ].filter(s => !('hidden' in s && s.hidden))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-background p-5 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-bold text-foreground">Your report — {itemName}</h3>
+          <button onClick={onClose}><X className="h-5 w-5 text-muted-foreground"/></button>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${meta.cls}`}>{meta.label}</span>
+            <span className="text-xs text-muted-foreground capitalize">{claim.claim_type} item</span>
+          </div>
+
+          {/* Timeline */}
+          <div className="space-y-0">
+            {stages.map((s, i) => (
+              <div key={s.key} className="flex items-start gap-3">
+                <div className="flex flex-col items-center">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0
+                    ${('failed' in s && s.failed) ? 'bg-red-100 dark:bg-red-900/20'
+                      : s.done ? 'bg-green-100 dark:bg-green-900/20' : 'bg-muted'}`}>
+                    {('failed' in s && s.failed)
+                      ? <XCircle className="w-3.5 h-3.5 text-red-600"/>
+                      : s.done
+                        ? <CheckCircle className="w-3.5 h-3.5 text-green-600"/>
+                        : <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40"/>}
+                  </div>
+                  {i < stages.length - 1 && <div className="w-0.5 h-6 bg-border"/>}
+                </div>
+                <div className="pt-0.5 pb-2">
+                  <p className={`text-sm ${s.done ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>{s.label}</p>
+                  {s.at && <p className="text-[10px] text-muted-foreground">{formatDateTime(s.at)}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Your description */}
+          <div className="rounded-xl bg-muted/30 p-3">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-1">What you reported</p>
+            <p className="text-sm text-foreground">{claim.description}</p>
+          </div>
+
+          {/* Provider's comment */}
+          {claim.provider_comment && (
+            <div className={`rounded-xl p-3 border ${claim.status === 'provider_rejected'
+              ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800'
+              : 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800'}`}>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-1">
+                {claim.provider_name || 'Laundry provider'}&apos;s response
+              </p>
+              <p className={`text-sm ${claim.status === 'provider_rejected' ? 'text-red-700 dark:text-red-400' : 'text-blue-800 dark:text-blue-300'}`}>
+                {claim.provider_comment}
+              </p>
+            </div>
+          )}
+
+          {claim.status === 'paid' && claim.compensation_amount != null && (
+            <div className="rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800 p-3 text-sm text-green-700 dark:text-green-400">
+              {formatINR(claim.compensation_amount)} has been credited to your Laundrease wallet. Thank you for your patience.
+            </div>
+          )}
+          {claim.status === 'provider_rejected' && (
+            <p className="text-[11px] text-muted-foreground">
+              This decision is final. If you believe it is incorrect, please reach out to our support team from the Help section.
+            </p>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -562,6 +713,7 @@ export default function OrderDetailPage() {
   const [claims, setClaims] = useState<GarmentClaim[]>([])
   const [itemProtectionPolicy, setItemProtectionPolicy] = useState<ItemProtectionPolicy | null>(null)
   const [reportIssueItem, setReportIssueItem] = useState<OrderItem | null>(null)
+  const [viewClaim, setViewClaim] = useState<{ claim: GarmentClaim; itemName: string } | null>(null)
 
   useEffect(() => {
     // Load fee labels from order_fee_config (once per page load)
@@ -1000,13 +1152,9 @@ export default function OrderDetailPage() {
                       && withinWindow
                       && !claim
 
-                    const claimStatusCls: Record<string, string> = {
-                      submitted: 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400',
-                      under_review: 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400',
-                      approved: 'bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400',
-                      paid: 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400',
-                      rejected: 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400',
-                    }
+                    const claimMeta = claim
+                      ? (CLAIM_STATUS_META[claim.status] ?? { label: claim.status.replace(/_/g, ' '), cls: 'bg-muted text-muted-foreground' })
+                      : null
 
                     return (
                       <div key={item.id} className="flex items-center justify-between gap-3">
@@ -1019,20 +1167,41 @@ export default function OrderDetailPage() {
                             className="shrink-0 rounded-md"
                           />
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-foreground">{item.product_type_name}</p>
+                            <p className={cn('truncate text-sm font-medium',
+                              item.item_status === 'not_picked_up' ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                              {item.product_type_name}
+                            </p>
                             <p className="text-xs text-muted-foreground">
                               {item.weight_kg ? `${item.weight_kg} kg` : `×${item.quantity}`}
                               {item.is_express && <span className="ml-1 text-amber-600">· Express</span>}
                             </p>
-                            {claim && (
-                              <span className={`mt-1 inline-block text-[10px] px-2 py-0.5 rounded-full font-semibold capitalize ${claimStatusCls[claim.status] || 'bg-muted text-muted-foreground'}`}>
-                                {claim.claim_type} claim — {claim.status.replace('_', ' ')}
+                            {item.item_status === 'not_picked_up' && (
+                              <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-400"
+                                title={item.modification_note || undefined}>
+                                Not picked up
                               </span>
+                            )}
+                            {item.item_status === 'added_by_delivery' && (
+                              <span className="mt-1 inline-block rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-400"
+                                title={item.modification_note || undefined}>
+                                Added at pickup
+                              </span>
+                            )}
+                            {claim && claimMeta && (
+                              <button
+                                onClick={() => setViewClaim({ claim, itemName: item.product_type_name })}
+                                className={`mt-1 inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold hover:opacity-80 transition-opacity ${claimMeta.cls}`}
+                                title="View report status"
+                              >
+                                <span className="capitalize">{claim.claim_type}</span> report — {claimMeta.label}
+                                <ChevronRight className="h-2.5 w-2.5"/>
+                              </button>
                             )}
                           </div>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-1">
-                          <span className="text-sm font-semibold text-foreground">
+                          <span className={cn('text-sm font-semibold',
+                            item.item_status === 'not_picked_up' ? 'text-muted-foreground line-through' : 'text-foreground')}>
                             {formatINR(item.line_total)}
                           </span>
                           {canReportIssue && (
@@ -1090,30 +1259,64 @@ export default function OrderDetailPage() {
               }
 
               <div className="flex justify-between border-t border-border/40 pt-2.5 text-base">
-                <span className="font-bold text-foreground">Total</span>
+                <span className="font-bold text-foreground">
+                  Total
+                  {order.modified_by_delivery && order.original_total_amount != null
+                    && order.original_total_amount !== order.total_amount && (
+                    <span className="ml-2 text-xs font-normal text-muted-foreground line-through">
+                      {formatINR(order.original_total_amount)}
+                    </span>
+                  )}
+                </span>
                 <span className="font-bold text-primary">{formatINR(order.total_amount)}</span>
               </div>
+
+              {/* Paid vs balance — only interesting once the totals diverge */}
+              {order.modified_by_delivery && order.amount_paid > 0 && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Paid so far</span>
+                    <span className="font-medium text-emerald-600">{formatINR(order.amount_paid)}</span>
+                  </div>
+                  {order.balance_due > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Balance due</span>
+                      <span className="font-semibold text-amber-600">{formatINR(order.balance_due)}</span>
+                    </div>
+                  )}
+                  {order.amount_paid > order.total_amount && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Overpaid (credited to wallet after pickup)</span>
+                      <span className="font-semibold text-violet-600">{formatINR(Math.round((order.amount_paid - order.total_amount) * 100) / 100)}</span>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </Section>
 
           {/* Payment — shows split clearly for wallet+COD / wallet+UPI */}
           <Section title="Payment" icon={CreditCard}>
             {(() => {
-              const NOT_PAYABLE = new Set(['delivered', 'completed', 'cancelled', 'returned', 'failed'])
-              const canPayOnline = order.payment_method?.toLowerCase().includes('cod')
+              const NOT_PAYABLE = new Set(['delivered', 'completed', 'cancelled', 'returned', 'failed', 'rejected'])
+              // A positive balance covers both classic COD orders and prepaid
+              // orders whose total grew after items were modified at pickup.
+              const canPayOnline = order.balance_due > 0
                 && order.payment_status !== 'paid'
                 && !NOT_PAYABLE.has(order.status)
               if (!canPayOnline) return null
               return (
                 <div className="mb-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-800 dark:bg-violet-950/20">
                   <p className="text-sm font-medium text-foreground">
-                    Skip the cash/card at the door — pay online any time before delivery.
+                    {order.modified_by_delivery && order.amount_paid > 0
+                      ? `Your order was updated at pickup — ₹${order.balance_due.toFixed(2)} is remaining to pay.`
+                      : 'Skip the cash/card at the door — pay online any time before delivery.'}
                   </p>
                   {payError && <p className="mt-1.5 text-xs text-destructive">{payError}</p>}
                   <button onClick={handlePayOnline} disabled={payLoading}
                     className="mt-2.5 flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-violet-700 disabled:opacity-60">
                     {payLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                    {payLoading ? 'Processing…' : 'Pay Online Now'}
+                    {payLoading ? 'Processing…' : `Pay ${formatINR(order.balance_due)} Online Now`}
                   </button>
                 </div>
               )
@@ -1272,9 +1475,7 @@ export default function OrderDetailPage() {
         {showCancel && (
           <CancelOrderModal
             orderId={order.id}
-            totalAmount={order.total_amount}
-            paymentStatus={order.payment_status}
-            gatewayProvider={payments.find(p => p.status === 'completed')?.provider ?? null}
+            payments={payments}
             onClose={() => setShowCancel(false)}
             onSuccess={handleCancelSuccess}
           />
@@ -1291,12 +1492,21 @@ export default function OrderDetailPage() {
             onClose={() => setReportIssueItem(null)}
             onSuccess={() => {
               setReportIssueItem(null)
-              toast({ title: 'Claim submitted', description: 'Our support team will review it shortly' })
+              toast({ title: 'Report submitted', description: 'The laundry provider will review it shortly' })
               fetchOrder()
             }}
           />
         )}
       </AnimatePresence>
+
+      {/* Claim status detail modal */}
+      {viewClaim && (
+        <ClaimStatusModal
+          claim={viewClaim.claim}
+          itemName={viewClaim.itemName}
+          onClose={() => setViewClaim(null)}
+        />
+      )}
     </>
   )
 }

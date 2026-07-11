@@ -128,6 +128,21 @@ export async function GET(req: NextRequest) {
       partner_count:  string
     }>(`SELECT * FROM home_platform_stats`)
 
+    // Live coverage: pincodes + cities actually served by active providers
+    // (derived from provider_service_areas, not a manually maintained list).
+    const coverageRow = await queryOne<{
+      service_areas: string; cities: string; city_names: string[] | null
+    }>(`
+      SELECT
+        COUNT(DISTINCT psa.postal_code)::TEXT AS service_areas,
+        COUNT(DISTINCT LOWER(psa.city)) FILTER (WHERE psa.city IS NOT NULL)::TEXT AS cities,
+        (ARRAY_AGG(DISTINCT INITCAP(psa.city)) FILTER (WHERE psa.city IS NOT NULL))[1:5] AS city_names
+      FROM provider_service_areas psa
+      INNER JOIN laundry_profiles lp ON lp.id = psa.provider_id
+      WHERE psa.is_active = TRUE
+        AND lp.status = 'active' AND lp.is_verified = TRUE
+    `)
+
     // ---- 3. Testimonials (active, ordered) ----------------------------
     const testimonialsRes = await query(
       `SELECT id, display_name, role, avatar_url, content, rating, is_featured
@@ -180,6 +195,9 @@ export async function GET(req: NextRequest) {
         monthly_orders: parseInt(statsRow?.monthly_orders ?? '0'),
         success_rate:   parseFloat(statsRow?.success_rate  ?? '100'),
         partner_count:  parseInt(statsRow?.partner_count  ?? '0'),
+        service_areas:  parseInt(coverageRow?.service_areas ?? '0'),
+        cities_covered: parseInt(coverageRow?.cities        ?? '0'),
+        city_names:     coverageRow?.city_names ?? [],
       },
       testimonials,
       platform: {

@@ -409,3 +409,71 @@ export async function sendDeliveryCompletionLinkEmail(to: string, name: string, 
     },
   })
 }
+// ─── Item-protection claim emails ────────────────────────────────────────────
+// One helper per stage the customer needs to hear about. Same mock/dev vs
+// MSG91-template pattern as everything above; all call sites fire these
+// best-effort so a mail hiccup never blocks the claim action itself.
+
+export async function sendClaimSubmittedEmail(params: {
+  to: string; customerName: string; orderNumber: string
+  itemLabel: string; claimType: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] CLAIM SUBMITTED → ${params.to} | order ${params.orderNumber} | ${params.claimType} | item: ${params.itemLabel}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('CLAIM_SUBMITTED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName: params.customerName,
+      orderNumber:  params.orderNumber,
+      itemLabel:    params.itemLabel,
+      claimType:    params.claimType,
+    },
+  })
+}
+
+export async function sendClaimProviderDecisionEmail(params: {
+  to: string; customerName: string; orderNumber: string
+  itemLabel: string; approved: boolean; providerComment: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] CLAIM ${params.approved ? 'APPROVED' : 'REJECTED'} BY PROVIDER → ${params.to} | order ${params.orderNumber} | comment: ${params.providerComment}`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('CLAIM_PROVIDER_DECISION_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName:    params.customerName,
+      orderNumber:     params.orderNumber,
+      itemLabel:       params.itemLabel,
+      decision:        params.approved ? 'approved' : 'rejected',
+      providerComment: params.providerComment,
+      nextStep:        params.approved
+        ? 'Our team is now determining your compensation amount — we will keep you posted.'
+        : 'This decision is final. If you believe it is incorrect, please contact our support team.',
+    },
+  })
+}
+
+export async function sendClaimResolvedEmail(params: {
+  to: string; customerName: string; orderNumber: string
+  itemLabel: string; amount: string
+}): Promise<void> {
+  if (getEmailProvider() === 'mock') {
+    console.log(`[EMAIL DEV] CLAIM RESOLVED (PAID) → ${params.to} | order ${params.orderNumber} | ₹${params.amount} credited to wallet`)
+    return
+  }
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.customerName,
+    templateId: getTemplateId('CLAIM_RESOLVED_EMAIL_TEMPLATE_ID'),
+    variables: {
+      customerName: params.customerName,
+      orderNumber:  params.orderNumber,
+      itemLabel:    params.itemLabel,
+      amount:       params.amount,
+    },
+  })
+}

@@ -25,6 +25,7 @@ interface Testimonial {
 }
 interface Stats {
   total_users: number; monthly_orders: number; success_rate: number; partner_count: number
+  service_areas: number; cities_covered: number; city_names: string[]
 }
 interface HomeData {
   providers: Provider[]; location_used: boolean; stats: Stats; testimonials: Testimonial[]
@@ -483,6 +484,14 @@ export default function HomePage() {
     { label: 'Monthly Orders', value: stats ? formatStat(stats.monthly_orders) : '—' },
     { label: 'Success Rate',   value: stats ? `${stats.success_rate}%`          : '—' },
     { label: 'Local Partners', value: stats ? formatStat(stats.partner_count)  : '—' },
+    { label: 'Service Areas',  value: stats ? formatStat(stats.service_areas)  : '—' },
+    {
+      label: (stats?.cities_covered ?? 0) === 1 && stats?.city_names?.[0]
+        ? 'Serving City' : 'Cities Served',
+      value: stats
+        ? ((stats.cities_covered === 1 && stats.city_names?.[0]) ? stats.city_names[0] : formatStat(stats.cities_covered))
+        : '—',
+    },
   ]
 
   return (
@@ -538,10 +547,10 @@ export default function HomePage() {
               </Link>
             </div>
 
-            <div className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-4 md:max-w-md">
+            <div className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-3 md:max-w-md">
               {STATS.map((stat, i) => (
                 <div key={i} className="text-center md:text-left">
-                  <p className="text-2xl font-extrabold text-white tabular-nums">{loading ? '—' : stat.value}</p>
+                  <p className="text-2xl font-extrabold text-white tabular-nums truncate">{loading ? '—' : stat.value}</p>
                   <p className="text-xs font-medium text-white/70">{stat.label}</p>
                 </div>
               ))}
