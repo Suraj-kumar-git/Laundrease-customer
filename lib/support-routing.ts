@@ -4,66 +4,41 @@
 // assigned_to is deliberately left NULL so the ticket lands in that team's
 // shared "Group queue" (see app/api/support/dashboard/route.ts) and any
 // member can claim it. No specific-agent auto-pick.
+//
+// Routing rules live in support_ticket_category_routing (admin-configurable,
+// see scripts/39-support-ticket-category-routing.sql) instead of being
+// hardcoded here. A rule matches when every non-NULL column on it is
+// satisfied (NULL means "any"); sub_category_keyword is a case-insensitive
+// substring match. When several rules match, the most specific one wins via
+// a weighted score: category match = 100, sub_category_keyword match = 10,
+// reporter_role match = 1 — ties broken by id ASC (earlier-seeded wins).
 
 import { queryOne } from '@/lib/db'
-
-const PARTNER_ROLES = new Set(['laundry', 'delivery'])
-
-// Group names must match support_groups.name exactly (scripts/25-support-auth.sql
-// + the 5th group added later: 'Tier 2 - Technical').
-const GROUP_NAMES = {
-  GENERAL:    'Tier 1 - General',
-  BILLING:    'Tier 2 - Billing',
-  TECH_TIER2: 'Tier 2 - Technical',
-  TECH_TIER3: 'Tier 3 - Technical',
-  OPERATIONS: 'Operations',
-} as const
-
-// Sub-categories that describe a damaged/lost/quality/mishandled item — these
-// need the team that actually owns provider quality & fulfilment (Operations),
-// not generic first-line triage, regardless of who reported it.
-const QUALITY_ISSUE_KEYWORDS = [
-  'damaged', 'lost', 'quality issue', 'wrong item', 'missing item', 'wrong items returned',
-]
-
-function isQualityOrDamageIssue(subCategory?: string | null): boolean {
-  if (!subCategory) return false
-  const s = subCategory.toLowerCase()
-  return QUALITY_ISSUE_KEYWORDS.some(k => s.includes(k))
-}
-
-function resolveGroupName(category: string, reporterRole: string, subCategory?: string | null): string {
-  const isPartner = PARTNER_ROLES.has(reporterRole)
-
-  if (category === 'technical') return GROUP_NAMES.TECH_TIER2 // first line; escalate to Tier 3 manually
-  if (category === 'wallet')    return GROUP_NAMES.BILLING    // refunds, payouts, billing disputes
-
-  // order — a damaged/lost/quality complaint is an operational fulfilment
-  // issue regardless of who reported it (customer or partner), so it skips
-  // straight to Operations instead of sitting in generic Tier 1 triage.
-  if (category === 'order' && isQualityOrDamageIssue(subCategory)) return GROUP_NAMES.OPERATIONS
-
-  // account / coupon / other / remaining order sub-categories:
-  // partner-reported (laundry/delivery) issues go to Operations,
-  // everything else (customer and any other reporter) goes to General.
-  return isPartner ? GROUP_NAMES.OPERATIONS : GROUP_NAMES.GENERAL
-}
 
 /**
  * Resolve which support_groups.id a newly-created ticket should auto-route to,
  * based on its category, sub-category, and the reporter's role. Returns null
- * (leaves the ticket unassigned) if the target group doesn't exist in this DB
- * yet — ticket creation should never fail because of a routing lookup miss.
+ * (leaves the ticket unassigned) if no rule matches — ticket creation should
+ * never fail because of a routing lookup miss.
  */
 export async function getAutoAssignGroupId(
   category:     string,
   reporterRole: string,
   subCategory?: string | null
 ): Promise<number | null> {
-  const groupName = resolveGroupName(category, reporterRole, subCategory)
-  const group = await queryOne<{ id: number }>(
-    `SELECT id FROM support_groups WHERE name = $1`,
-    [groupName]
+  const rule = await queryOne<{ group_id: number }>(
+    `SELECT group_id
+     FROM support_ticket_category_routing
+     WHERE (category IS NULL OR category = $1)
+       AND (reporter_role IS NULL OR reporter_role = $2)
+       AND (sub_category_keyword IS NULL OR $3::text ILIKE '%' || sub_category_keyword || '%')
+     ORDER BY
+       (CASE WHEN category IS NOT NULL THEN 100 ELSE 0 END +
+        CASE WHEN sub_category_keyword IS NOT NULL THEN 10 ELSE 0 END +
+        CASE WHEN reporter_role IS NOT NULL THEN 1 ELSE 0 END) DESC,
+       id ASC
+     LIMIT 1`,
+    [category, reporterRole, subCategory ?? null]
   )
-  return group?.id ?? null
+  return rule?.group_id ?? null
 }

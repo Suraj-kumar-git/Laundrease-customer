@@ -12,6 +12,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
+import { formatStat } from '@/lib/format-stat'
 
 // ---- Types -------------------------------------------------------------------
 interface Provider {
@@ -32,12 +33,6 @@ interface HomeData {
 }
 
 // ---- Helpers -----------------------------------------------------------------
-function formatStat(n: number): string {
-  if (n >= 100000) return `${Math.floor(n / 1000)}K+`
-  if (n >= 1000)   return `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}K+`
-  if (n === 0)     return '—'
-  return `${n}+`
-}
 function formatDistance(km: number | null): string {
   if (km === null) return ''
   if (km < 1) return `${Math.round(km * 1000)}m away`

@@ -124,10 +124,22 @@ export async function POST(req: NextRequest) {
     if (!category) return errorResponse('Invalid or unavailable category', 400)
 
     const priority = body.priority || category.default_priority || 'medium'
-    const validPriority = await queryOne(
-      `SELECT code FROM support_ticket_priorities WHERE code = $1`, [priority]
+    const sla = await queryOne<{
+      code: string
+      first_response_sla_minutes: number | null
+      resolution_sla_minutes:     number | null
+    }>(
+      `SELECT code, first_response_sla_minutes, resolution_sla_minutes
+       FROM support_ticket_priorities WHERE code = $1`, [priority]
     )
-    if (!validPriority) return errorResponse('Invalid priority', 400)
+    if (!sla) return errorResponse('Invalid priority', 400)
+
+    // SLA due dates from priority config — same clock every reporter role uses.
+    const now = new Date()
+    const firstResponseDue = sla.first_response_sla_minutes
+      ? new Date(now.getTime() + sla.first_response_sla_minutes * 60000) : null
+    const resolutionDue    = sla.resolution_sla_minutes
+      ? new Date(now.getTime() + sla.resolution_sla_minutes * 60000) : null
 
     // If an order is referenced, verify it actually belongs to this customer
     let orderId: number | null = null
@@ -144,7 +156,6 @@ export async function POST(req: NextRequest) {
 
     const metadata = {
       role:          'customer',
-      sub_category:  body.sub_category || null,
       order_number:  orderNumber,
       source_portal: 'customer_app',
     }
@@ -153,19 +164,23 @@ export async function POST(req: NextRequest) {
 
     const ticket = await queryOne<{ id: number }>(`
       INSERT INTO support_tickets (
-        reporter_id, reporter_role, order_id, category, priority,
-        status, source, subject, description, metadata, assigned_group_id
-      ) VALUES ($1, 'customer', $2, $3, $4, 'open', 'app', $5, $6, $7, $8)
+        reporter_id, reporter_role, order_id, category, sub_category, priority,
+        status, source, subject, description, metadata, assigned_group_id,
+        first_response_due_at, resolution_due_at
+      ) VALUES ($1, 'customer', $2, $3, $4, $5, 'open', 'app', $6, $7, $8, $9, $10, $11)
       RETURNING id
     `, [
       userId,
       orderId,
       body.category,
+      body.sub_category?.trim() || null,
       priority,
       body.subject.trim(),
       body.description.trim(),
       JSON.stringify(metadata),
       assignedGroupId,
+      firstResponseDue,
+      resolutionDue,
     ])
 
     const ticketId = ticket!.id

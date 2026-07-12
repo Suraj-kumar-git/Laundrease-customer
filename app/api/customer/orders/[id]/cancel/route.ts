@@ -168,6 +168,8 @@ export async function POST(
         `SELECT email, full_name FROM users WHERE id = $1`,
         [userId]
       )
+      const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL || 'http://localhost:3000'
+
       if (customerRes?.email) {
         const refundNote = result.refunded
           ? `₹${result.refund_amount.toFixed(2)} has been credited to your Laundrease wallet.`
@@ -182,6 +184,7 @@ export async function POST(
           orderNumber: result.order_number,
           cancelledBy: 'customer',
           refundNote,
+          orderUrl: `${baseUrl}/customer/orders/${publicId}`,
         })
       }
 
@@ -200,6 +203,8 @@ export async function POST(
           providerName: providerRes.business_name,
           orderNumber: result.order_number,
           cancelledBy: 'the customer',
+          cancellationReason: reason || 'No reason provided',
+          orderUrl: `${baseUrl}/laundry/orders/${publicId}`,
         })
       }
     } catch (notifyErr) {

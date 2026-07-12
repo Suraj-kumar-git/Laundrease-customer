@@ -429,24 +429,6 @@ export async function requireAuth(req?: NextRequest): Promise<string> {
 }
  
 /**
-* Check whether a (support-role) user is a 'lead' member of the
-* 'Operations' support group — used to gate cash-remittance logging to
-* admins plus that specific subset of the support team, without adding
-* a whole new permissions system on top of the existing support_groups
-* membership model.
-*/
-export async function isOperationsLead(userId: string): Promise<boolean> {
-  const row = await queryOne<{ group_id: number }>(
-    `SELECT sgm.group_id
-     FROM support_group_members sgm
-     INNER JOIN support_groups sg ON sg.id = sgm.group_id
-     WHERE sgm.user_id = $1 AND sg.name = 'Operations' AND sgm.role = 'lead'`,
-    [userId]
-  )
-  return !!row
-}
-
-/**
 * Get user ID and verify role
 * Throws error if user is not authenticated or doesn't have required role
 */
