@@ -8,7 +8,9 @@ import {
 import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
 import { GuestOnlyCta } from '@/components/common/guest-only-cta'
 import { ABOUT_US_FALLBACK } from '@/lib/footer-page-fallbacks'
+import { formatStat } from '@/lib/format-stat'
 import type { PageContentBlock, CardItem, StatItem, HeroBody, TextBlockBody } from '@/types/footer-pages'
+import { AboutPageLiveStats, getAboutPageLiveStats } from '@/lib/about-stats'
 
 export const metadata: Metadata = {
   title: 'About Us | Laundrease',
@@ -101,22 +103,26 @@ function HeroSection({ block }: { block: PageContentBlock }) {
   )
 }
 
-function StatsSection({ block }: { block: PageContentBlock }) {
+function StatsSection({ block, liveStats }: { block: PageContentBlock; liveStats: AboutPageLiveStats | null }) {
   const stats = block.body as StatItem[]
   return (
     <div className="border-y border-border/50 bg-muted/30">
       <PageSection tight>
         <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
-          {stats.map((stat, i) => (
-            <div key={i} className="text-center">
-              <div className="text-4xl font-bold text-primary sm:text-5xl">
-                {stat.value}
+          {stats.map((stat, i) => {
+            const live = liveStats?.[stat.icon as keyof AboutPageLiveStats]
+            const value = live !== undefined ? formatStat(live) : stat.value
+            return (
+              <div key={i} className="text-center">
+                <div className="text-4xl font-bold text-primary sm:text-5xl">
+                  {value}
+                </div>
+                <div className="mt-2 text-sm font-medium text-muted-foreground">
+                  {stat.label}
+                </div>
               </div>
-              <div className="mt-2 text-sm font-medium text-muted-foreground">
-                {stat.label}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </PageSection>
     </div>
@@ -218,9 +224,12 @@ function StorySection({ block }: { block: PageContentBlock }) {
 
 // ---- Page ---------------------------------------------------
 export default async function AboutUsPage() {
-  const blocks = await getAboutContent()
+  const [blocks, liveStats] = await Promise.all([
+    getAboutContent(),
+    getAboutPageLiveStats(),
+  ])
 
-  const getBlock = (key: string) => blocks.find((b) => b.section_key === key)
+  const getBlock = (key: string) => blocks.find((b:any) => b.section_key === key)
 
   const hero = getBlock('hero')
   const stats = getBlock('stats')
@@ -231,7 +240,7 @@ export default async function AboutUsPage() {
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'About Us' }]}>
       {hero && <HeroSection block={hero} />}
-      {stats && <StatsSection block={stats} />}
+      {stats && <StatsSection block={stats} liveStats={liveStats} />}
       {mission && <MissionSection block={mission} />}
       {values && <ValuesSection block={values} />}
       {story && <StorySection block={story} />}

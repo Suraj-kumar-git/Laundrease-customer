@@ -116,12 +116,12 @@ export async function POST(
     const maxCap          = parseFloat(policy.max_cap_amount)
     const capAmount       = Math.min(cleaningCharge * multiplier, maxCap)
 
-    const inserted = await queryOne<{ id: number }>(
+    const inserted = await queryOne<{ id: number; public_id: string }>(
       `INSERT INTO garment_claims
          (order_id, order_item_id, customer_id, claim_type, description,
           cleaning_charge_snapshot, cap_amount)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
-       RETURNING id`,
+       RETURNING id, public_id::TEXT`,
       [orderId, body.order_item_id, userId, body.claim_type, body.description.trim(), cleaningCharge, capAmount]
     )
 
@@ -146,10 +146,13 @@ export async function POST(
         `SELECT email, full_name FROM users WHERE id = $1`, [userId]
       )
       if (cust?.email) {
+        const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL || 'http://localhost:3000'
         sendClaimSubmittedEmail({
           to: cust.email, customerName: cust.full_name,
           orderNumber: order.order_number, itemLabel: item.item_label,
           claimType: body.claim_type,
+          claimId: inserted!.public_id,
+          orderUrl: `${baseUrl}/customer/orders/${publicId}`,
         }).catch(e => console.error('[api/customer/orders/[id]/claims] claim-submitted email failed:', e))
       }
     } catch (e) {

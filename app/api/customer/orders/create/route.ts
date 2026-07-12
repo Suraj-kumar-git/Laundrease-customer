@@ -519,11 +519,13 @@ export async function POST(req: NextRequest) {
           [result.provider.id]
         )
         if (providerContact?.email) {
+          const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL || 'http://localhost:3000'
           sendProviderNewOrderEmail({
             to: providerContact.email,
             providerName: providerContact.business_name,
             orderNumber: result.orderNumber,
             pickupDate: result.pickupDate,
+            orderUrl: `${baseUrl}/laundry/orders/${result.orderPublicId}`,
           }).catch(e => console.error('[orders/create] provider new-order email failed:', e))
         }
       } catch (e) {
