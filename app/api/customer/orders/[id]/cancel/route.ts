@@ -41,8 +41,9 @@ export async function POST(
     reason = typeof body?.reason === 'string' ? body.reason.trim().slice(0, 500) : null
     if (body?.refund_method === 'original') refundMethod = 'original'
   } catch {
-    // Body is optional — no reason provided is fine.
+    // Body missing/unparsable — falls through to the reason check below.
   }
+  if (!reason) return errorResponse('A cancellation reason is required', 400)
 
   try {
     const result = await transaction(async (client) => {

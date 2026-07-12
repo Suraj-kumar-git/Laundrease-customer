@@ -315,6 +315,10 @@ function CancelOrderModal({
   const canRefundToOriginal = gatewayPaid > 0
 
   const handleConfirm = async () => {
+    if (!reason.trim()) {
+      setError('Please tell us why you\'re cancelling this order')
+      return
+    }
     setCancelling(true)
     setError(null)
     try {
@@ -323,7 +327,7 @@ function CancelOrderModal({
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          reason: reason.trim() || undefined,
+          reason: reason.trim(),
           refund_method: canRefundToOriginal ? refundMethod : undefined,
         }),
       })
@@ -410,13 +414,14 @@ function CancelOrderModal({
 
         <div className="mb-4">
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Reason (optional)
+            Reason <span className="text-red-600">*</span>
           </label>
           <textarea
             value={reason}
             onChange={e => setReason(e.target.value)}
             rows={3}
             maxLength={500}
+            required
             placeholder="Let us know why you're cancelling…"
             className="w-full resize-none rounded-xl border border-border/50 bg-card p-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none"
           />
@@ -433,7 +438,7 @@ function CancelOrderModal({
             className="flex-1 rounded-xl border border-border/50 py-3 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-50">
             Keep Order
           </button>
-          <button type="button" onClick={handleConfirm} disabled={cancelling}
+          <button type="button" onClick={handleConfirm} disabled={cancelling || !reason.trim()}
             className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white disabled:opacity-50 hover:bg-red-700">
             {cancelling ? <><Loader2 className="h-4 w-4 animate-spin" /> Cancelling...</> : 'Yes, Cancel Order'}
           </button>
