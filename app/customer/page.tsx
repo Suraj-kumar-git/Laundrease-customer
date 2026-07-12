@@ -502,7 +502,7 @@ export default function HomePage() {
           ))}
         </div>
 
-        <div className="container relative mx-auto grid grid-cols-1 items-center gap-10 px-4 py-16 sm:py-20 md:grid-cols-2 md:py-28">
+        <div className="container relative mx-auto grid grid-cols-1 items-center gap-10 px-4 py-16 sm:py-20 md:grid-cols-2 md:py-20">
           <div className="text-center md:text-left">
             <h1 className="mb-5 text-3xl font-extrabold tracking-tight text-white sm:text-5xl md:text-6xl">
               Laundry,{' '}
@@ -542,7 +542,7 @@ export default function HomePage() {
               </Link>
             </div>
 
-            <div className="mt-10 grid grid-cols-2 gap-4 sm:grid-cols-3 md:max-w-md">
+            <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:max-w-md">
               {STATS.map((stat, i) => (
                 <div key={i} className="text-center md:text-left">
                   <p className="text-2xl font-extrabold text-white tabular-nums truncate">{loading ? '—' : stat.value}</p>
