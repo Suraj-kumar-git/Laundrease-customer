@@ -151,6 +151,20 @@ export function CheckoutStep({
       .finally(() => setGatewayLoading(false))
   }, [])
 
+  // ---- Provider availability (re-check on checkout mount) -------
+  // A resumed cart can carry a provider selected days ago — re-verify here
+  // rather than trusting the stale snapshot, so a provider that's since
+  // paused/been suspended is caught with a clear message instead of only
+  // surfacing as a generic "Order failed" toast after the final submit.
+  const [providerAvailable, setProviderAvailable] = useState(true)
+  useEffect(() => {
+    if (!providerId) return
+    fetch(`/api/customer/laundry-providers/${providerId}`)
+      .then(r => r.json())
+      .then(json => { if (json.success) setProviderAvailable(json.data.is_available) })
+      .catch(() => {})
+  }, [providerId])
+
   // ---- Available coupons: re-fetch on subtotal change ----------
   // This ensures the ineligible_reason ("Add ₹X more") stays accurate
   useEffect(() => {
@@ -306,7 +320,8 @@ export function CheckoutStep({
     gatewayInfo?.cod_enabled &&
     codCheckAmount <= (gatewayInfo?.cod_max_amount ?? 5000)
   )
-  const canPlace = walletCoversAll || selectedMethod === 'cod' || (selectedMethod === 'online' && onlinePaymentAvailable)
+  const canPlace = providerAvailable &&
+    (walletCoversAll || selectedMethod === 'cod' || (selectedMethod === 'online' && onlinePaymentAvailable))
 
   // The order is always created first via onSubmit (cod/wallet/online alike).
   // For 'online', the parent (page.tsx) creates the order, then calls the
@@ -341,6 +356,16 @@ export function CheckoutStep({
       {/* ---- Left: Summary ---- */}
       <div className="space-y-3 lg:col-span-3">
         <h2 className="text-base font-semibold text-foreground">Order Review</h2>
+
+        {!providerAvailable && (
+          <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <p className="text-sm text-destructive">
+              {orderState.selected_provider?.business_name ?? 'This provider'} is not accepting orders right now.
+              Please go back and choose a different provider.
+            </p>
+          </div>
+        )}
 
         {/* BUG 1: Coupon warning banner */}
         {couponWarning && (
