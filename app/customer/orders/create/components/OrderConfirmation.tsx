@@ -130,7 +130,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
-          <Card className="bg-gradient-to-r from-blue-600 to-purple-600 text-white overflow-hidden">
+          <Card className="bg-gradient-to-r from-blue-600 to-blue-600 text-white overflow-hidden">
             <CardContent className="p-6">
               <div className="text-center mb-5">
                 <p className="text-sm text-white/80 mb-2">Your Order Number</p>

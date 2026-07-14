@@ -52,7 +52,7 @@ interface DisplayProvider {
 }
 
 const ICON_GRADIENTS = [
-  'from-blue-500 to-purple-500',
+  'from-blue-500 to-blue-500',
   'from-sky-500 to-blue-500',
   'from-amber-500 to-orange-500',
   'from-emerald-500 to-teal-500',
@@ -138,9 +138,9 @@ export default function ServicesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
       {/* Hero — compact */}
-      <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 to-purple-600 px-4 py-10 sm:py-12">
+      <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 to-blue-600 px-4 py-10 sm:py-12">
         <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
 
         <motion.div
@@ -224,7 +224,7 @@ export default function ServicesPage() {
                       </div>
                       <a
                         href={`/customer/orders/create?provider=${p.id}`}
-                        className="rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-3 py-1.5 text-xs font-semibold text-white transition-all hover:shadow-md"
+                        className="rounded-lg bg-gradient-to-r from-blue-600 to-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-all hover:shadow-md"
                       >
                         Book Now
                       </a>
@@ -360,7 +360,7 @@ export default function ServicesPage() {
 
         {/* Why Choose Us — compact */}
         <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 p-6 text-white sm:p-8">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-600 p-6 text-white sm:p-8">
             <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
             <div className="relative z-10">
               <h2 className="mb-6 text-center text-xl font-bold sm:text-2xl">Why Choose Laundrease?</h2>
@@ -408,7 +408,7 @@ export default function ServicesPage() {
             <button
               onClick={cart.placeOrder}
               disabled={cart.placing}
-              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md disabled:opacity-60"
+              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md disabled:opacity-60"
             >
               {cart.placing ? 'Placing...' : 'Place Order'}
               <ArrowRight className="h-4 w-4" />

@@ -292,7 +292,7 @@ function WalletModal({ open, onClose, balance }: { open: boolean; onClose: () =>
     <Modal open={open} onClose={onClose} title="My Wallet">
       <div className="p-5 space-y-5">
         {/* Balance card */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-purple-700 p-5 text-white">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-5 text-white">
           <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/10" />
           <p className="text-sm font-medium text-white/80">Available Balance</p>
           <p className="mt-1 text-4xl font-black">{formatINR(balance)}</p>

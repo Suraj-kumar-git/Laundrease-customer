@@ -206,7 +206,7 @@ export default function AddressSelection({
           </p>
           <Button
             onClick={handleAddNew}
-            className="bg-gradient-to-r from-blue-600 to-purple-600"
+            className="bg-gradient-to-r from-blue-600 to-blue-600"
           >
             <Plus className="mr-2 h-5 w-5" />
             Add Address
@@ -256,7 +256,7 @@ export default function AddressSelection({
                               </div>
                             )}
                             {address.isDefault && (
-                              <Badge className="bg-gradient-to-r from-blue-600 to-purple-600 text-xs">
+                              <Badge className="bg-gradient-to-r from-blue-600 to-blue-600 text-xs">
                                 <Star className="h-2 w-2 fill-current mr-1" />
                                 Default
                               </Badge>

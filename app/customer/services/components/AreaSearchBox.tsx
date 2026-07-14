@@ -157,7 +157,7 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
           onClick={handleSubmit}
           disabled={busy}
           aria-label="Search"
-          className="flex shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-purple-600 px-4 py-2.5 text-white transition-all hover:shadow-md disabled:opacity-50"
+          className="flex shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-blue-600 px-4 py-2.5 text-white transition-all hover:shadow-md disabled:opacity-50"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
         </button>

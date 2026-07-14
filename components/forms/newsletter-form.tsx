@@ -66,7 +66,7 @@ export function NewsletterForm() {
             "You'll receive our latest updates and offers. You can unsubscribe anytime from the emails we send.",
           duration: 5000,
           className:
-            "bg-gradient-to-r from-blue-600 to-purple-600 text-white border-none",
+            "bg-gradient-to-r from-blue-600 to-blue-600 text-white border-none",
         })
       }
 
