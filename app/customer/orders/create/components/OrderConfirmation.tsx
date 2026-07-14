@@ -130,7 +130,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
-          <Card className="bg-gradient-to-r from-violet-600 to-purple-600 text-white overflow-hidden">
+          <Card className="bg-gradient-to-r from-blue-600 to-purple-600 text-white overflow-hidden">
             <CardContent className="p-6">
               <div className="text-center mb-5">
                 <p className="text-sm text-white/80 mb-2">Your Order Number</p>
@@ -176,7 +176,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
         >
           <Button
             onClick={handleTrackOrder}
-            className="w-full bg-violet-600 hover:bg-violet-700 h-12 text-base font-semibold"
+            className="w-full bg-blue-600 hover:bg-blue-700 h-12 text-base font-semibold"
           >
             <Package className="w-5 h-5 mr-2" />
             View Order Details
@@ -195,7 +195,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
               <div className="grid gap-3">
                 <a href="tel:+919876543210"
                   className="flex items-center gap-3 p-3 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors">
-                  <Phone className="w-5 h-5 text-violet-600" />
+                  <Phone className="w-5 h-5 text-blue-600" />
                   <div>
                     <p className="text-sm font-medium">Call Us</p>
                     <p className="text-xs text-muted-foreground">+91 98765 43210</p>
@@ -203,7 +203,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
                 </a>
                 <a href="mailto:support@laundrease.in"
                   className="flex items-center gap-3 p-3 rounded-lg hover:bg-white dark:hover:bg-gray-800 transition-colors">
-                  <Mail className="w-5 h-5 text-violet-600" />
+                  <Mail className="w-5 h-5 text-blue-600" />
                   <div>
                     <p className="text-sm font-medium">Email Us</p>
                     <p className="text-xs text-muted-foreground">support@laundrease.in</p>
@@ -227,7 +227,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
           <Card>
             <CardContent className="p-6">
               <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                <Clock className="w-6 h-6 text-violet-600" />
+                <Clock className="w-6 h-6 text-blue-600" />
                 What Happens Next?
               </h2>
 
@@ -236,7 +236,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
                   status tracking happens on the order details page. */}
               <div className="space-y-4">
                 <div className="flex gap-4">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold">1</div>
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 font-bold">1</div>
                   <div className="flex-1">
                     <h3 className="font-semibold mb-1">Order Placed</h3>
                     <p className="text-sm text-muted-foreground">You&apos;ll receive a confirmation email and SMS with order details</p>
@@ -249,7 +249,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
                 <Separator />
 
                 <div className="flex gap-4">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold">2</div>
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 font-bold">2</div>
                   <div className="flex-1">
                     <h3 className="font-semibold mb-1">Order Confirmation</h3>
                     <p className="text-sm text-muted-foreground">Your order will be confirmed once the laundry partner accepts it</p>
@@ -260,7 +260,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
                 <Separator />
 
                 <div className="flex gap-4">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold">3</div>
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 font-bold">3</div>
                   <div className="flex-1">
                     <h3 className="font-semibold mb-1">Pickup</h3>
                     <p className="text-sm text-muted-foreground">Our delivery partner will arrive at your scheduled time to collect your laundry</p>
@@ -270,7 +270,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
                 <Separator />
 
                 <div className="flex gap-4">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold">4</div>
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 font-bold">4</div>
                   <div className="flex-1">
                     <h3 className="font-semibold mb-1">Professional Cleaning</h3>
                     <p className="text-sm text-muted-foreground">Your clothes will be professionally cleaned, dried, and ironed with care</p>
@@ -280,7 +280,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
                 <Separator />
 
                 <div className="flex gap-4">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold">5</div>
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 font-bold">5</div>
                   <div className="flex-1">
                     <h3 className="font-semibold mb-1">Ready</h3>
                     <p className="text-sm text-muted-foreground">Your order is cleaned and packed, ready to head back to you</p>
@@ -290,7 +290,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
                 <Separator />
 
                 <div className="flex gap-4">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold">6</div>
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 font-bold">6</div>
                   <div className="flex-1">
                     <h3 className="font-semibold mb-1">Out for Delivery</h3>
                     <p className="text-sm text-muted-foreground">Your delivery partner is on the way with your order</p>
@@ -300,7 +300,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
                 <Separator />
 
                 <div className="flex gap-4">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center text-violet-600 font-bold">7</div>
+                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 font-bold">7</div>
                   <div className="flex-1">
                     <h3 className="font-semibold mb-1">Delivered</h3>
                     <p className="text-sm text-muted-foreground">Clean, fresh, and neatly folded clothes delivered back to your doorstep</p>

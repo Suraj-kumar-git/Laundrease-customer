@@ -89,7 +89,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   confirmed:        { label: 'Confirmed',        color: 'text-blue-700',    bg: 'bg-blue-100 dark:bg-blue-950/40',     step: 2 },
   assigned_for_pickup: { label: 'Delivery Partner Assigned', color: 'text-blue-700', bg: 'bg-blue-100 dark:bg-blue-950/40',     step: 2 },
   out_for_pickup:   { label: 'Partner On the Way for Pickup', color: 'text-cyan-700', bg: 'bg-cyan-100 dark:bg-cyan-950/40',   step: 3 },
-  picked_up:        { label: 'Picked Up',        color: 'text-violet-700',  bg: 'bg-violet-100 dark:bg-violet-950/40', step: 3 },
+  picked_up:        { label: 'Picked Up',        color: 'text-blue-700',  bg: 'bg-blue-100 dark:bg-blue-950/40', step: 3 },
   at_laundry:       { label: 'Delivered to Laundry',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 7 },
   processing:       { label: 'Being Cleaned',    color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40', step: 4 },
   ready:            { label: 'Ready',            color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40',     step: 5 },
@@ -631,8 +631,8 @@ function ReportIssueModal({
           </button>
         </div>
 
-        <div className="mb-3 rounded-xl bg-violet-50 dark:bg-violet-900/10 border border-violet-200 dark:border-violet-800 px-3 py-2.5">
-          <p className="text-xs text-violet-700 dark:text-violet-400">
+        <div className="mb-3 rounded-xl bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 px-3 py-2.5">
+          <p className="text-xs text-blue-700 dark:text-blue-400">
             Up to <span className="font-bold">₹{estimatedCap.toFixed(2)}</span> compensation if approved
             ({policy.multiplier}× the service charge for this item, capped at ₹{policy.max_cap_amount.toLocaleString('en-IN')}).
           </p>
@@ -1292,7 +1292,7 @@ export default function OrderDetailPage() {
                   {order.amount_paid > order.total_amount && (
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Overpaid (credited to wallet after pickup)</span>
-                      <span className="font-semibold text-violet-600">{formatINR(Math.round((order.amount_paid - order.total_amount) * 100) / 100)}</span>
+                      <span className="font-semibold text-blue-600">{formatINR(Math.round((order.amount_paid - order.total_amount) * 100) / 100)}</span>
                     </div>
                   )}
                 </>
@@ -1311,7 +1311,7 @@ export default function OrderDetailPage() {
                 && !NOT_PAYABLE.has(order.status)
               if (!canPayOnline) return null
               return (
-                <div className="mb-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-800 dark:bg-violet-950/20">
+                <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-800 dark:bg-blue-950/20">
                   <p className="text-sm font-medium text-foreground">
                     {order.modified_by_delivery && order.amount_paid > 0
                       ? `Your order was updated at pickup — ₹${order.balance_due.toFixed(2)} is remaining to pay.`
@@ -1319,7 +1319,7 @@ export default function OrderDetailPage() {
                   </p>
                   {payError && <p className="mt-1.5 text-xs text-destructive">{payError}</p>}
                   <button onClick={handlePayOnline} disabled={payLoading}
-                    className="mt-2.5 flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-violet-700 disabled:opacity-60">
+                    className="mt-2.5 flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700 disabled:opacity-60">
                     {payLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
                     {payLoading ? 'Processing…' : `Pay ${formatINR(order.balance_due)} Online Now`}
                   </button>
@@ -1354,14 +1354,14 @@ export default function OrderDetailPage() {
                   return (
                     <div key={p.id} className={cn(
                       'flex items-start justify-between gap-3 rounded-xl px-4 py-3',
-                      isWallet ? 'bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800' :
+                      isWallet ? 'bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800' :
                       isCOD    ? 'bg-amber-50  dark:bg-amber-950/20  border border-amber-200  dark:border-amber-800'  :
                       'bg-muted/30'
                     )}>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-foreground">{methodLabel(p.payment_method)}</p>
                         {isWallet && p.status === 'completed' && (
-                          <p className="mt-0.5 text-xs text-violet-600 dark:text-violet-400">Paid from wallet balance</p>
+                          <p className="mt-0.5 text-xs text-blue-600 dark:text-blue-400">Paid from wallet balance</p>
                         )}
                         {isCOD && isPending && (
                           <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">To be collected at delivery</p>

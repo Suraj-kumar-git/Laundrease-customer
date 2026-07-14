@@ -135,7 +135,7 @@ export default function AddressSelection({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-violet-600" />
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
       </div>
     )
   }
@@ -153,7 +153,7 @@ export default function AddressSelection({
           {description}
         </p>
         {filterByServiceablePostalCode && validatingAddresses && (
-          <div className="mt-2 flex items-center gap-2 text-sm text-violet-600">
+          <div className="mt-2 flex items-center gap-2 text-sm text-blue-600">
             <Loader2 className="h-4 w-4 animate-spin" />
             Checking service availability...
           </div>
@@ -178,7 +178,7 @@ export default function AddressSelection({
       <Button
         onClick={handleAddNew}
         variant="outline"
-        className="w-full border-2 border-dashed hover:border-violet-500 hover:bg-violet-50 dark:hover:bg-violet-900/20"
+        className="w-full border-2 border-dashed hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
       >
         <Plus className="mr-2 h-5 w-5" />
         Add New Address
@@ -191,8 +191,8 @@ export default function AddressSelection({
           animate={{ opacity: 1, scale: 1 }}
           className="text-center py-12 bg-white dark:bg-gray-800 rounded-2xl border-2 border-dashed"
         >
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-violet-100 dark:bg-violet-900/30 mb-4">
-            <MapPin className="w-8 h-8 text-violet-600" />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-blue-100 dark:bg-blue-900/30 mb-4">
+            <MapPin className="w-8 h-8 text-blue-600" />
           </div>
           <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
             {filterByServiceablePostalCode && addresses.length > 0
@@ -206,7 +206,7 @@ export default function AddressSelection({
           </p>
           <Button
             onClick={handleAddNew}
-            className="bg-gradient-to-r from-violet-600 to-purple-600"
+            className="bg-gradient-to-r from-blue-600 to-purple-600"
           >
             <Plus className="mr-2 h-5 w-5" />
             Add Address
@@ -230,8 +230,8 @@ export default function AddressSelection({
                   <Card className={`
                     relative overflow-hidden cursor-pointer transition-all
                     ${selectedAddressId === address.id
-                      ? 'border-2 border-violet-500 shadow-lg'
-                      : 'border-2 border-transparent hover:border-violet-300'
+                      ? 'border-2 border-blue-500 shadow-lg'
+                      : 'border-2 border-transparent hover:border-blue-300'
                     }
                   `}>
                     <CardContent className="p-4">
@@ -251,12 +251,12 @@ export default function AddressSelection({
                           <div className="flex items-center gap-2 mb-2">
                             {address.label && (
                               <div className="flex items-center gap-1 text-sm font-semibold text-gray-900 dark:text-white">
-                                <Home className="h-4 w-4 text-violet-600" />
+                                <Home className="h-4 w-4 text-blue-600" />
                                 {address.label}
                               </div>
                             )}
                             {address.isDefault && (
-                              <Badge className="bg-gradient-to-r from-violet-600 to-purple-600 text-xs">
+                              <Badge className="bg-gradient-to-r from-blue-600 to-purple-600 text-xs">
                                 <Star className="h-2 w-2 fill-current mr-1" />
                                 Default
                               </Badge>
@@ -311,7 +311,7 @@ export default function AddressSelection({
  
                           {/* Selected Indicator */}
                           {selectedAddressId === address.id && (
-                            <div className="flex items-center gap-1 text-violet-600 font-semibold text-sm mt-2">
+                            <div className="flex items-center gap-1 text-blue-600 font-semibold text-sm mt-2">
                               <CheckCircle2 className="h-4 w-4" />
                               Selected
                             </div>

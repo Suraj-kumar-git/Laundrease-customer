@@ -203,9 +203,9 @@ export default function FAQPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-purple-50 dark:from-gray-950 dark:via-gray-900 dark:to-violet-950">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
       {/* Hero Section */}
-      <div className="relative overflow-hidden bg-gradient-to-r from-violet-600 to-purple-600 py-20">
+      <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 to-purple-600 py-20">
         <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -248,14 +248,14 @@ export default function FAQPage() {
               placeholder="Search for questions..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full px-6 py-4 rounded-2xl border-2 border-violet-200 focus:border-violet-500 focus:outline-none focus:ring-4 focus:ring-violet-500/20 transition-all bg-white dark:bg-gray-800 dark:border-gray-700 shadow-xl"
+              className="w-full px-6 py-4 rounded-2xl border-2 border-blue-200 focus:border-blue-500 focus:outline-none focus:ring-4 focus:ring-blue-500/20 transition-all bg-white dark:bg-gray-800 dark:border-gray-700 shadow-xl"
             />
             <div className="absolute right-4 top-1/2 -translate-y-1/2">
               <motion.div
                 animate={{ rotate: 360 }}
                 transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
               >
-                <Sparkles className="w-6 h-6 text-violet-500" />
+                <Sparkles className="w-6 h-6 text-blue-500" />
               </motion.div>
             </div>
           </div>
@@ -277,8 +277,8 @@ export default function FAQPage() {
               onClick={() => setActiveCategory(category.id)}
               className={`flex items-center gap-2 px-6 py-3 rounded-full font-medium transition-all duration-300 ${
                 activeCategory === category.id
-                  ? 'bg-gradient-to-r from-violet-600 to-purple-600 text-white shadow-lg shadow-violet-500/50'
-                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-violet-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'
+                  ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-lg shadow-blue-500/50'
+                  : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'
               }`}
             >
               {category.icon}
@@ -308,10 +308,10 @@ export default function FAQPage() {
                   >
                     <button
                       onClick={() => toggleFAQ(faq.id)}
-                      className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-violet-50 dark:hover:bg-gray-700/50 transition-colors"
+                      className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-blue-50 dark:hover:bg-gray-700/50 transition-colors"
                     >
                       <div className="flex items-center gap-4 flex-1">
-                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center text-white">
+                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white">
                           {faq.icon}
                         </div>
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -372,7 +372,7 @@ export default function FAQPage() {
           transition={{ delay: 0.8 }}
           className="mt-20 max-w-4xl mx-auto"
         >
-          <div className="bg-gradient-to-br from-violet-600 to-purple-600 rounded-3xl p-8 md:p-12 text-white relative overflow-hidden">
+          <div className="bg-gradient-to-br from-blue-600 to-purple-600 rounded-3xl p-8 md:p-12 text-white relative overflow-hidden">
             <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
             <div className="relative z-10">
               <h2 className="text-3xl font-bold mb-4">Still have questions?</h2>

@@ -557,7 +557,7 @@ export function CheckoutStep({
                 </div>
               )}
               {walletContributionRounded > 0 && (
-                <div className="flex justify-between text-violet-600 dark:text-violet-400">
+                <div className="flex justify-between text-blue-600 dark:text-blue-400">
                   <span className="flex items-center gap-1"><Wallet className="h-3.5 w-3.5" /> Wallet</span>
                   <span className="font-semibold">-{formatINR(walletContributionRounded)}</span>
                 </div>
@@ -582,30 +582,30 @@ export function CheckoutStep({
         {!walletLoading && walletInfo?.has_wallet && walletInfo.balance > 0 && (
           <div className={cn(
             'rounded-xl border p-3 transition-all',
-            useWallet ? 'border-violet-300 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30' : 'border-border/50 bg-card'
+            useWallet ? 'border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/30' : 'border-border/50 bg-card'
           )}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className={cn('flex h-9 w-9 items-center justify-center rounded-xl transition-colors',
-                  useWallet ? 'bg-violet-600 text-white' : 'bg-muted text-muted-foreground')}>
+                  useWallet ? 'bg-blue-600 text-white' : 'bg-muted text-muted-foreground')}>
                   <Wallet className="h-4 w-4" />
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-foreground">Laundrease Wallet</p>
                   <p className="text-xs text-muted-foreground">
-                    Available: <span className="font-semibold text-violet-600">{formatINR(walletInfo.balance)}</span>
+                    Available: <span className="font-semibold text-blue-600">{formatINR(walletInfo.balance)}</span>
                   </p>
                 </div>
               </div>
               <button type="button" onClick={() => setUseWallet(v => !v)}
                 className={cn('relative h-5 w-9 rounded-full transition-colors duration-200',
-                  useWallet ? 'bg-violet-600' : 'bg-muted-foreground/30')}>
+                  useWallet ? 'bg-blue-600' : 'bg-muted-foreground/30')}>
                 <div className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200',
                   useWallet ? 'translate-x-[18px]' : 'translate-x-0.5')} />
               </button>
             </div>
             {useWallet && (
-              <div className="mt-2 rounded-lg bg-violet-100/50 px-3 py-1.5 text-xs text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+              <div className="mt-2 rounded-lg bg-blue-100/50 px-3 py-1.5 text-xs text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
                 {walletCoversAll
                   ? `✓ Wallet covers the full amount of ${formatINR(grossTotal)}`
                   : `${formatINR(walletContributionRounded)} from wallet · ${formatINR(amountAfterWallet)} remaining via another method`}
@@ -818,7 +818,7 @@ export function CheckoutStep({
         {(walletCoversAll || selectedMethod === 'cod' || selectedMethod === 'online') && (
         <button type="button" onClick={handlePlace}
           disabled={!canPlace || isSubmitting || feesLoading}
-          className="w-full rounded-2xl bg-gradient-to-r from-primary to-violet-700 py-3.5 text-base font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-50">
+          className="w-full rounded-2xl bg-gradient-to-r from-primary to-blue-700 py-3.5 text-base font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-50">
           {isSubmitting ? (
             <span className="flex items-center justify-center gap-2">
               <Loader2 className="h-5 w-5 animate-spin" /> Processing...

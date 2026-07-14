@@ -360,7 +360,7 @@ export function AddressProviderStep({
 
               {/* Avatar + name */}
               <div className="mb-3 flex items-start gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/80 to-violet-700 text-lg font-bold text-white">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/80 to-blue-700 text-lg font-bold text-white">
                   {provider.business_name.charAt(0)}
                 </div>
                 <div className="flex-1 min-w-0 pr-6">

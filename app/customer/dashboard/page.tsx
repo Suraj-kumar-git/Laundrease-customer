@@ -68,7 +68,7 @@ const ORDER_STEPS = [
 const STATUS_META: Record<string, { label: string; color: string }> = {
   pending:          { label: 'Order Placed',     color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400' },
   confirmed:        { label: 'Confirmed',        color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400' },
-  picked_up:        { label: 'Picked Up',        color: 'text-violet-600 bg-violet-50 dark:bg-violet-950/40 dark:text-violet-400' },
+  picked_up:        { label: 'Picked Up',        color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400' },
   processing:      { label: 'In Progress',      color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 dark:text-indigo-400' },
   ready:            { label: 'Ready',            color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400' },
   out_for_delivery: { label: 'Out for Delivery', color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/40 dark:text-orange-400' },
@@ -202,7 +202,7 @@ function LoyaltyModal({ open, onClose, currentPoints, onRedeemed }: {
             <p className="text-muted-foreground">Earn <span className="font-semibold text-foreground">1% of order value</span> as points after every completed order</p>
           </div>
           <div className="flex items-start gap-2.5 text-sm">
-            <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-violet-500" />
+            <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
             <p className="text-muted-foreground">Convert <span className="font-semibold text-foreground">100+ points to wallet</span> — 1 point = ₹1</p>
           </div>
         </div>
@@ -292,7 +292,7 @@ function WalletModal({ open, onClose, balance }: { open: boolean; onClose: () =>
     <Modal open={open} onClose={onClose} title="My Wallet">
       <div className="p-5 space-y-5">
         {/* Balance card */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 to-purple-700 p-5 text-white">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-purple-700 p-5 text-white">
           <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/10" />
           <p className="text-sm font-medium text-white/80">Available Balance</p>
           <p className="mt-1 text-4xl font-black">{formatINR(balance)}</p>
@@ -518,7 +518,7 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
 //   return (
 //     <div className="space-y-5">
 //       {/* Video placeholder — replace src with your real video URL */}
-//       <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary/80 to-violet-700 cursor-pointer shadow-lg"
+//       <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary/80 to-blue-700 cursor-pointer shadow-lg"
 //         style={{ aspectRatio: '16/9' }}>
 //         <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
 //           <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm transition-transform group-hover:scale-110">
@@ -558,7 +558,7 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
 //       </div>
 
 //       {/* First order CTA */}
-//       <div className="flex items-center justify-between rounded-2xl bg-gradient-to-r from-primary to-violet-700 px-5 py-4">
+//       <div className="flex items-center justify-between rounded-2xl bg-gradient-to-r from-primary to-blue-700 px-5 py-4">
 //         <div>
 //           <p className="text-sm font-bold text-white">First order? Use FIRST50</p>
 //           <p className="text-xs text-white/70">Get 50% off on your first laundry order</p>
