@@ -134,7 +134,7 @@ async function verifyRefreshTokenSignature(token: string): Promise<Awaited<Retur
   }
 }
  
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
   // Skip middleware for static files
   if (
