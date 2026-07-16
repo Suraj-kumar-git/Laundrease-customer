@@ -7,6 +7,13 @@ loadEnvConfig(projectDir);
 
 const ROLE = process.env.ROLE;
 const nextConfig: NextConfig = {
+  // Force Next.js to include pg-cloudflare files during the build trace
+  outputFileTracingIncludes: {
+    "**/*": [
+      "./node_modules/pg-cloudflare/dist/**",
+      "./node_modules/pg-cloudflare/esm/**",
+    ],
+  },
   reactStrictMode: true,
 
   // Pages like /customer/about, /customer/careers, /customer/help-center
