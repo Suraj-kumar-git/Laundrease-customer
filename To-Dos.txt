@@ -1,21 +1,19 @@
 **** HIGH Priority: ****
-* For address fields all over the platform, prefill the City & State based on the PIN code filled. Use the dropdown to select the State. Wrongly filled PIN code as per city & state will show an error message to type the correct PIN,City,& State combination.
-* Put a check on duplicate data feed by customers or laundry or delivery persona in all their write operations like GST number, PAN card number or any unique id can't be same for 2 laundry providers or the bike license plate number can't be same for 2 delivery persons...first let's figure out what all constraints we will have to make in DB so that we can fix this bug....check the whole sql scripts thoroughly...
-
-**** MEDIUM Priority: ****
-* Get new image for services, providers, & Product types.
-* The emails, payment, AWS S3, SQS and all 3rd party integration fallback for complete flow testing in dev env
-* Create all kinds of SMS & Email templates on msg91.
-
-**** LOW Priority: ****
-
-**** Bugs & missing implementation: ****
+*Delivery:
+*Laundry:
+1. Put a check on duplicate data feed by customers or laundry or delivery persona in all their write operations like GST number, PAN card number or any unique id can't be same for 2 laundry providers or the bike license plate number can't be same for 2 delivery persons...first let's figure out what all constraints we will have to make in DB so that we can fix this bug....check the whole sql scripts thoroughly...
+*Customer
+2. Public Page content updates - Manual
 
 
 **** Future implementation: ****
 * Create one emails tab for both support and admin portal where they can see all the emails received and sent and they can also reply back to the emails with all emails functionalities like attachments and forwarding features.
 
 ** Code review checklist **
+* Get new image for services, providers, & Product types.
+* There's currently zero cron/scheduled-job infrastructure anywhere in this app — nothing runs on a timer today. How should the daily "reschedule to tomorrow if not picked up" sweep actually get triggered in production?
+* Barcode/Bag Creation Logic for all the orders/Customers when they are picked up by delivery partner from customer
+* In Safety Center page we have mentioned that the customer's PII like Address, Phone, Payment details, etc are encrypted.
 * Do code revisit for each persona Repo & remove unnecessary & duplicate code snippets, also check if files can be simplified per role.
 * Review architectural pattern to enhance the app's performance like using queue or serverless architecture
 

@@ -5,7 +5,7 @@
 // support_ticket_categories / support_ticket_priorities (DB-driven, admin-manageable).
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -567,6 +567,7 @@ function TicketDetailModal({ ticket, onClose, onReplied }: {
 
 function CustomerSupportContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const { toast } = useToast()
 
   const [view,         setView]         = useState<'list' | 'new' | 'success'>('list')
@@ -581,7 +582,7 @@ function CustomerSupportContent() {
   const [successRef,   setSuccessRef]   = useState('')
   const [detailTicket, setDetailTicket] = useState<Ticket | null>(null)
   const [lockedOrder,  setLockedOrder]  = useState<{ id: string; order_number: string } | null>(null)
-  const [prefillHandled, setPrefillHandled] = useState(false)
+  const [processedParamKey, setProcessedParamKey] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/customer/support/meta', { credentials: 'include' })
@@ -592,11 +593,21 @@ function CustomerSupportContent() {
   }, [])
 
   // ?category=order&order_id=123 from the order details page's "Get Help" button.
+  // Keyed off the actual param values (not a one-shot flag) so that navigating
+  // back to this same mounted route WITHOUT those params — e.g. via the plain
+  // "My Tickets" link, which Next.js can soft-navigate to without remounting —
+  // resets the modal instead of leaving a previous Get Help visit's prefill open.
   useEffect(() => {
-    if (prefillHandled) return
     const orderId = searchParams.get('order_id')
     const category = searchParams.get('category')
-    if (!category) { setPrefillHandled(true); return }
+    const paramKey = category ? `${category}:${orderId ?? ''}` : null
+    if (paramKey === processedParamKey) return
+    setProcessedParamKey(paramKey)
+
+    if (!category) {
+      setView('list'); setLockedOrder(null)
+      return
+    }
 
     if (orderId) {
       fetch(`/api/customer/orders/${orderId}`, { credentials: 'include' })
@@ -605,13 +616,18 @@ function CustomerSupportContent() {
           if (j.success) setLockedOrder({ id: j.data.order.id, order_number: j.data.order.order_number })
         })
         .catch(() => {})
-        .finally(() => { setView('new'); setPrefillHandled(true) })
+        .finally(() => setView('new'))
     } else {
-      setView('new'); setPrefillHandled(true)
+      setView('new')
     }
-  }, [searchParams, prefillHandled])
+  }, [searchParams, processedParamKey])
 
   const lockedCategory = searchParams.get('category') || undefined
+
+  function closeNewTicket() {
+    setView('list')
+    if (searchParams.get('category')) router.replace('/customer/support')
+  }
 
   const fetchTickets = useCallback(async () => {
     setLoading(true); setError('')
@@ -631,6 +647,7 @@ function CustomerSupportContent() {
 
   function handleNewSuccess(id: number, ref: string) {
     setSuccessRef(ref); setView('success'); setLockedOrder(null); fetchTickets()
+    if (searchParams.get('category')) router.replace('/customer/support')
     toast({ title: 'Ticket raised', description: `Reference ${ref}` })
   }
 
@@ -791,7 +808,7 @@ function CustomerSupportContent() {
 
       <AnimatePresence>
         {view === 'new' && (
-          <SheetModal onClose={() => setView('list')} widthClass="sm:max-w-xl">
+          <SheetModal onClose={closeNewTicket} widthClass="sm:max-w-xl">
             {metaLoading || !meta ? (
               <div className="flex h-48 items-center justify-center">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -800,7 +817,7 @@ function CustomerSupportContent() {
               <NewTicketForm
                 meta={meta}
                 onSuccess={handleNewSuccess}
-                onClose={() => setView('list')}
+                onClose={closeNewTicket}
                 lockedCategory={lockedCategory}
                 lockedOrder={lockedOrder}
               />

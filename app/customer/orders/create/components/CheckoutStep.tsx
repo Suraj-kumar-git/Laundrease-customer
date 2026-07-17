@@ -92,12 +92,16 @@ export function CheckoutStep({
     services: SelectedService[]
     feeBreakdown: FeeBreakdown
   }>>(new Map())
-  // ---- Fees (re-fetch on subtotal or express change) -----------
+  // ---- Estimated delivery date preview --------------------------
+  const providerId = orderState.selected_provider?.id
+
+  // ---- Fees (re-fetch on subtotal, express, or provider change) -----------
   useEffect(() => {
     // if (initialFeesLoaded.current) return  // Only load once on mount
     // initialFeesLoaded.current = true
     setFeesLoading(true)
-    fetch(`/api/customer/orders/fees?subtotal=${subtotal}&is_express=${currentIsExpress}`)
+    const providerParam = providerId ? `&provider_id=${providerId}` : ''
+    fetch(`/api/customer/orders/fees?subtotal=${subtotal}&is_express=${currentIsExpress}${providerParam}`)
       .then(r => r.json())
             .then(json => {
         if (json.success) {
@@ -110,10 +114,8 @@ export function CheckoutStep({
       })
       .catch(() => {})
       .finally(() => setFeesLoading(false))
-  }, [subtotal, currentIsExpress])
+  }, [subtotal, currentIsExpress, providerId])
 
-  // ---- Estimated delivery date preview --------------------------
-  const providerId = orderState.selected_provider?.id
   const servicesKey = useMemo(
     () => JSON.stringify(orderState.selected_services.map(s => ({ id: s.service_id, x: s.is_express }))),
     [orderState.selected_services]

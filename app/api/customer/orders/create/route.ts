@@ -492,19 +492,19 @@ export async function POST(req: NextRequest) {
       catch { /* non-fatal */ }
     }
 
-    try {
-      await enqueueOrderConfirmationEmail({
-        orderId:       result.orderId,
-        orderNumber:   result.orderNumber,
-        customerEmail: result.customer.email,
-        customerName:  result.customer.full_name,
-        totalAmount:   result.totalAmount,
-        pickupDate:    result.pickupDate,
-        pickupTimeSlot:result.pickupTimeSlot,
-        providerName:  result.provider.business_name,
-        paymentMethod: body.payment_method,
-      })
-    } catch (e) { console.warn('[orders/create] SQS error:', e) }
+    // try {
+    //   await enqueueOrderConfirmationEmail({
+    //     orderId:       result.orderId,
+    //     orderNumber:   result.orderNumber,
+    //     customerEmail: result.customer.email,
+    //     customerName:  result.customer.full_name,
+    //     totalAmount:   result.totalAmount,
+    //     pickupDate:    result.pickupDate,
+    //     pickupTimeSlot:result.pickupTimeSlot,
+    //     providerName:  result.provider.business_name,
+    //     paymentMethod: body.payment_method,
+    //   })
+    // } catch (e) { console.warn('[orders/create] SQS error:', e) }
 
     // Email the provider about the new order — but only when no gateway
     // payment is still pending, so providers never hear about orders whose
@@ -525,6 +525,7 @@ export async function POST(req: NextRequest) {
             providerName: providerContact.business_name,
             orderNumber: result.orderNumber,
             pickupDate: result.pickupDate,
+            pickupSlot: result.pickupTimeSlot,
             orderUrl: `${baseUrl}/laundry/orders/${result.orderPublicId}`,
           }).catch(e => console.error('[orders/create] provider new-order email failed:', e))
         }

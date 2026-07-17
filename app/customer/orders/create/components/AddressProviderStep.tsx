@@ -15,6 +15,10 @@ import { Address, KgService, LaundryProvider, UnitProduct } from '@/types/order-
 interface AddressProviderStepProps {
   initialAddress?: Address
   initialProvider?: LaundryProvider
+  // Provider to auto-select once the list loads — set by the dashboard's
+  // "Providers near you" cards via /customer/orders/create?provider=<id>.
+  // Applied once; the user can still switch to any other provider after.
+  preferredProviderId?: number | null
   // onComplete also returns prefetched services so Step 2 has zero loading time
   onComplete: (
     address: Address,
@@ -52,6 +56,7 @@ function RatingBadge({ rating, count }: { rating: number; count: number }) {
 export function AddressProviderStep({
   initialAddress,
   initialProvider,
+  preferredProviderId,
   onComplete,
 }: AddressProviderStepProps) {
   const [addresses, setAddresses]               = useState<Address[]>([])
@@ -96,6 +101,11 @@ export function AddressProviderStep({
       .finally(() => setLoadingAddresses(false))
   }, [])
 
+  // One-shot flag: the dashboard's preferred provider is applied only to the
+  // first provider-list load, so switching address (or provider) afterwards
+  // behaves exactly as before.
+  const preferredAppliedRef = useRef(false)
+
   // Load providers when address changes
   useEffect(() => {
     if (!selectedAddress?.postal_code) return
@@ -107,11 +117,20 @@ export function AddressProviderStep({
       .then(json => {
         const list: LaundryProvider[] = json.success ? (json.data?.providers ?? []) : []
         setProviders(list)
+        if (preferredProviderId && !preferredAppliedRef.current) {
+          preferredAppliedRef.current = true
+          const match = list.find(p => p.id === preferredProviderId)
+          if (match) {
+            setSelectedProvider(match)
+            prefetchServices(match.id)
+          }
+        }
         if (list.length === 0)
           setProviderError(`No providers found for pincode ${selectedAddress.postal_code}`)
       })
       .catch(() => setProviderError('Failed to load providers'))
       .finally(() => setLoadingProviders(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAddress?.postal_code])
 
   // Prefetch services when a provider is selected

@@ -8,6 +8,13 @@ import { EMPLOYMENT_TYPE_LABELS } from '@/types/footer-pages'
 export const metadata: Metadata = {
   title: 'Careers | Laundrease',
   description: 'Join the Laundrease team. We are building the future of on-demand laundry in India.',
+  keywords: ['jobs at Laundrease', 'Laundrease careers', 'laundry startup jobs Pune'],
+  alternates: { canonical: '/customer/careers' },
+  openGraph: {
+    title: 'Careers | Laundrease', type: 'website', url: '/customer/careers',
+    description: 'Join the Laundrease team. We are building the future of on-demand laundry in India.',
+  },
+  twitter: { card: 'summary_large_image', title: 'Careers | Laundrease' },
 }
 
 export const revalidate = 3600 // 1 hour
