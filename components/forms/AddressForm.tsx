@@ -151,7 +151,13 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
     if (!/^\d{6}$/.test(data.postal_code.trim())) errs.postal_code = 'Enter a valid 6-digit PIN code'
     if (!data.city.trim())          errs.city           = 'City is required'
     if (!data.country_code.trim())  errs.country_code   = 'Country code is required'
-    if (data.contact_phone.trim()) {
+    if (!data.contact_name.trim())  errs.contact_name   = 'Contact name is required'
+    // Required — the DB rejects an empty contact_phone (the format CHECK
+    // constraint doesn't accept '', only NULL or a valid number), which
+    // previously surfaced as a generic "Failed to save address" error.
+    if (!data.contact_phone.trim()) {
+      errs.contact_phone = 'Contact phone is required'
+    } else {
       const digits = data.contact_phone.replace(/^\+91/, '').replace(/\D/g, '')
       if (!/^[6-9]\d{9}$/.test(digits)) errs.contact_phone = 'Enter a valid 10-digit Indian mobile number'
     }
@@ -172,7 +178,10 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
   const validate = (): boolean => {
     setErrors(liveErrors)
     // Mark everything touched so all remaining errors surface at once
-    setTouched({ label: true, address_line1: true, postal_code: true, city: true, country_code: true, contact_phone: true })
+    setTouched({
+      label: true, address_line1: true, postal_code: true, city: true, country_code: true,
+      contact_name: true, contact_phone: true,
+    })
     return formValid
   }
 
@@ -324,17 +333,18 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
 
       {/* Contact */}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Contact Name">
-          <Input value={form.contact_name} onChange={set('contact_name')}
+        <Field label="Contact Name" required error={shownError('contact_name')}>
+          <Input value={form.contact_name} onChange={set('contact_name')} onBlur={touch('contact_name')}
             placeholder="Person to contact" maxLength={100} />
         </Field>
-        <Field label="Contact Phone" error={shownError('contact_phone')}>
+        <Field label="Contact Phone" required error={shownError('contact_phone')}>
           <Input
             value={form.contact_phone}
             onChange={e => {
               const raw = e.target.value.replace(/[^\d+]/g, '')
               if (raw.length <= 13) setForm(prev => ({ ...prev, contact_phone: raw }))
             }}
+            onBlur={touch('contact_phone')}
             placeholder="+91 98765 43210"
             type="tel"
             inputMode="tel"

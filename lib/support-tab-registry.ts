@@ -19,7 +19,7 @@ import {
   Users, ShoppingBag, Store, Bike, Building2, Ticket, ListChecks, CreditCard,
   Calendar, IndianRupee, ShieldCheck, ShieldAlert, PhoneCall, Tag, UserPlus,
   Award, Star, MessageSquare, FileText, Briefcase, MapPin, BarChart2, PieChart,
-  Truck, HeadphonesIcon, BadgePercent, Wallet,
+  Truck, HeadphonesIcon, BadgePercent, Wallet, Megaphone,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -55,6 +55,7 @@ export const GRANTABLE_TABS: GrantableTab[] = [
   { key: 'coupons',               label: 'Coupons',               group: 'Marketing',  icon: Tag,            adminHref: '/admin/coupons',                  supportHref: '/support/coupons',                  builtForSupport: true  },
   { key: 'referral',              label: 'Referral',               group: 'Marketing',  icon: UserPlus,       adminHref: '/admin/referral',                 supportHref: '/support/referral',                 builtForSupport: true  },
   { key: 'loyalty',               label: 'Loyalty',                group: 'Marketing',  icon: Award,          adminHref: '/admin/loyalty',                  supportHref: '/support/loyalty',                  builtForSupport: true  },
+  { key: 'notifications',         label: 'Notifications',          group: 'Marketing',  icon: Megaphone,      adminHref: '/admin/notifications',            supportHref: '/support/notifications',            builtForSupport: true  },
 
   // ── Content ─────────────────────────────────────────────────────────────
   { key: 'reviews',               label: 'Reviews',                group: 'Content',    icon: Star,           adminHref: '/admin/reviews',                  supportHref: '/support/reviews',                  builtForSupport: true  },
