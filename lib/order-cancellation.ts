@@ -9,6 +9,7 @@ import { transaction, queryOne } from '@/lib/db'
 import { getRefundBreakdown, initiateOriginalMethodRefund } from '@/lib/payment/refund'
 import { sendOrderCancelledEmail, sendProviderOrderCancelledEmail } from '@/lib/notifications/email'
 import { isNotificationEnabled } from '@/lib/notifications/preferences'
+import { sendPushToUser } from '@/lib/push-notifications'
 import { CANCELLABLE_STATUSES } from '@/lib/order-status'
 
 export const AUTO_CANCEL_REASON_NOTE = 'Order automatically cancelled after 3 reschedules — pickup could not be completed on the scheduled date after multiple attempts'
@@ -53,7 +54,7 @@ export async function cancelOrderTransaction(params: CancelOrderTxParams): Promi
        LEFT  JOIN laundry_profiles lp ON lp.id = o.laundry_profile_id
        LEFT  JOIN users pu ON pu.id = lp.user_id
        WHERE o.id = $1
-       FOR UPDATE`,
+       FOR UPDATE OF o`,
       [params.orderId]
     )
     if (orderRes.rowCount === 0) throw new Error('NOT_FOUND')
@@ -168,20 +169,27 @@ export async function finalizeCancelSideEffects(
   try {
     const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL || 'http://localhost:3000'
 
+    const refundNote = result.refunded
+      ? `₹${result.refundAmount.toFixed(2)} has been credited to your Laundrease wallet.`
+      : result.refundToOriginal && !originalRefundError
+        ? result.walletPaid > 0
+          ? `₹${result.gatewayPaid.toFixed(2)} refund initiated to your original payment method (5–7 business days) and ₹${result.walletPaid.toFixed(2)} credited back to your wallet.`
+          : `₹${result.gatewayPaid.toFixed(2)} refund initiated to your original payment method (5–7 business days).`
+        : 'No payment was captured for this order.'
+
     if (result.customerEmail && await isNotificationEnabled(result.customerId, 'orders', 'email')) {
-      const refundNote = result.refunded
-        ? `₹${result.refundAmount.toFixed(2)} has been credited to your Laundrease wallet.`
-        : result.refundToOriginal && !originalRefundError
-          ? result.walletPaid > 0
-            ? `₹${result.gatewayPaid.toFixed(2)} refund initiated to your original payment method (5–7 business days) and ₹${result.walletPaid.toFixed(2)} credited back to your wallet.`
-            : `₹${result.gatewayPaid.toFixed(2)} refund initiated to your original payment method (5–7 business days).`
-          : 'No payment was captured for this order.'
       await sendOrderCancelledEmail({
         to: result.customerEmail, customerName: result.customerName, orderNumber: result.orderNumber,
         cancelledBy: opts.cancelledByEmailLabel, cancelledByText: opts.customerCancelledByText, refundNote,
         orderUrl: `${baseUrl}/customer/orders/${result.orderPublicId}`,
       })
     }
+    sendPushToUser({
+      userId: result.customerId, category: 'orders',
+      title: 'Order cancelled',
+      body: `Order #${result.orderNumber} was cancelled. ${refundNote}`,
+      data: { orderId: result.orderPublicId },
+    }).catch(() => {})
 
     if (result.providerEmail) {
       await sendProviderOrderCancelledEmail({
