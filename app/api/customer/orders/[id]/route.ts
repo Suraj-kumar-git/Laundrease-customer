@@ -9,8 +9,9 @@ import {
   serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from '@/lib/order-status'
-import { calculateEstimatedDeliveryDate } from '@/lib/delivery-estimate'
 import { getRefundBreakdown } from '@/lib/payment/refund'
+import { rescheduleOrder } from '@/lib/order-reschedule'
+import { autoCancelForRescheduleLimit } from '@/lib/order-cancellation'
 
 export async function GET(
   req: NextRequest,
@@ -254,7 +255,7 @@ export async function PATCH(
   if (newDate <= today)         return errorResponse('Pickup date must be in the future', 400)
 
   try {
-    const result = await transaction(async (client) => {
+    const { orderId, result } = await transaction(async (client) => {
       // Set user context for triggers
       await client.query(`SELECT set_config('app.current_user_id', $1, TRUE)`, [userId])
 
@@ -267,38 +268,29 @@ export async function PATCH(
       if (!RESCHEDULABLE_STATUSES.has(check.rows[0].status)) throw new Error('NOT_RESCHEDULABLE')
       const orderId = check.rows[0].id
 
-      // Recompute the estimated delivery date against the new pickup date.
-      const itemsRes = await client.query(
-        `SELECT ois.service_id, ois.is_express
-         FROM order_items oi
-         JOIN order_item_services ois ON ois.order_item_id = oi.id
-         WHERE oi.order_id = $1`,
-        [orderId]
-      )
-      const estimatedDeliveryDate = await calculateEstimatedDeliveryDate(
-        (text, params) => client.query(text, params),
-        {
-          providerId: check.rows[0].laundry_profile_id,
-          pickupDate: body.pickup_date,
-          items: itemsRes.rows.map(r => ({ serviceId: r.service_id, isExpress: r.is_express })),
-        }
-      )
+      const result = await rescheduleOrder({
+        client, orderId, laundryProfileId: check.rows[0].laundry_profile_id,
+        newPickupDate: body.pickup_date, newPickupTimeSlot: body.pickup_time_slot,
+        reasonNote: `Rescheduled by customer — new pickup slot: ${body.pickup_date} (${body.pickup_time_slot})`,
+        initiatedBy: userId, initiatedByRole: 'customer',
+      })
 
-      await client.query(
-        `UPDATE orders
-         SET pickup_date = $1, pickup_time_slot = $2, estimated_delivery_date = $3, updated_at = NOW()
-         WHERE id = $4`,
-        [body.pickup_date, body.pickup_time_slot, estimatedDeliveryDate, orderId]
-      )
-
-      return {
-        pickup_date: body.pickup_date,
-        pickup_time_slot: body.pickup_time_slot,
-        estimated_delivery_date: estimatedDeliveryDate,
-      }
+      return { orderId, result }
     })
 
-    return successResponse(result)
+    if (result.autoCancelThresholdReached) {
+      await autoCancelForRescheduleLimit(orderId)
+      return successResponse({
+        cancelled: true,
+        message: 'This order has been automatically cancelled after 3 reschedules. A refund has been initiated to your original payment method.',
+      })
+    }
+
+    return successResponse({
+      pickup_date: result.pickupDate,
+      pickup_time_slot: result.pickupTimeSlot,
+      estimated_delivery_date: result.estimatedDeliveryDate,
+    })
   } catch (error: any) {
     if (error.message === 'NOT_FOUND')         return notFoundResponse('Order not found')
     if (error.message === 'NOT_RESCHEDULABLE') return errorResponse(

@@ -107,7 +107,7 @@ export default function ForgotPasswordPage() {
                   {error && <p className="text-xs text-red-500">{error}</p>}
                 </div>
 
-                <Button type="submit" className="w-full bg-violet-600 hover:bg-violet-700" disabled={isLoading}>
+                <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={isLoading}>
                   {isLoading ? "Sending..." : "Send Reset Link"}
                 </Button>
               </form>

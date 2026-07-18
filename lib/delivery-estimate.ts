@@ -32,6 +32,32 @@ function parseLocalDate(dateStr: string): Date {
 }
 
 /**
+ * Whether a provider is closed on a given date — either a one-off holiday
+ * (provider_closed_dates) or a recurring weekly closure
+ * (provider_operating_hours.is_closed). Shared by any flow that needs to
+ * validate a pickup/delivery date against provider availability.
+ */
+export async function isProviderClosedOnDate(
+  queryFn: QueryFn,
+  providerId: number,
+  dateStr: string
+): Promise<boolean> {
+  const date = parseLocalDate(dateStr)
+  const [{ rows: dowRows }, { rows: dateRows }] = await Promise.all([
+    queryFn(
+      `SELECT 1 FROM provider_operating_hours
+       WHERE provider_id = $1 AND day_of_week = $2 AND is_closed = TRUE`,
+      [providerId, date.getDay()]
+    ),
+    queryFn(
+      `SELECT 1 FROM provider_closed_dates WHERE provider_id = $1 AND closed_date = $2`,
+      [providerId, dateStr.slice(0, 10)]
+    ),
+  ])
+  return dowRows.length > 0 || dateRows.length > 0
+}
+
+/**
  * Returns the estimated delivery date as 'YYYY-MM-DD'.
  * `queryFn` is anything with a (text, params) => Promise<{rows}> signature —
  * pass the transaction client's `.query` when called inside a transaction,

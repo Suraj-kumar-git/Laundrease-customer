@@ -193,6 +193,9 @@ function PageContent() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const resumeMode   = searchParams.get('resume') === '1'
+  // ?provider=<id> — set by the dashboard's "Providers near you" cards to
+  // auto-select that provider once step 1's provider list loads.
+  const preferredProviderId = Number(searchParams.get('provider')) || null
   const { user, isLoading: authLoading } = useAuth()
   const { toast } = useToast()
   const { clear: clearGuestCart, syncFromServer } = useCart()
@@ -622,6 +625,7 @@ function PageContent() {
                 <AddressProviderStep
                   initialAddress={state.pickup_address}
                   initialProvider={state.selected_provider}
+                  preferredProviderId={preferredProviderId}
                   onComplete={handleStep1Complete}
                 />
               )}
@@ -640,6 +644,8 @@ function PageContent() {
                   onSelect={handleStep3Complete}
                   initialDate={state.pickup_date ?? undefined}
                   initialTimeSlot={state.pickup_time_slot ?? undefined}
+                  cartItemCount={state.selected_services.length}
+                  cartSubtotal={state.selected_services.reduce((s, i) => s + i.line_total, 0)}
                 />
               )}
               {state.step === 4 && (

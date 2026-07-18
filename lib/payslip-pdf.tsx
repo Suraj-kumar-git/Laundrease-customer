@@ -24,7 +24,7 @@ export interface PayslipData {
   generatedAt: string
 }
 
-const VIOLET = '#3b82f6'
+const BLUE = '#3b82f6'
 const GRAY1 = '#111827'
 const GRAY2 = '#374151'
 const GRAY3 = '#6b7280'
@@ -44,14 +44,14 @@ const s = StyleSheet.create({
   title: { fontSize: 18, fontFamily: 'Helvetica-Bold', color: GRAY1, marginBottom: 4 },
   metaLine: { fontSize: 8, color: GRAY3, marginBottom: 2 },
   metaVal: { fontFamily: 'Helvetica-Bold', color: GRAY2 },
-  hrThick: { borderBottomWidth: 2, borderBottomColor: VIOLET, marginVertical: 14 },
+  hrThick: { borderBottomWidth: 2, borderBottomColor: BLUE, marginVertical: 14 },
   hr: { borderBottomWidth: 1, borderBottomColor: GRAY4, marginVertical: 14 },
   twoCol: { flexDirection: 'row', gap: 20, marginBottom: 14 },
   box: { flex: 1, backgroundColor: '#fafafa', borderRadius: 6, padding: 12, borderWidth: 1, borderColor: GRAY4 },
   boxLabel: { fontSize: 7, fontFamily: 'Helvetica-Bold', color: GRAY3, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 },
   boxName: { fontSize: 10, fontFamily: 'Helvetica-Bold', color: GRAY1, marginBottom: 3 },
   boxLine: { fontSize: 8, color: GRAY2, marginBottom: 2, lineHeight: 1.4 },
-  amountStrip: { backgroundColor: VIOLET, borderRadius: 8, padding: 16, marginBottom: 14, alignItems: 'center' },
+  amountStrip: { backgroundColor: BLUE, borderRadius: 8, padding: 16, marginBottom: 14, alignItems: 'center' },
   amountLabel: { fontSize: 8, color: WHITE, opacity: 0.85, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 },
   amountValue: { fontSize: 24, fontFamily: 'Helvetica-Bold', color: WHITE },
   statusBadge: { fontSize: 7.5, color: WHITE, marginTop: 6, backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 4, paddingHorizontal: 8, paddingVertical: 3 },

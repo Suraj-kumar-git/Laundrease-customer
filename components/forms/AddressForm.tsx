@@ -243,7 +243,7 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
           value={form.address_line1}
           onChange={v => setForm(prev => ({ ...prev, address_line1: v }))}
           placeholder="Search building, street or area…"
-          className="mt-1 w-full pl-9 pr-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+          className="mt-1 w-full pl-9 pr-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           types={['geocode']}
           onAddressComponents={({ address_line1, city, state, postal_code }) => {
             setForm(prev => ({

@@ -170,12 +170,15 @@ export async function sendOrderConfirmedEmail(params: {
 export async function sendOrderCancelledEmail(params: {
   to: string; customerName: string; orderNumber: string
   cancelledBy: 'customer' | 'delivery_partner' | 'platform'
-  refundNote?: string; orderUrl: string; 
+  // Overrides the mapped phrase when the caller has a more specific message
+  // (e.g. "by Laundrease — pickup could not be completed after 3 attempts").
+  cancelledByText?: string
+  refundNote?: string; orderUrl: string;
 }): Promise<void> {
-  const cancelledByText =
+  const cancelledByText = params.cancelledByText || (
     params.cancelledBy === 'customer'         ? 'at your request'
     : params.cancelledBy === 'delivery_partner' ? 'by the delivery partner at your request'
-    : 'by Laundrease'
+    : 'by Laundrease')
   await sendMsg91TemplateEmail({
     to: params.to, toName: params.customerName,
     templateId: getTemplateId('ORDER_CANCELLED_EMAIL_TEMPLATE_ID'),

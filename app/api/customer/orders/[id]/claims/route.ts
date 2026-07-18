@@ -10,6 +10,7 @@ import {
   serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
 import { sendClaimSubmittedEmail } from '@/lib/notifications/email'
+import { isNotificationEnabled } from '@/lib/notifications/preferences'
 
 export async function GET(
   req: NextRequest,
@@ -145,7 +146,7 @@ export async function POST(
       const cust = await queryOne<{ email: string | null; full_name: string }>(
         `SELECT email, full_name FROM users WHERE id = $1`, [userId]
       )
-      if (cust?.email) {
+      if (cust?.email && await isNotificationEnabled(userId, 'orders', 'email')) {
         const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL || 'http://localhost:3000'
         sendClaimSubmittedEmail({
           to: cust.email, customerName: cust.full_name,
