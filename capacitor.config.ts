@@ -19,6 +19,16 @@ const config: CapacitorConfig = {
       style: 'LIGHT',
       backgroundColor: '#2563eb',
     },
+    SplashScreen: {
+      // Stays up (with a spinner) until the web app explicitly hides it,
+      // once laundrease.in has actually loaded over the network — see
+      // components/capacitor-splash.tsx.
+      launchAutoHide: false,
+      backgroundColor: '#ffffffff',
+      showSpinner: true,
+      spinnerColor: '#2563eb',
+      androidSpinnerStyle: 'large',
+    },
   },
 };
 

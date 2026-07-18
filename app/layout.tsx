@@ -1,6 +1,7 @@
 import type React from "react"
 import type { Metadata, Viewport } from "next"
 import '@/styles/globals.css'
+import { CapacitorSplash } from '@/components/capacitor-splash'
 
 // Wraps every role (customer, laundry, delivery, admin, support) — metadataBase
 // is needed here so relative OG/canonical URLs declared in role-specific
@@ -29,6 +30,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        <CapacitorSplash />
         <div
           aria-hidden
           className="fixed inset-x-0 top-0 z-50 bg-primary"
