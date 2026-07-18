@@ -91,7 +91,28 @@ export async function POST(req: NextRequest) {
 
       const payment = paymentResult.rows[0]
       orderPublicId = payment.order_public_id
-      const isVerifiedSuccess = verification.verified
+
+      // PayU's hash proves the callback is genuinely from PayU, but not that
+      // the amount it's confirming matches what this txnid was actually
+      // supposed to charge — a caller can request a PayU order for any
+      // amount under any receipt string (see /api/customer/payments/
+      // create-order, which doesn't bind amount to a real order). Comparing
+      // against the amount we ourselves stored when the payment row was
+      // created closes that gap regardless of which endpoint requested it.
+      const expectedAmount = Number(payment.amount)
+      const paidAmount = Number(amount)
+      const amountMatches =
+        Number.isFinite(expectedAmount) &&
+        Number.isFinite(paidAmount) &&
+        Math.abs(expectedAmount - paidAmount) < 0.01
+
+      if (verification.verified && !amountMatches) {
+        console.error('[payu/success] amount mismatch — refusing to mark order paid', {
+          txnid, expected: payment.amount, paid: amount,
+        })
+      }
+
+      const isVerifiedSuccess = verification.verified && amountMatches
       const paymentStatus = isVerifiedSuccess ? 'completed' : 'failed'
       const completedAt = isVerifiedSuccess ? new Date() : null
       const failedAt     = isVerifiedSuccess ? null : new Date()
