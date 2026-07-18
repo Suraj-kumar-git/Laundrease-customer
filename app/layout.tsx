@@ -1,5 +1,5 @@
 import type React from "react"
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import '@/styles/globals.css'
 
 // Wraps every role (customer, laundry, delivery, admin, support) — metadataBase
@@ -12,6 +12,15 @@ export const metadata: Metadata = {
   description: 'Laundrease — on-demand laundry pickup and delivery.',
 }
 
+// viewportFit: 'cover' lets env(safe-area-inset-*) resolve to real values —
+// needed so the Android app (edge-to-edge enforced on API 35+, where native
+// status-bar coloring is ignored by the OS) can paint that inset itself.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -19,7 +28,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <div
+          aria-hidden
+          className="fixed inset-x-0 top-0 z-50 bg-primary"
+          style={{ height: 'env(safe-area-inset-top)' }}
+        />
+        {children}
+      </body>
     </html>
   )
 }
