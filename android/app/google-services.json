@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "220116153553",
+    "project_id": "laundrease-5f1fa",
+    "storage_bucket": "laundrease-5f1fa.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220116153553:android:a774244eda6b06dd7881f0",
+        "android_client_info": {
+          "package_name": "in.laundrease.customer"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDH_lfEqqVJVV5wzgOsChwA7tJJ1k-Jhfs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

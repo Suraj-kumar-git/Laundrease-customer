@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { transaction } from '@/lib/db'
 import { getActiveGateway } from '@/lib/payment'
+import { sendPushToUser } from '@/lib/push-notifications'
 
 function getCustomerBaseUrl(): string {
   const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL
@@ -71,11 +72,12 @@ export async function POST(req: NextRequest) {
     // The redirect URL needs the order's public_id (UUID) — orders.id is an
     // internal BIGSERIAL the customer-facing routes don't accept.
     let orderPublicId: string | null = null
+    let pushTarget: { customerId: number; orderNumber: string } | null = null
 
     await transaction(async (client) => {
       const paymentResult = await client.query(
         `SELECT p.id, p.order_id, p.status, p.amount, p.currency, p.gateway_config_id,
-                o.public_id AS order_public_id
+                o.public_id AS order_public_id, o.customer_id, o.order_number
          FROM payments p
          LEFT JOIN orders o ON o.id = p.order_id
          WHERE p.merchant_txn_id = $1
@@ -170,8 +172,26 @@ export async function POST(req: NextRequest) {
             [payment.order_id]
           )
         }
+
+        if (isVerifiedSuccess) {
+          pushTarget = { customerId: payment.customer_id, orderNumber: payment.order_number }
+        }
       }
     })
+
+    // Best-effort, outside the transaction — a push failure must never
+    // affect the payment result the customer is redirected to.
+    // (Read into a const first — TS doesn't narrow `let`s mutated inside
+    // the transaction() closure above.)
+    const push = pushTarget as { customerId: number; orderNumber: string } | null
+    if (push) {
+      sendPushToUser({
+        userId: push.customerId,
+        title: 'Payment successful',
+        body: `Order #${push.orderNumber} is confirmed and on its way to pickup.`,
+        data: { orderId: orderPublicId ?? '' },
+      }).catch((error) => console.error('[push] payu/success send failed', error))
+    }
 
     if (verification.verified) {
       return buildRedirect(`/customer/orders/payment/success?order_id=${orderPublicId ?? ''}`)

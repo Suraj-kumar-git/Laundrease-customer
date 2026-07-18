@@ -1,4 +1,7 @@
 .env*
+# Firebase admin SDK service account keys must never enter the repo —
+# they belong on the backend host's env vars, not the mobile app codebase.
+*firebase-adminsdk*.json
 # dependencies
 /node_modules
 /package-lock.json
