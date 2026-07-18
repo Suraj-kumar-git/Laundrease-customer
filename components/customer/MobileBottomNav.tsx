@@ -20,20 +20,23 @@ const HIDDEN_PREFIXES = [
   '/customer/auth',
 ]
 
-const TABS = [
-  { href: '/customer/dashboard', label: 'Home',    icon: Home,       match: ['/customer/dashboard'] },
-  { href: '/customer/orders',    label: 'Orders',  icon: Package,    match: ['/customer/orders'] },
-  null, // center slot — New Order
-  { href: '/customer/support',   label: 'Tickets', icon: LifeBuoy,   match: ['/customer/support'] },
-  { href: '/customer/settings',  label: 'Account', icon: UserCircle, match: ['/customer/settings', '/customer/profile', '/customer/addresses'] },
-] as const
-
 export function MobileBottomNav() {
   const pathname = usePathname()
   const { user } = useAuth()
 
   if (!user || user.role !== 'customer') return null
   if (HIDDEN_PREFIXES.some(p => pathname?.startsWith(p))) return null
+
+  // Account tab goes to My Profile (matches the header's "My Profile" link
+  // and the UserCircle icon) — Settings is reached from there, not directly
+  // from the bottom nav.
+  const TABS = [
+    { href: '/customer/dashboard', label: 'Home',    icon: Home,       match: ['/customer/dashboard'] },
+    { href: '/customer/orders',    label: 'Orders',  icon: Package,    match: ['/customer/orders'] },
+    null, // center slot — New Order
+    { href: '/customer/support',   label: 'Tickets', icon: LifeBuoy,   match: ['/customer/support'] },
+    { href: `/customer/profile/${user.id}`, label: 'Account', icon: UserCircle, match: ['/customer/profile', '/customer/settings', '/customer/addresses'] },
+  ] as const
 
   return (
     <>

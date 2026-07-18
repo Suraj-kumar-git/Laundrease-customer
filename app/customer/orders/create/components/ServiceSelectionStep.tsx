@@ -772,31 +772,32 @@ export function ServiceSelectionStep({
 
   return (
     <div className="space-y-5">
-      {/* Tabs */}
-      <div className="flex gap-2 rounded-xl border border-border/50 bg-muted/30 p-1">
-        {([
-          { id: 'per_kg' as const, label: 'By Weight', sub: 'Wash & Fold/Iron', count: kgServices.length },
-          { id: 'per_unit' as const, label: 'By Piece', sub: 'Dry Clean, Steam Iron', count: unitProducts.length },
-        ]).map(tab => (
-          <button type="button" key={tab.id} onClick={() => setActiveTab(tab.id)}
-            className={cn(
-              'flex flex-1 flex-col items-center rounded-lg py-2.5 text-center transition-all',
-              activeTab === tab.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
-            )}>
-            {tab.id === 'per_kg' ? <Scale className="mb-1 h-4 w-4" /> : <Tag className="mb-1 h-4 w-4" />}
-            <span className="text-xs font-semibold">{tab.label}</span>
-            <span className="text-[10px] text-muted-foreground">{tab.sub}</span>
-            {tab.count === 0 && <span className="mt-0.5 text-[9px] text-muted-foreground/60">Not available</span>}
-          </button>
-        ))}
-      </div>
-
-      {/* Express toggle for By Weight — By Piece carries it in its pill row */}
-      {activeTab === 'per_kg' && kgServices.some(s => s.is_express_available) && (
-        <div className="flex items-center gap-2">
-          <ExpressPill active={isExpressGlobal} onToggle={() => setIsExpressGlobal(v => !v)} />
-          {isExpressGlobal && <span className="text-[11px] text-muted-foreground">Faster turnaround — prices updated below</span>}
+      {/* Tabs + Express toggle — single compact row */}
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 gap-1 rounded-xl border border-border/50 bg-muted/30 p-1">
+          {([
+            { id: 'per_kg' as const, label: 'By Weight', count: kgServices.length },
+            { id: 'per_unit' as const, label: 'By Piece', count: unitProducts.length },
+          ]).map(tab => (
+            <button type="button" key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={cn(
+                'flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all',
+                activeTab === tab.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+              )}>
+              {tab.id === 'per_kg' ? <Scale className="h-3.5 w-3.5" /> : <Tag className="h-3.5 w-3.5" />}
+              {tab.label}
+              {tab.count === 0 && <span className="text-[9px] text-muted-foreground/60">(N/A)</span>}
+            </button>
+          ))}
         </div>
+
+        {/* Express toggle for By Weight — By Piece carries it in its pill row */}
+        {activeTab === 'per_kg' && kgServices.some(s => s.is_express_available) && (
+          <ExpressPill active={isExpressGlobal} onToggle={() => setIsExpressGlobal(v => !v)} />
+        )}
+      </div>
+      {activeTab === 'per_kg' && isExpressGlobal && kgServices.some(s => s.is_express_available) && (
+        <p className="-mt-3 text-[11px] text-muted-foreground">Faster turnaround — prices updated below</p>
       )}
 
       {/* Tab content */}

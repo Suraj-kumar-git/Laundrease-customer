@@ -344,7 +344,7 @@ function SaveBar({ visible, saving, saved, onSave }: {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 80, opacity: 0 }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="fixed bottom-0 left-0 right-0 z-40 border-t border-border/50 bg-background/95 px-4 py-3 backdrop-blur"
+          className="fixed inset-x-0 bottom-16 z-40 border-t border-border/50 bg-background/95 px-4 py-3 backdrop-blur lg:bottom-0"
         >
           <div className="container mx-auto flex max-w-3xl items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">You have unsaved changes</p>

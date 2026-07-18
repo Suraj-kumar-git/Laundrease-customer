@@ -11,6 +11,7 @@ import {
 } from '@/lib/api-response'
 import { sendClaimSubmittedEmail } from '@/lib/notifications/email'
 import { isNotificationEnabled } from '@/lib/notifications/preferences'
+import { sendPushToUser } from '@/lib/push-notifications'
 
 export async function GET(
   req: NextRequest,
@@ -91,14 +92,20 @@ export async function POST(
       return errorResponse(`The claim window (${policy.claim_window_hours}h after delivery) for this order has passed`, 400)
     }
 
-    const item = await queryOne<{ id: number; item_label: string }>(
-      `SELECT oi.id, COALESCE(oi.garment_label, pt.name) AS item_label
+    const item = await queryOne<{ id: number; item_label: string; weight_kg: string | null }>(
+      `SELECT oi.id, COALESCE(oi.garment_label, pt.name) AS item_label, oi.weight_kg::TEXT
        FROM order_items oi
        JOIN product_types pt ON pt.id = oi.product_type_id
        WHERE oi.id = $1 AND oi.order_id = $2`,
       [body.order_item_id, orderId]
     )
     if (!item) return errorResponse('Item not found on this order', 404)
+    // Per-kg (weight-based) lines represent a whole mixed batch, not a single
+    // identifiable garment — there's no way to verify or scope a damage/loss
+    // claim against one item within it, so claims are per-piece items only.
+    if (item.weight_kg != null) {
+      return errorResponse('Claims are not available for per-kg (weight-based) items', 400)
+    }
 
     const existingOpen = await queryOne(
       `SELECT id FROM garment_claims
@@ -156,6 +163,12 @@ export async function POST(
           orderUrl: `${baseUrl}/customer/orders/${publicId}`,
         }).catch(e => console.error('[api/customer/orders/[id]/claims] claim-submitted email failed:', e))
       }
+      sendPushToUser({
+        userId, category: 'orders',
+        title: 'Claim submitted',
+        body: `Your ${body.claim_type} claim for ${item.item_label} on order #${order.order_number} has been submitted`,
+        data: { orderId: publicId },
+      }).catch(() => {})
     } catch (e) {
       console.error('[api/customer/orders/[id]/claims] claim-submitted notify failed:', e)
     }
