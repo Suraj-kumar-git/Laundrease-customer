@@ -46,9 +46,13 @@ export function CapacitorPush() {
 
     // Deep-link into the relevant order when a notification is tapped —
     // the backend attaches { orderId } as custom data when it sends one.
+    // Notifications with no associated order (e.g. a support ticket reply)
+    // attach { screen } instead.
     const actionListener = PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-      const orderId = action.notification.data?.orderId
+      const data = action.notification.data
+      const orderId = data?.orderId
       if (orderId) router.push(`/customer/orders/${orderId}`)
+      else if (data?.screen === 'support') router.push('/customer/support')
     })
 
     ;(async () => {
