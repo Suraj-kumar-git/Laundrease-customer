@@ -1,4 +1,5 @@
 import type React from "react"
+import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import Link from "next/link"
 import { Bell, Menu, Search, ShoppingCart, MapPin } from "lucide-react"
@@ -17,21 +18,38 @@ import '@/styles/globals.css'
 import { NewsletterForm } from "@/components/forms/newsletter-form"
 import { UserMenuDropdown } from "@/components/header/user-menu-dropdown"
 import { HeaderWithCart } from "@/components/header/HeaderWithCart"
+import { MobileBottomNav } from "@/components/customer/MobileBottomNav"
 import Script from "next/script"
 
 const inter = Inter({ subsets: ["latin"] })
 
-export const metadata = {
-  title: "Laundrease - Laundry Made Effortless Online",
-  description: "Laundrease is an online platform that connects users with local laundry services for convenient pickup and delivery.",
-}
+const TITLE = "Laundrease - Laundry Pickup & Delivery Made Effortless"
+const DESCRIPTION = "Laundrease connects you with trusted local laundry providers in Pune for convenient online laundry, wash & fold, and dry cleaning pickup and delivery."
 
+// Fallback for every /customer page that doesn't define its own metadata —
+// most now do (see their individual page/layout files), so in practice this
+// mainly governs the home page, which is a client component and can't
+// export metadata itself.
+export const metadata: Metadata = {
+  title: TITLE,
+  description: DESCRIPTION,
+  keywords: [
+    'laundry pickup and delivery Pune', 'online laundry service', 'dry cleaning pickup and delivery',
+    'wash and fold service near me', 'same day laundry Pune', 'Laundrease',
+  ],
+  alternates: { canonical: '/customer' },
+  openGraph: {
+    title: TITLE, description: DESCRIPTION, url: '/customer',
+    siteName: 'Laundrease', type: 'website', locale: 'en_IN',
+  },
+  twitter: { card: 'summary_large_image', title: TITLE, description: DESCRIPTION },
+}
 
 async function getFooterConfig() {
   try {
     const { rows } = await query(
       `SELECT key, value FROM platform_config
-       WHERE key IN ('social_instagram', 'social_facebook', 'social_twitter', 'business_address', 'app_store_url', 'play_store_url')`
+       WHERE key IN ('social_instagram', 'social_facebook', 'social_twitter', 'business_address', 'app_store_url', 'play_store_url', 'support_phone', 'support_email')`
     )
     const config: Record<string, string | null> = {}
     for (const row of rows) config[row.key] = row.value
@@ -47,6 +65,8 @@ async function getFooterConfig() {
       // has actually set a real store listing URL.
       appStoreUrl:  config.app_store_url  || null,
       playStoreUrl: config.play_store_url || null,
+      supportPhone: config.support_phone || null,
+      supportEmail: config.support_email || null,
     }
   } catch (error) {
     console.error('[customer/layout] Failed to load footer config:', error)
@@ -59,6 +79,8 @@ async function getFooterConfig() {
       address: null,
       appStoreUrl:  null,
       playStoreUrl: null,
+      supportPhone: null,
+      supportEmail: null,
     }
   }
 }
@@ -104,10 +126,28 @@ export default async function RootLayout({
 }>) {
   // In the future, you can fetch logoUrl from an API here
   // const logoUrl = await fetchLogoFromApi()
-  const { social, address, appStoreUrl, playStoreUrl } = await getFooterConfig()
+  const { social, address, appStoreUrl, playStoreUrl, supportPhone, supportEmail } = await getFooterConfig()
+
+  const organizationJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'LocalBusiness',
+    name: 'Laundrease',
+    url: 'https://laundrease.in/customer',
+    logo: 'https://laundrease.in/laundrease-logo.PNG',
+    image: 'https://laundrease.in/laundrease-logo.PNG',
+    description: DESCRIPTION,
+    ...(address ? { address: { '@type': 'PostalAddress', addressLocality: 'Pune', addressRegion: 'Maharashtra', addressCountry: 'IN' } } : {}),
+    ...(supportPhone ? { telephone: supportPhone } : {}),
+    ...(supportEmail ? { email: supportEmail } : {}),
+    sameAs: [social.instagram, social.facebook, social.x].filter(Boolean),
+  }
 
   return (
     <div className={inter.className}>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+        />
         {/* If using the below script then the loadScript is not required in checkoutStep.tsx file */}
         {/* <Script
           src="https://checkout.razorpay.com/v1/checkout.js"
@@ -270,6 +310,7 @@ export default async function RootLayout({
                   </div>
                 </div>
               </footer>
+              <MobileBottomNav />
             </div>
             <Toaster />
             </CartProvider>

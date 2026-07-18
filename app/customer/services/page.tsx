@@ -52,7 +52,7 @@ interface DisplayProvider {
 }
 
 const ICON_GRADIENTS = [
-  'from-violet-500 to-purple-500',
+  'from-blue-500 to-blue-500',
   'from-sky-500 to-blue-500',
   'from-amber-500 to-orange-500',
   'from-emerald-500 to-teal-500',
@@ -138,9 +138,9 @@ export default function ServicesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-50 via-white to-purple-50 dark:from-gray-950 dark:via-gray-900 dark:to-violet-950">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
       {/* Hero — compact */}
-      <div className="relative overflow-hidden bg-gradient-to-r from-violet-600 to-purple-600 px-4 py-10 sm:py-12">
+      <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 to-blue-600 px-4 py-10 sm:py-12">
         <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
 
         <motion.div
@@ -171,7 +171,7 @@ export default function ServicesPage() {
         {searched && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-10">
             <div className="mb-4 flex items-center gap-2">
-              <Navigation className="h-4 w-4 text-violet-600" />
+              <Navigation className="h-4 w-4 text-blue-600" />
               <h2 className="text-lg font-bold text-gray-900 dark:text-white">
                 {searchLoading
                   ? 'Searching…'
@@ -183,7 +183,7 @@ export default function ServicesPage() {
 
             {searchLoading ? (
               <div className="flex justify-center py-10">
-                <Loader2 className="h-8 w-8 animate-spin text-violet-600" />
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
               </div>
             ) : providers.length > 0 ? (
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -193,7 +193,7 @@ export default function ServicesPage() {
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
-                    className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition-all hover:border-violet-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
+                    className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition-all hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -212,7 +212,7 @@ export default function ServicesPage() {
                     <div className="mt-3 flex items-center justify-between">
                       <div>
                         {p.minPriceKg !== null ? (
-                          <p className="text-sm font-bold text-violet-600 dark:text-violet-400">
+                          <p className="text-sm font-bold text-blue-600 dark:text-blue-400">
                             Starting {formatINR(p.minPriceKg)}<span className="text-xs font-medium text-gray-500"> /kg</span>
                           </p>
                         ) : (
@@ -224,7 +224,7 @@ export default function ServicesPage() {
                       </div>
                       <a
                         href={`/customer/orders/create?provider=${p.id}`}
-                        className="rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 px-3 py-1.5 text-xs font-semibold text-white transition-all hover:shadow-md"
+                        className="rounded-lg bg-gradient-to-r from-blue-600 to-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition-all hover:shadow-md"
                       >
                         Book Now
                       </a>
@@ -253,7 +253,7 @@ export default function ServicesPage() {
 
         {servicesLoading ? (
           <div className="flex justify-center py-10">
-            <Loader2 className="h-7 w-7 animate-spin text-violet-600" />
+            <Loader2 className="h-7 w-7 animate-spin text-blue-600" />
           </div>
         ) : (
           <div className="mb-12 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
@@ -270,7 +270,7 @@ export default function ServicesPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.05 }}
                   whileHover={{ y: -3 }}
-                  className="rounded-xl border border-transparent bg-white p-3.5 shadow-sm transition-all hover:border-violet-300 hover:shadow-md dark:bg-gray-800"
+                  className="rounded-xl border border-transparent bg-white p-3.5 shadow-sm transition-all hover:border-blue-300 hover:shadow-md dark:bg-gray-800"
                 >
                   <div className={`mb-2.5 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br text-lg overflow-hidden ${ICON_GRADIENTS[index % ICON_GRADIENTS.length]}`}>
                     <ProductIcon
@@ -287,7 +287,7 @@ export default function ServicesPage() {
                     {service.description}
                   </p>
                   <div className="mt-2 flex items-baseline gap-1">
-                    <span className="text-base font-bold text-violet-600 dark:text-violet-400">
+                    <span className="text-base font-bold text-blue-600 dark:text-blue-400">
                       {formatINR(service.startingPrice)}
                     </span>
                     <span className="text-[10px] text-gray-500 dark:text-gray-400">
@@ -319,12 +319,12 @@ export default function ServicesPage() {
                             express_multiplier: service.isExpressAvailable ? 1.5 : 1,
                           })
                         }
-                        className="flex w-full items-center justify-center gap-1 rounded-lg border border-violet-200 py-1.5 text-xs font-semibold text-violet-700 transition-colors hover:bg-violet-50 dark:border-violet-800 dark:text-violet-300 dark:hover:bg-violet-900/20"
+                        className="flex w-full items-center justify-center gap-1 rounded-lg border border-blue-200 py-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/20"
                       >
                         <ShoppingBag className="h-3.5 w-3.5" /> Add to Cart
                       </button>
                     ) : (
-                      <div className="flex items-center justify-between rounded-lg bg-violet-50 px-2 py-1 dark:bg-violet-900/20">
+                      <div className="flex items-center justify-between rounded-lg bg-blue-50 px-2 py-1 dark:bg-blue-900/20">
                         <button
                           onClick={() => {
                             const field = dpt!.pricingModel === 'per_kg' ? 'weight_kg' : 'quantity'
@@ -332,11 +332,11 @@ export default function ServicesPage() {
                             if (current <= 1) cart.removeItem(cartKey)
                             else cart.updateItem(cartKey, field, current - 1)
                           }}
-                          className="flex h-6 w-6 items-center justify-center rounded-md bg-white text-violet-700 shadow-sm dark:bg-gray-700"
+                          className="flex h-6 w-6 items-center justify-center rounded-md bg-white text-blue-700 shadow-sm dark:bg-gray-700"
                         >
                           <Minus className="h-3 w-3" />
                         </button>
-                        <span className="text-xs font-semibold text-violet-800 dark:text-violet-200">
+                        <span className="text-xs font-semibold text-blue-800 dark:text-blue-200">
                           {dpt!.pricingModel === 'per_kg' ? `${cartItem.weight_kg}kg` : cartItem.quantity}
                         </span>
                         <button
@@ -345,7 +345,7 @@ export default function ServicesPage() {
                             const current = dpt!.pricingModel === 'per_kg' ? cartItem.weight_kg : cartItem.quantity
                             cart.updateItem(cartKey, field, current + 1)
                           }}
-                          className="flex h-6 w-6 items-center justify-center rounded-md bg-white text-violet-700 shadow-sm dark:bg-gray-700"
+                          className="flex h-6 w-6 items-center justify-center rounded-md bg-white text-blue-700 shadow-sm dark:bg-gray-700"
                         >
                           <Plus className="h-3 w-3" />
                         </button>
@@ -360,7 +360,7 @@ export default function ServicesPage() {
 
         {/* Why Choose Us — compact */}
         <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 to-purple-600 p-6 text-white sm:p-8">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-600 p-6 text-white sm:p-8">
             <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
             <div className="relative z-10">
               <h2 className="mb-6 text-center text-xl font-bold sm:text-2xl">Why Choose Laundrease?</h2>
@@ -393,22 +393,22 @@ export default function ServicesPage() {
       </div>
 
       {cart.itemCount > 0 && (
-        <div className="sticky bottom-0 z-20 border-t border-violet-100 bg-white/95 px-4 py-3 backdrop-blur dark:border-violet-900 dark:bg-gray-900/95">
+        <div className="sticky bottom-0 z-20 border-t border-blue-100 bg-white/95 px-4 py-3 backdrop-blur dark:border-blue-900 dark:bg-gray-900/95">
           <div className="container mx-auto flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-sm">
-              <ShoppingBag className="h-4 w-4 text-violet-600" />
+              <ShoppingBag className="h-4 w-4 text-blue-600" />
               <span className="font-semibold text-gray-900 dark:text-white">
                 {cart.itemCount} item{cart.itemCount !== 1 ? 's' : ''}
               </span>
               <span className="text-gray-400">·</span>
-              <span className="font-bold text-violet-600 dark:text-violet-400">
+              <span className="font-bold text-blue-600 dark:text-blue-400">
                 {formatINR(cart.subtotal)}
               </span>
             </div>
             <button
               onClick={cart.placeOrder}
               disabled={cart.placing}
-              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md disabled:opacity-60"
+              className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:shadow-md disabled:opacity-60"
             >
               {cart.placing ? 'Placing...' : 'Place Order'}
               <ArrowRight className="h-4 w-4" />

@@ -50,8 +50,8 @@ export async function getRefundBreakdown(
 export async function initiateOriginalMethodRefund(params: {
   orderId: number
   amount: number
-  initiatedBy: string | number
-  initiatedByRole: 'customer' | 'delivery' | 'admin'
+  initiatedBy: string | number | null
+  initiatedByRole: 'customer' | 'delivery' | 'admin' | 'system'
 }): Promise<InitiateRefundResult> {
   const payment = await queryOne<{ id: number; provider: string; amount: string }>(
     `SELECT id, provider, amount FROM payments

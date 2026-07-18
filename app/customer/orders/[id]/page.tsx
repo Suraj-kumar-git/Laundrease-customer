@@ -9,7 +9,7 @@ import { format, addDays, startOfDay } from 'date-fns'
 import {
   ArrowLeft, Package, MapPin, Store, Calendar, Clock,
   Receipt, CreditCard, Zap, CheckCircle, XCircle, Truck,
-  ChevronRight, Loader2, AlertCircle, Edit2, X,
+  ChevronRight, ChevronDown, Loader2, AlertCircle, Edit2, X,
   Phone, Shield, RefreshCw, Info,
   Download, Ban, Camera, ShieldAlert,
 } from 'lucide-react'
@@ -89,7 +89,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   confirmed:        { label: 'Confirmed',        color: 'text-blue-700',    bg: 'bg-blue-100 dark:bg-blue-950/40',     step: 2 },
   assigned_for_pickup: { label: 'Delivery Partner Assigned', color: 'text-blue-700', bg: 'bg-blue-100 dark:bg-blue-950/40',     step: 2 },
   out_for_pickup:   { label: 'Partner On the Way for Pickup', color: 'text-cyan-700', bg: 'bg-cyan-100 dark:bg-cyan-950/40',   step: 3 },
-  picked_up:        { label: 'Picked Up',        color: 'text-violet-700',  bg: 'bg-violet-100 dark:bg-violet-950/40', step: 3 },
+  picked_up:        { label: 'Picked Up',        color: 'text-blue-700',  bg: 'bg-blue-100 dark:bg-blue-950/40', step: 3 },
   at_laundry:       { label: 'Delivered to Laundry',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 7 },
   processing:       { label: 'Being Cleaned',    color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40', step: 4 },
   ready:            { label: 'Ready',            color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40',     step: 5 },
@@ -135,26 +135,50 @@ function methodLabel(pm: string): string {
 }
 
 // ---- Section card -------------------------------------------
-function Section({ title, icon: Icon, children, className }: {
+function Section({ title, icon: Icon, children, className, collapsible = false, defaultOpen = false }: {
   title: string; icon: React.ComponentType<{ className?: string }>; children: React.ReactNode; className?: string
+  collapsible?: boolean; defaultOpen?: boolean
 }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
     <div className={cn('rounded-xl border border-border/50 bg-card overflow-hidden', className)}>
-      <div className="flex items-center gap-2 border-b border-border/40 bg-muted/20 px-3.5 py-2">
+      <div
+        onClick={collapsible ? () => setOpen(v => !v) : undefined}
+        className={cn(
+          'flex items-center gap-2 border-b border-border/40 bg-muted/20 px-3.5 py-2',
+          collapsible && 'cursor-pointer select-none'
+        )}>
         <Icon className="h-3.5 w-3.5 text-primary" />
-        <h3 className="text-xs font-semibold text-foreground">{title}</h3>
+        <h3 className="text-xs font-semibold text-foreground flex-1">{title}</h3>
+        {collapsible && (
+          <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform duration-200', open && 'rotate-180')} />
+        )}
       </div>
-      <div className="p-3.5">{children}</div>
+      {collapsible ? (
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }}
+              className="overflow-hidden">
+              <div className="p-3.5">{children}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      ) : (
+        <div className="p-3.5">{children}</div>
+      )}
     </div>
   )
 }
 
 // ---- Reschedule modal ---------------------------------------
 function RescheduleModal({
-  orderId, currentDate, currentSlot, onClose, onSuccess,
+  orderId, currentDate, currentSlot, onClose, onSuccess, onCancelled,
 }: {
   orderId: string; currentDate: string; currentSlot: string
   onClose: () => void; onSuccess: (date: string, slot: string, estimatedDeliveryDate: string | null) => void
+  onCancelled: (message: string) => void
 }) {
   const { toast }         = useToast()
   const [selectedDate, setSelectedDate] = useState<string>(currentDate)
@@ -180,6 +204,11 @@ function RescheduleModal({
       })
       const json = await res.json()
       if (!json.success) throw new Error(json.error ?? 'Failed to reschedule')
+      if (json.data.cancelled) {
+        toast({ title: 'Order Cancelled', description: json.data.message })
+        onCancelled(json.data.message)
+        return
+      }
       toast({ title: 'Pickup Rescheduled ✓', description: `New date: ${formatDate(selectedDate)}` })
       onSuccess(selectedDate, selectedSlot, json.data.estimated_delivery_date ?? null)
     } catch (err: any) {
@@ -631,8 +660,8 @@ function ReportIssueModal({
           </button>
         </div>
 
-        <div className="mb-3 rounded-xl bg-violet-50 dark:bg-violet-900/10 border border-violet-200 dark:border-violet-800 px-3 py-2.5">
-          <p className="text-xs text-violet-700 dark:text-violet-400">
+        <div className="mb-3 rounded-xl bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 px-3 py-2.5">
+          <p className="text-xs text-blue-700 dark:text-blue-400">
             Up to <span className="font-bold">₹{estimatedCap.toFixed(2)}</span> compensation if approved
             ({policy.multiplier}× the service charge for this item, capped at ₹{policy.max_cap_amount.toLocaleString('en-IN')}).
           </p>
@@ -705,7 +734,6 @@ export default function OrderDetailPage() {
   const [error,      setError]      = useState<string | null>(null)
   const [showReschedule, setShowReschedule] = useState(false)
   const [showCancel,    setShowCancel]    = useState(false)
-  const [showAllHistory, setShowAllHistory] = useState(false)
   // Invoice download state
   const [invoiceLoading, setInvoiceLoading] = useState(false)
   const [invoiceError,   setInvoiceError]   = useState<string | null>(null)
@@ -761,6 +789,14 @@ export default function OrderDetailPage() {
   const handleCancelSuccess = (message: string) => {
     setOrder(prev => prev ? { ...prev, status: 'cancelled', can_cancel: false, can_reschedule: false } : prev)
     setShowCancel(false)
+  }
+  // A reschedule can itself trigger an auto-cancellation once an order hits
+  // 3 reschedules — the modal shows a toast for that case instead of the
+  // normal "rescheduled" one, so this must NOT set a new pickup_date.
+  const handleRescheduleCancelled = () => {
+    setOrder(prev => prev ? { ...prev, status: 'cancelled', can_cancel: false, can_reschedule: false } : prev)
+    setShowReschedule(false)
+    fetchOrder()
   }
 
   // Pay online any time before delivery — eliminates needing a card/scanner
@@ -1292,7 +1328,7 @@ export default function OrderDetailPage() {
                   {order.amount_paid > order.total_amount && (
                     <div className="flex justify-between text-sm">
                       <span className="text-muted-foreground">Overpaid (credited to wallet after pickup)</span>
-                      <span className="font-semibold text-violet-600">{formatINR(Math.round((order.amount_paid - order.total_amount) * 100) / 100)}</span>
+                      <span className="font-semibold text-blue-600">{formatINR(Math.round((order.amount_paid - order.total_amount) * 100) / 100)}</span>
                     </div>
                   )}
                 </>
@@ -1311,7 +1347,7 @@ export default function OrderDetailPage() {
                 && !NOT_PAYABLE.has(order.status)
               if (!canPayOnline) return null
               return (
-                <div className="mb-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 dark:border-violet-800 dark:bg-violet-950/20">
+                <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-800 dark:bg-blue-950/20">
                   <p className="text-sm font-medium text-foreground">
                     {order.modified_by_delivery && order.amount_paid > 0
                       ? `Your order was updated at pickup — ₹${order.balance_due.toFixed(2)} is remaining to pay.`
@@ -1319,7 +1355,7 @@ export default function OrderDetailPage() {
                   </p>
                   {payError && <p className="mt-1.5 text-xs text-destructive">{payError}</p>}
                   <button onClick={handlePayOnline} disabled={payLoading}
-                    className="mt-2.5 flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-violet-700 disabled:opacity-60">
+                    className="mt-2.5 flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700 disabled:opacity-60">
                     {payLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
                     {payLoading ? 'Processing…' : `Pay ${formatINR(order.balance_due)} Online Now`}
                   </button>
@@ -1354,14 +1390,14 @@ export default function OrderDetailPage() {
                   return (
                     <div key={p.id} className={cn(
                       'flex items-start justify-between gap-3 rounded-xl px-4 py-3',
-                      isWallet ? 'bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800' :
+                      isWallet ? 'bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800' :
                       isCOD    ? 'bg-amber-50  dark:bg-amber-950/20  border border-amber-200  dark:border-amber-800'  :
                       'bg-muted/30'
                     )}>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-foreground">{methodLabel(p.payment_method)}</p>
                         {isWallet && p.status === 'completed' && (
-                          <p className="mt-0.5 text-xs text-violet-600 dark:text-violet-400">Paid from wallet balance</p>
+                          <p className="mt-0.5 text-xs text-blue-600 dark:text-blue-400">Paid from wallet balance</p>
                         )}
                         {isCOD && isPending && (
                           <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">To be collected at delivery</p>
@@ -1404,45 +1440,37 @@ export default function OrderDetailPage() {
             </Section>
           )}
 
-          {/* Status history — collapsed to the latest 3 entries by default
-              since this list grows unbounded and was the main contributor
-              to an overly long scroll on orders with many status changes. */}
-          <Section title="Order Timeline" icon={Clock}>
+          {/* Order Timeline — an accordion, collapsed by default. Every
+              reschedule (customer, delivery partner, admin/support, or the
+              automatic "not picked up" sweep) logs a note here, so this can
+              grow long — hidden until the customer taps to expand it. */}
+          <Section title={`Order Timeline (${history.length})`} icon={Clock} collapsible defaultOpen={false}>
             {(() => {
               const sorted = [...history].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-              const visible = showAllHistory ? sorted : sorted.slice(0, 3)
               return (
-                <>
-                  <div className="relative space-y-3 pl-5">
-                    <div className="absolute left-2 top-1 bottom-1 w-px bg-border/50" />
-                    {visible.map((entry, i) => {
-                      const cfg = STATUS_CONFIG[entry.status] ?? { label: entry.status, bg: 'bg-muted', color: 'text-foreground' }
-                      return (
-                        <div key={i} className="relative flex gap-3">
-                          <div className={cn('absolute -left-5 mt-0.5 h-4 w-4 rounded-full border-2 border-background', cfg.bg)} />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className={cn('text-xs font-semibold', cfg.color)}>{cfg.label}</span>
-                              {entry.changed_by_name && (
-                                <span className="text-[11px] text-muted-foreground">by {entry.changed_by_name}</span>
-                              )}
-                            </div>
-                            {entry.notes && (
-                              <p className="mt-0.5 text-[11px] text-muted-foreground">{entry.notes}</p>
+                <div className="relative space-y-3 pl-5">
+                  <div className="absolute left-2 top-1 bottom-1 w-px bg-border/50" />
+                  {sorted.map((entry, i) => {
+                    const cfg = STATUS_CONFIG[entry.status] ?? { label: entry.status, bg: 'bg-muted', color: 'text-foreground' }
+                    return (
+                      <div key={i} className="relative flex gap-3">
+                        <div className={cn('absolute -left-5 mt-0.5 h-4 w-4 rounded-full border-2 border-background', cfg.bg)} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className={cn('text-xs font-semibold', cfg.color)}>{cfg.label}</span>
+                            {entry.changed_by_name && (
+                              <span className="text-[11px] text-muted-foreground">by {entry.changed_by_name}</span>
                             )}
-                            <p className="mt-0.5 text-[11px] text-muted-foreground">{formatDateTime(entry.created_at)}</p>
                           </div>
+                          {entry.notes && (
+                            <p className="mt-0.5 text-[11px] text-muted-foreground">{entry.notes}</p>
+                          )}
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">{formatDateTime(entry.created_at)}</p>
                         </div>
-                      )
-                    })}
-                  </div>
-                  {sorted.length > 3 && (
-                    <button type="button" onClick={() => setShowAllHistory(v => !v)}
-                      className="mt-2 text-xs font-medium text-primary hover:underline">
-                      {showAllHistory ? 'Show less' : `Show ${sorted.length - 3} more`}
-                    </button>
-                  )}
-                </>
+                      </div>
+                    )
+                  })}
+                </div>
               )
             })()}
           </Section>
@@ -1471,6 +1499,7 @@ export default function OrderDetailPage() {
             currentSlot={order.pickup_time_slot}
             onClose={() => setShowReschedule(false)}
             onSuccess={handleRescheduleSuccess}
+            onCancelled={handleRescheduleCancelled}
           />
         )}
       </AnimatePresence>

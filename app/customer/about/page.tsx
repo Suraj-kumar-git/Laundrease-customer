@@ -15,6 +15,13 @@ import { AboutPageLiveStats, getAboutPageLiveStats } from '@/lib/about-stats'
 export const metadata: Metadata = {
   title: 'About Us | Laundrease',
   description: 'Learn about Laundrease — our story, mission, and the values that drive everything we do.',
+  keywords: ['about Laundrease', 'laundry startup Pune', 'on-demand laundry company'],
+  alternates: { canonical: '/customer/about' },
+  openGraph: {
+    title: 'About Us | Laundrease', type: 'website', url: '/customer/about',
+    description: 'Learn about Laundrease — our story, mission, and the values that drive everything we do.',
+  },
+  twitter: { card: 'summary_large_image', title: 'About Us | Laundrease' },
 }
 
 // Revalidate every 6 hours — content changes rarely

@@ -166,9 +166,9 @@ export function PlaceAutocompleteInput({
               key={p.place_id}
               type="button"
               onClick={() => selectPrediction(p)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-violet-50 dark:hover:bg-gray-700"
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-blue-50 dark:hover:bg-gray-700"
             >
-              <MapPin className="h-3.5 w-3.5 shrink-0 text-violet-500" />
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-blue-500" />
               <span className="truncate text-foreground">{p.description}</span>
             </button>
           ))}

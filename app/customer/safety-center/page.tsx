@@ -12,6 +12,13 @@ import type { PageContentBlock, HeroBody, CardItem, TextBlockBody } from '@/type
 export const metadata: Metadata = {
   title: 'Safety Center | Laundrease',
   description: 'Learn how Laundrease keeps you, your belongings, and your data safe.',
+  keywords: ['is Laundrease safe', 'laundry service trust and safety', 'Laundrease data privacy'],
+  alternates: { canonical: '/customer/safety-center' },
+  openGraph: {
+    title: 'Safety Center | Laundrease', type: 'website', url: '/customer/safety-center',
+    description: 'Learn how Laundrease keeps you, your belongings, and your data safe.',
+  },
+  twitter: { card: 'summary_large_image', title: 'Safety Center | Laundrease' },
 }
 
 export const revalidate = 21600

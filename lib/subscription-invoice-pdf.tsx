@@ -127,8 +127,8 @@ export function SubscriptionInvoiceDocument({ data, ...docProps }: SubscriptionI
           <View style={s.col}>
             <Text style={s.colLabel}>From</Text>
             <Text style={[s.colLine, { fontFamily: 'Helvetica-Bold' }]}>Laundrease Technologies Pvt. Ltd.</Text>
-            <Text style={s.colSub}>support@laundrease.com</Text>
-            <Text style={s.colSub}>www.laundrease.com</Text>
+            <Text style={s.colSub}>support@laundrease.in</Text>
+            <Text style={s.colSub}>www.laundrease.in</Text>
           </View>
           <View style={s.col}>
             <Text style={s.colLabel}>Billed To</Text>
@@ -204,7 +204,7 @@ export function SubscriptionInvoiceDocument({ data, ...docProps }: SubscriptionI
         <View style={s.footer}>
           <Text style={s.footerNote}>
             This is a computer-generated invoice. No signature required.{'\n'}
-            For support: support@laundrease.com
+            For support: support@laundrease.in
           </Text>
           <Text style={s.footerBrand}>Laundrease</Text>
         </View>

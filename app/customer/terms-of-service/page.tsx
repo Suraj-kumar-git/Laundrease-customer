@@ -6,6 +6,12 @@ import type { LegalDocument } from '@/types/footer-pages'
 export const metadata: Metadata = {
   title: 'Terms of Service | Laundrease',
   description: 'Read the Laundrease Terms of Service — the rules and guidelines that govern use of our platform.',
+  keywords: ['Laundrease terms of service'],
+  alternates: { canonical: '/customer/terms-of-service' },
+  openGraph: {
+    title: 'Terms of Service | Laundrease', type: 'website', url: '/customer/terms-of-service',
+    description: 'The rules and guidelines that govern use of the Laundrease platform.',
+  },
 }
 
 export const revalidate = 86400 // 24 hours — changes rarely

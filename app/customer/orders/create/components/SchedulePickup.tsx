@@ -17,6 +17,9 @@ interface SchedulePickupProps {
   // restored once so it doesn't reset on every visit to this step.
   initialDate?: string
   initialTimeSlot?: string
+  // Cart context for the sticky bottom bar — services picked in step 2.
+  cartItemCount?: number
+  cartSubtotal?: number
 }
 
 interface TimeSlot {
@@ -27,7 +30,7 @@ interface TimeSlot {
 
 const DAY_NAMES = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday']
 
-export function SchedulePickup({ provider, pickupAddress, onSelect, initialDate, initialTimeSlot }: SchedulePickupProps) {
+export function SchedulePickup({ provider, pickupAddress, onSelect, initialDate, initialTimeSlot, cartItemCount, cartSubtotal }: SchedulePickupProps) {
   const [selectedDate,     setSelectedDate]     = useState<Date | null>(null)
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<string | null>(null)
   const [availableDates,   setAvailableDates]   = useState<Date[]>([])
@@ -313,27 +316,43 @@ export function SchedulePickup({ provider, pickupAddress, onSelect, initialDate,
         </div>
       )}
 
-      {/* Confirmation bar — only when both are selected */}
-      {selectedDate && selectedTimeSlot && selectedSlot && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="flex items-center justify-between rounded-2xl bg-primary p-4">
-            <div>
-              <p className="text-xs font-medium text-primary-foreground/70">Pickup scheduled</p>
-              <p className="text-sm font-bold text-primary-foreground">
-                {format(selectedDate, 'EEE, d MMM')} · {selectedSlot.label}
-              </p>
-              <p className="text-xs text-primary-foreground/70">
-                {selectedSlot.start_time} – {selectedSlot.end_time}
-              </p>
-            </div>
-            <button type="button"
-              onClick={handleContinue}
-              className="rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-primary shadow-sm hover:bg-white/90">
-              Continue
-            </button>
+      {/* Sticky cart bar — always visible; Continue unlocks once date + slot
+          are picked. Same pattern as the services step's summary bar. */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+        className="sticky bottom-4 z-10 rounded-2xl bg-primary p-4 shadow-xl shadow-primary/25">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            {selectedDate && selectedSlot ? (
+              <>
+                <p className="text-xs font-medium text-primary-foreground/70">
+                  {cartItemCount ? `${cartItemCount} service${cartItemCount !== 1 ? 's' : ''}` : 'Pickup scheduled'}
+                  {cartSubtotal != null && cartSubtotal > 0 && ` · ₹${cartSubtotal.toLocaleString('en-IN')}`}
+                </p>
+                <p className="truncate text-sm font-bold text-primary-foreground">
+                  {format(selectedDate, 'EEE, d MMM')} · {selectedSlot.label}
+                </p>
+                <p className="text-xs text-primary-foreground/70">
+                  {selectedSlot.start_time} – {selectedSlot.end_time}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm font-bold text-primary-foreground">
+                  {cartItemCount ? `${cartItemCount} service${cartItemCount !== 1 ? 's' : ''}` : 'Your order'}
+                  {cartSubtotal != null && cartSubtotal > 0 && ` · ₹${cartSubtotal.toLocaleString('en-IN')}`}
+                </p>
+                <p className="text-xs text-primary-foreground/70">Select a pickup date & time to continue</p>
+              </>
+            )}
           </div>
-        </motion.div>
-      )}
+          <button type="button"
+            onClick={handleContinue}
+            disabled={!selectedDate || !selectedTimeSlot || !selectedSlot?.available}
+            className="shrink-0 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-primary shadow-sm hover:bg-white/90 disabled:opacity-50">
+            Continue
+          </button>
+        </div>
+      </motion.div>
     </div>
   )
 }

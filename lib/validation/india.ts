@@ -47,6 +47,12 @@ export function isValidIfsc(input: string): boolean {
   return IFSC_REGEX.test(input.toUpperCase().trim())
 }
 
+// ─── PAN ─────────────────────────────────────────────────────────────────────
+export const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/
+export function isValidPan(input: string): boolean {
+  return PAN_REGEX.test(input.toUpperCase().trim())
+}
+
 // ─── Bank account number ─────────────────────────────────────────────────────
 export function isValidBankAccountNumber(input: string): boolean {
   return /^\d{9,18}$/.test(input.replace(/\s/g, ''))
