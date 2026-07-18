@@ -1,6 +1,7 @@
 import { getApps, initializeApp, cert, type App } from 'firebase-admin/app'
 import { getMessaging } from 'firebase-admin/messaging'
 import { query } from '@/lib/db'
+import { isNotificationEnabled, type NotificationCategory } from '@/lib/notifications/preferences'
 
 let app: App | null = null
 
@@ -29,6 +30,8 @@ function getFirebaseApp(): App {
 
 type SendPushParams = {
   userId: string | number
+  /** Same categories used for email/SMS gating — see lib/notifications/preferences.ts. */
+  category: NotificationCategory
   title: string
   body: string
   /** FCM requires string values only — e.g. { orderId: '123' }. */
@@ -36,11 +39,17 @@ type SendPushParams = {
 }
 
 /**
- * Sends a push notification to every device registered for a user.
- * No-ops (logs and returns) if Firebase isn't configured yet or the user has
- * no registered devices, so callers don't need to guard for either case.
+ * Sends a push notification to every device registered for a user, gated by
+ * the same customer_notification_preferences the user's Settings page
+ * writes to (checked here exactly like every email/SMS send already does).
+ * No-ops (logs and returns) if Firebase isn't configured yet, the user has
+ * opted out of this category on the 'push' channel, or has no registered
+ * devices — callers don't need to guard for any of those.
  */
-export async function sendPushToUser({ userId, title, body, data }: SendPushParams): Promise<void> {
+export async function sendPushToUser({ userId, category, title, body, data }: SendPushParams): Promise<void> {
+  const enabled = await isNotificationEnabled(userId, category, 'push')
+  if (!enabled) return
+
   let firebaseApp: App
   try {
     firebaseApp = getFirebaseApp()

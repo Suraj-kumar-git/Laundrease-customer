@@ -187,6 +187,7 @@ export async function POST(req: NextRequest) {
     if (push) {
       sendPushToUser({
         userId: push.customerId,
+        category: 'orders',
         title: 'Payment successful',
         body: `Order #${push.orderNumber} is confirmed and on its way to pickup.`,
         data: { orderId: orderPublicId ?? '' },
