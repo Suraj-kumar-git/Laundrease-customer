@@ -588,6 +588,49 @@ function ClaimStatusModal({ claim, itemName, onClose }: {
   )
 }
 
+// ---- All reported items — consolidated list ------------------
+// The per-item badge (in Services & Items) is easy to miss once there's
+// more than a couple of items — this surfaces every claim on the order in
+// one place, each row opening the same ClaimStatusModal for full detail.
+function AllClaimsModal({ claims, items, onSelect, onClose }: {
+  claims: GarmentClaim[]
+  items: OrderItem[]
+  onSelect: (entry: { claim: GarmentClaim; itemName: string }) => void
+  onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-background p-5 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-bold text-foreground">Reported items ({claims.length})</h3>
+          <button onClick={onClose}><X className="h-5 w-5 text-muted-foreground"/></button>
+        </div>
+
+        <div className="space-y-2">
+          {claims.map(claim => {
+            const item = items.find(i => i.id === claim.order_item_id)
+            const itemName = item?.product_type_name ?? 'Item'
+            const meta = CLAIM_STATUS_META[claim.status] ?? { label: claim.status.replace(/_/g, ' '), cls: 'bg-muted text-foreground' }
+            return (
+              <button key={claim.id} onClick={() => onSelect({ claim, itemName })}
+                className="flex w-full items-center justify-between gap-3 rounded-xl border border-border/50 p-3 text-left transition-colors hover:bg-muted/50">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">{itemName}</p>
+                  <p className="text-xs text-muted-foreground capitalize">{claim.claim_type} · reported {formatDateTime(claim.created_at)}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.cls}`}>{meta.label}</span>
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground"/>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---- Report an issue modal (item-protection claim) -----------
 function ReportIssueModal({
   orderId, item, policy, onClose, onSuccess,
@@ -747,6 +790,7 @@ export default function OrderDetailPage() {
   const [itemProtectionPolicy, setItemProtectionPolicy] = useState<ItemProtectionPolicy | null>(null)
   const [reportIssueItem, setReportIssueItem] = useState<OrderItem | null>(null)
   const [viewClaim, setViewClaim] = useState<{ claim: GarmentClaim; itemName: string } | null>(null)
+  const [showAllClaims, setShowAllClaims] = useState(false)
 
   useEffect(() => {
     // Load fee labels from order_fee_config (once per page load)
@@ -946,23 +990,39 @@ export default function OrderDetailPage() {
               </div>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
-              <button
-                onClick={handleDownloadInvoice}
-                disabled={invoiceLoading}
-                title="Download invoice as PDF"
-                aria-label="Download invoice as PDF"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:justify-start"
-              >
-                {invoiceLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                {/* Short label on mobile, longer on desktop */}
-                <span>
-                  {invoiceLoading ? 'Generating Invoice…' : 'Download Invoice PDF'}
-                </span>
-              </button>
+              {/* No invoice for an order that never went through — nothing
+                  was actually billed/serviced. */}
+              {!isCancelled && (
+                <button
+                  onClick={handleDownloadInvoice}
+                  disabled={invoiceLoading}
+                  title="Download invoice as PDF"
+                  aria-label="Download invoice as PDF"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:justify-start"
+                >
+                  {invoiceLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  {/* Short label on mobile, longer on desktop */}
+                  <span>
+                    {invoiceLoading ? 'Generating Invoice…' : 'Download Invoice PDF'}
+                  </span>
+                </button>
+              )}
+
+              {claims.length > 0 && (
+                <button
+                  onClick={() => setShowAllClaims(true)}
+                  title="View reported items"
+                  aria-label="View reported items"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 shadow-sm transition-all hover:bg-amber-100 active:scale-95 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-400 dark:hover:bg-amber-950/50 sm:w-auto sm:justify-start"
+                >
+                  <ShieldAlert className="h-4 w-4" />
+                  <span>Reported Items ({claims.length})</span>
+                </button>
+              )}
 
               {order.can_cancel && (
                 <button
@@ -1060,55 +1120,59 @@ export default function OrderDetailPage() {
         )}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
-          {/* Pickup & Delivery schedule */}
-          <Section title="Schedule" icon={Calendar}>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl bg-muted/30 p-3">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Pickup</p>
-                <p className="text-sm font-semibold text-foreground">{formatDate(order.pickup_date)}</p>
-                {order.pickup_time_slot && (
-                  <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                    <Clock className="h-3 w-3" /> {order.pickup_time_slot}
-                  </p>
-                )}
-                {/* Reschedule button */}
-                {order.can_reschedule && (
-                  <button
-                    type="button"
-                    onClick={() => setShowReschedule(true)}
-                    className="mt-2 flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
-                  >
-                    <Edit2 className="h-3 w-3" /> Change date
-                  </button>
-                )}
+          {/* Pickup & Delivery schedule — meaningless once the order never
+              went through (cancelled/rejected/returned/failed), so hidden
+              alongside the progress tracker for those statuses. */}
+          {!isCancelled && (
+            <Section title="Schedule" icon={Calendar}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-muted/30 p-3">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Pickup</p>
+                  <p className="text-sm font-semibold text-foreground">{formatDate(order.pickup_date)}</p>
+                  {order.pickup_time_slot && (
+                    <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3" /> {order.pickup_time_slot}
+                    </p>
+                  )}
+                  {/* Reschedule button */}
+                  {order.can_reschedule && (
+                    <button
+                      type="button"
+                      onClick={() => setShowReschedule(true)}
+                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                    >
+                      <Edit2 className="h-3 w-3" /> Change date
+                    </button>
+                  )}
+                </div>
+                <div className="rounded-xl bg-muted/30 p-3">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Delivery</p>
+                  {order.delivered_at ? (
+                    <>
+                      <p className="text-sm font-semibold text-foreground">{formatDateTime(order.delivered_at)}</p>
+                      <p className="mt-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">Delivered</p>
+                    </>
+                  ) : order.delivery_date ? (
+                    <>
+                      <p className="text-sm font-semibold text-foreground">{formatDate(order.delivery_date)}</p>
+                      {order.delivery_time_slot && (
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock className="h-3 w-3" /> {order.delivery_time_slot}
+                        </p>
+                      )}
+                    </>
+                  ) : order.estimated_delivery_date ? (
+                    <>
+                      <p className="text-sm font-semibold text-foreground">{formatDate(order.estimated_delivery_date)}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">Estimated — exact time slot confirmed once out for delivery</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">To be scheduled</p>
+                  )}
+                </div>
               </div>
-              <div className="rounded-xl bg-muted/30 p-3">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Delivery</p>
-                {order.delivered_at ? (
-                  <>
-                    <p className="text-sm font-semibold text-foreground">{formatDateTime(order.delivered_at)}</p>
-                    <p className="mt-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">Delivered</p>
-                  </>
-                ) : order.delivery_date ? (
-                  <>
-                    <p className="text-sm font-semibold text-foreground">{formatDate(order.delivery_date)}</p>
-                    {order.delivery_time_slot && (
-                      <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="h-3 w-3" /> {order.delivery_time_slot}
-                      </p>
-                    )}
-                  </>
-                ) : order.estimated_delivery_date ? (
-                  <>
-                    <p className="text-sm font-semibold text-foreground">{formatDate(order.estimated_delivery_date)}</p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">Estimated — exact time slot confirmed once out for delivery</p>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">To be scheduled</p>
-                )}
-              </div>
-            </div>
-          </Section>
+            </Section>
+          )}
 
           {/* Addresses */}
           <Section title="Addresses" icon={MapPin}>
@@ -1164,7 +1228,7 @@ export default function OrderDetailPage() {
                   )}
                 </div>
               )}
-              {order.assignment_status === 'unassigned' && (
+              {!isCancelled && order.assignment_status === 'unassigned' && (
                 <div className="mt-3 flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 dark:bg-amber-950/30">
                   <Info className="h-4 w-4 shrink-0 text-amber-600" />
                   <p className="text-xs text-amber-700 dark:text-amber-400">Delivery partner will be assigned soon</p>
@@ -1188,10 +1252,14 @@ export default function OrderDetailPage() {
                           return new Date() <= deadline
                         })()
                       : false
+                    // Per-kg items are a whole weighed batch, not one
+                    // identifiable garment — no reliable way to verify a
+                    // damage/loss claim against a single piece within it.
                     const canReportIssue = itemProtectionPolicy?.is_active
                       && ['delivered', 'completed'].includes(order.status)
                       && withinWindow
                       && !claim
+                      && item.weight_kg == null
 
                     const claimMeta = claim
                       ? (CLAIM_STATUS_META[claim.status] ?? { label: claim.status.replace(/_/g, ' '), cls: 'bg-muted text-muted-foreground' })
@@ -1532,6 +1600,16 @@ export default function OrderDetailPage() {
           />
         )}
       </AnimatePresence>
+
+      {/* All reported items — consolidated list */}
+      {showAllClaims && (
+        <AllClaimsModal
+          claims={claims}
+          items={items}
+          onClose={() => setShowAllClaims(false)}
+          onSelect={entry => { setShowAllClaims(false); setViewClaim(entry) }}
+        />
+      )}
 
       {/* Claim status detail modal */}
       {viewClaim && (
