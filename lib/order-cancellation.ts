@@ -8,6 +8,7 @@
 import { transaction, queryOne } from '@/lib/db'
 import { getRefundBreakdown, initiateOriginalMethodRefund } from '@/lib/payment/refund'
 import { sendOrderCancelledEmail, sendProviderOrderCancelledEmail } from '@/lib/notifications/email'
+import { isNotificationEnabled } from '@/lib/notifications/preferences'
 import { CANCELLABLE_STATUSES } from '@/lib/order-status'
 
 export const AUTO_CANCEL_REASON_NOTE = 'Order automatically cancelled after 3 reschedules — pickup could not be completed on the scheduled date after multiple attempts'
@@ -167,7 +168,7 @@ export async function finalizeCancelSideEffects(
   try {
     const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL || 'http://localhost:3000'
 
-    if (result.customerEmail) {
+    if (result.customerEmail && await isNotificationEnabled(result.customerId, 'orders', 'email')) {
       const refundNote = result.refunded
         ? `₹${result.refundAmount.toFixed(2)} has been credited to your Laundrease wallet.`
         : result.refundToOriginal && !originalRefundError
