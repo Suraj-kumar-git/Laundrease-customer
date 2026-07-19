@@ -18,6 +18,19 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Deep-link bridge: OAuth (Google/Facebook) runs in a Custom
+                 Tab, which has its own cookie jar separate from this app's
+                 WebView. After it completes, the callback redirects to
+                 laundrease://oauth-complete?token=... to hand control back
+                 here, where the token is exchanged for a real session set
+                 inside the app's own WebView. See components/capacitor-oauth-bridge.tsx. -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="laundrease" android:host="oauth-complete" />
+            </intent-filter>
         </activity>
 
         <provider

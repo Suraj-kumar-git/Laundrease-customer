@@ -10,26 +10,38 @@ import { useEffect } from 'react'
 import { Capacitor } from '@capacitor/core'
 import { SplashScreen } from '@capacitor/splash-screen'
 
+const RETRY_INTERVAL_MS = 250
+const MAX_ATTEMPTS = 20 // 20 * 250ms = 5s ceiling before giving up
+
 export function CapacitorSplash() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return
 
     let cancelled = false
+    let attempts = 0
+    let timer: ReturnType<typeof setTimeout>
 
-    SplashScreen.hide().catch((err) => console.error('[splash] hide failed', err))
+    // launchAutoHide is off, so the splash stays up forever until hide()
+    // succeeds. The very first call can be lost (fired a tick before the
+    // native bridge finishes its startup handshake) — hide() is idempotent,
+    // so retrying fast and often gets it dismissed as soon as the bridge is
+    // actually ready, instead of waiting out a fixed multi-second delay.
+    const attempt = () => {
+      if (cancelled) return
+      attempts++
+      SplashScreen.hide().catch((err) => {
+        if (attempts === 1) console.error('[splash] hide failed, retrying', err)
+      })
+      if (attempts < MAX_ATTEMPTS) {
+        timer = setTimeout(attempt, RETRY_INTERVAL_MS)
+      }
+    }
 
-    // Safety net: launchAutoHide is off, so the splash stays up forever if
-    // this call is ever lost (e.g. fired a tick before the native bridge
-    // finishes its startup handshake) or silently rejects. A harmless
-    // retry a few seconds later means one dropped call can never strand
-    // the user on the splash screen indefinitely.
-    const retry = setTimeout(() => {
-      if (!cancelled) SplashScreen.hide().catch((err) => console.error('[splash] retry hide failed', err))
-    }, 4000)
+    attempt()
 
     return () => {
       cancelled = true
-      clearTimeout(retry)
+      clearTimeout(timer)
     }
   }, [])
 

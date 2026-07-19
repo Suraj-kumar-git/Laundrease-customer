@@ -18,6 +18,11 @@ export async function GET(req: NextRequest) {
     state: JSON.stringify({
       provider: 'facebook',
       returnTo: req.nextUrl.searchParams.get('returnTo') || '/customer/dashboard',
+      // Set when the Android app opened this in a Custom Tab (see
+      // components/capacitor-oauth-bridge.tsx) — the callback route uses
+      // this to bridge back into the app instead of setting cookies here,
+      // since a Custom Tab's cookies don't reach the app's own WebView.
+      platform: req.nextUrl.searchParams.get('platform') === 'app' ? 'app' : 'web',
     }),
   })
 

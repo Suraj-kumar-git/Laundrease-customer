@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import bcrypt from 'bcryptjs'
 import { SignJWT, jwtVerify } from 'jose'
 import crypto from 'crypto'
-import { queryOne } from '@/lib/db'
+import { query, queryOne } from '@/lib/db'
  
 // ============================================
 // PASSWORD UTILITIES
@@ -212,6 +212,46 @@ export async function setAuthCookies(
     maxAge: 7 * 24 * 60 * 60, // 7 days
     path: '/',
   })
+}
+
+/**
+* Creates a session row + JWTs and sets the auth cookies on the current
+* response — the shared tail end of every login path (password, OTP,
+* OAuth, and the OAuth exchange-token bridge) so session creation stays
+* in exactly one place.
+*/
+export async function createSessionAndSetCookies(
+  req: NextRequest,
+  params: { userId: string; email: string; role: string; refreshTokenExpiry?: string }
+): Promise<void> {
+  const refreshTokenExpiry = params.refreshTokenExpiry || process.env.REFRESH_TOKEN_EXPIRY || '7d'
+  const sessionId = generateSessionId()
+  const accessToken = await generateAccessToken({
+    userId: params.userId,
+    email: params.email,
+    role: params.role,
+    sessionId,
+    emailVerified: true,
+    phoneVerified: false,
+  })
+  const refreshToken = await generateRefreshToken(params.userId, sessionId, refreshTokenExpiry)
+
+  await query(
+    `INSERT INTO user_sessions (
+      user_id, session_id, refresh_token, expires_at, ip_address, user_agent
+    )
+    VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      params.userId,
+      sessionId,
+      refreshToken,
+      new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      getClientIP(req),
+      req.headers.get('user-agent') || 'unknown',
+    ]
+  )
+
+  await setAuthCookies(accessToken, refreshToken)
 }
  
 /**

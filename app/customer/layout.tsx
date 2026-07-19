@@ -20,6 +20,7 @@ import { UserMenuDropdown } from "@/components/header/user-menu-dropdown"
 import { HeaderWithCart } from "@/components/header/HeaderWithCart"
 import { MobileBottomNav } from "@/components/customer/MobileBottomNav"
 import { CapacitorPush } from "@/components/capacitor-push"
+import { CapacitorOAuthBridge } from "@/components/capacitor-oauth-bridge"
 import Script from "next/script"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -315,6 +316,7 @@ export default async function RootLayout({
             </div>
             <Toaster />
             <CapacitorPush />
+            <CapacitorOAuthBridge />
             </CartProvider>
           </AuthProvider>
         </ThemeProvider>

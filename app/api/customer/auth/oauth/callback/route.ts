@@ -1,13 +1,8 @@
 import { NextRequest } from 'next/server'
 import { redirect } from 'next/navigation'
+import crypto from 'crypto'
 import { query, queryOne, transaction } from '@/lib/db'
-import {
-  generateSessionId,
-  generateAccessToken,
-  generateRefreshToken,
-  setAuthCookies,
-  getClientIP,
-} from '@/lib/auth'
+import { createSessionAndSetCookies } from '@/lib/auth'
 
 async function exchangeGoogleCode(code: string) {
   const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
@@ -120,8 +115,9 @@ export async function GET(req: NextRequest) {
   }
 
   const state = JSON.parse(stateStr)
-  const { provider, returnTo } = state
+  const { provider, returnTo, platform } = state
   let jumpToDashboard = returnTo
+  const isNativeApp = platform === 'app'
 
   if (provider !== 'google' && provider !== 'facebook') {
     redirect('/customer/auth/login?error=invalid_provider')
@@ -137,8 +133,6 @@ export async function GET(req: NextRequest) {
     if (!oauthData.email) {
       redirect('/customer/auth/login?error=no_email')
     }
-
-    const clientIP = getClientIP(req)
 
     // Use transaction to handle user creation/login
     const result = await transaction(async (client) => {
@@ -260,42 +254,33 @@ export async function GET(req: NextRequest) {
       return { userId, user: user.rows[0], isNewUser }
     })
 
-    const refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRY || '7d'; //For oAuth login, session will be logged in for 7 days.
-    // Generate session and tokens
-    const sessionId = generateSessionId()
-    const accessToken = await generateAccessToken({
+    if (isNativeApp) {
+      // This request is running inside a Chrome Custom Tab, which has its
+      // own cookie jar separate from the app's WebView — setting cookies
+      // here wouldn't reach the app. Hand off via a short-lived, single-use
+      // token instead; the app's own WebView exchanges it for a real
+      // session (see app/api/customer/auth/oauth/exchange/route.ts).
+      const exchangeToken = crypto.randomBytes(32).toString('hex')
+      await query(
+        `INSERT INTO oauth_exchange_tokens (token, user_id, return_to, expires_at)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          exchangeToken,
+          result.userId,
+          jumpToDashboard || '/customer/dashboard',
+          new Date(Date.now() + 2 * 60 * 1000), // same-device, same-instant handoff — 2 minutes is generous
+        ]
+      )
+      redirect(`laundrease://oauth-complete?token=${exchangeToken}`)
+    }
+
+    const refreshTokenExpiry = process.env.REFRESH_TOKEN_EXPIRY || '7d' // For oAuth login, session will be logged in for 7 days.
+    await createSessionAndSetCookies(req, {
       userId: result.userId,
       email: oauthData.email,
       role: result.user?.role_name || 'customer',
-      sessionId,
-      emailVerified: true,
-      phoneVerified: false
+      refreshTokenExpiry,
     })
-    const refreshToken = await generateRefreshToken(result.userId, sessionId, refreshTokenExpiry)
-
-    // Store session
-    await query(
-      `INSERT INTO user_sessions (
-        user_id, 
-        session_id, 
-        refresh_token, 
-        expires_at, 
-        ip_address, 
-        user_agent
-      )
-      VALUES ($1, $2, $3, $4, $5, $6)`,
-      [
-        result.userId,
-        sessionId,
-        refreshToken,
-        new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-        clientIP,
-        req.headers.get('user-agent') || 'unknown',
-      ]
-    )
-
-    // Set cookies
-    await setAuthCookies(accessToken, refreshToken)
 
   } catch (error: any) {
     // redirect() throws internally (digest starts with 'NEXT_REDIRECT') so
