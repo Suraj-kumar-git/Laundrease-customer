@@ -21,6 +21,7 @@ import { HeaderWithCart } from "@/components/header/HeaderWithCart"
 import { MobileBottomNav } from "@/components/customer/MobileBottomNav"
 import { CapacitorPush } from "@/components/capacitor-push"
 import { CapacitorOAuthBridge } from "@/components/capacitor-oauth-bridge"
+import { CapacitorCameraPermission } from "@/components/capacitor-camera-permission"
 import Script from "next/script"
 
 const inter = Inter({ subsets: ["latin"] })
@@ -317,6 +318,7 @@ export default async function RootLayout({
             <Toaster />
             <CapacitorPush />
             <CapacitorOAuthBridge />
+            <CapacitorCameraPermission />
             </CartProvider>
           </AuthProvider>
         </ThemeProvider>

@@ -15,7 +15,6 @@ import { useAuth } from "@/components/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { SearchParamProvider } from "@/components/common/searchParamProvider"
-import { openOAuthProvider } from "@/lib/oauth-client"
 
 // ---- Password strength ---------------------------------------------------
 function passwordStrength(p: string): { score: 0 | 1 | 2 | 3 | 4; label: string; color: string } {
@@ -400,9 +399,10 @@ function PageContent() {
               <div className="h-px flex-1 bg-border" />
             </div>
 
-            {/* OAuth */}
+            {/* OAuth — temporarily disabled, see lib/oauth-client.ts and
+                app/api/customer/auth/oauth/** for the still-intact backend */}
             <div className="grid gap-3 sm:grid-cols-2">
-              <Button variant="outline" type="button" onClick={() => openOAuthProvider("google")}>
+              <Button variant="outline" type="button" disabled>
                 <svg className="mr-2 h-4 w-4" viewBox="0 0 24 24">
                   <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
                   <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
@@ -411,13 +411,16 @@ function PageContent() {
                 </svg>
                 Google
               </Button>
-              <Button variant="outline" type="button" onClick={() => openOAuthProvider("facebook")}>
+              <Button variant="outline" type="button" disabled>
                 <svg className="mr-2 h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
                   <path d="M22 12c0-5.523-4.477-10-10-10S2 6.477 2 12c0 4.991 3.657 9.128 8.438 9.878v-6.987h-2.54V12h2.54V9.797c0-2.506 1.492-3.89 3.777-3.89 1.094 0 2.238.195 2.238.195v2.46h-1.26c-1.243 0-1.63.771-1.63 1.562V12h2.773l-.443 2.89h-2.33v6.988C18.343 21.128 22 16.991 22 12z"/>
                 </svg>
                 Facebook
               </Button>
             </div>
+            <p className="mt-2 text-center text-xs text-muted-foreground">
+              Google &amp; Facebook sign-in coming soon
+            </p>
 
             <p className="mt-6 text-center text-sm text-muted-foreground">
               Already have an account?{" "}
