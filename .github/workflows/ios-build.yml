@@ -1,0 +1,88 @@
+name: iOS unsigned build
+
+# No Apple Developer Program account is used for this build. It produces an
+# UNSIGNED .ipa (CODE_SIGNING_ALLOWED=NO) — installing it on a real device
+# means running it through Sideloadly (or similar), which signs it locally
+# with a free Apple ID. That signature expires after 7 days and needs
+# re-sideloading; there is no permanent-install path without a paid account.
+#
+# This pipeline (xcodebuild -> unsigned .ipa -> Sideloadly) has not been
+# verified end-to-end. Expect the first few runs to need fixes.
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [dev-ios]
+    paths:
+      - 'ios/**'
+      - 'capacitor.config.ts'
+      - 'package.json'
+      - '.github/workflows/ios-build.yml'
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          # No package-lock.json in this repo (see .gitignore) — nothing to
+          # key an npm cache on, so caching is intentionally skipped.
+
+      - name: Show toolchain versions
+        run: |
+          node -v
+          npm -v
+          xcodebuild -version
+
+      - name: Install JS dependencies
+        run: npm install
+
+      - name: Sync Capacitor iOS project
+        run: npx cap sync ios
+
+      - name: Resolve Swift Package dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project ios/App/App.xcodeproj \
+            -scheme App
+
+      - name: Archive (unsigned)
+        run: |
+          xcodebuild archive \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Release \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES
+
+      - name: Package unsigned .ipa
+        run: |
+          set -e
+          ARCHIVE="$RUNNER_TEMP/App.xcarchive"
+          APP_PATH="$ARCHIVE/Products/Applications/App.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "::error::App.app not found at $APP_PATH — archive contents:"
+            find "$ARCHIVE" -maxdepth 4
+            exit 1
+          fi
+          PAYLOAD_DIR="$RUNNER_TEMP/Payload"
+          mkdir -p "$PAYLOAD_DIR"
+          cp -r "$APP_PATH" "$PAYLOAD_DIR/"
+          cd "$RUNNER_TEMP"
+          zip -r -y App-unsigned.ipa Payload
+          mkdir -p "${{ github.workspace }}/build-output"
+          mv App-unsigned.ipa "${{ github.workspace }}/build-output/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: laundrease-customer-ios-unsigned
+          path: build-output/App-unsigned.ipa
+          retention-days: 14
