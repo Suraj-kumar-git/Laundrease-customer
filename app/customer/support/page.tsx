@@ -13,11 +13,12 @@ import {
   CheckCircle2, Clock, ArrowLeft, Send, ChevronDown,
   ChevronLeft, ChevronRight, Paperclip, Loader2,
   FileText, ImageIcon, Film, AlertTriangle, Package,
-  LifeBuoy,
+  LifeBuoy, Camera,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { SearchParamProvider } from '@/components/common/searchParamProvider'
+import { useIsNativeApp, capturePhoto } from '@/lib/capacitor-photo'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -142,6 +143,7 @@ function NewTicketForm({
   lockedOrder?: { id: string; order_number: string } | null
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
+  const isNative = useIsNativeApp()
   const initialCat = lockedCategory ? meta.categories.find(c => c.code === lockedCategory) ?? null : null
   const [step,   setStep]   = useState<'category' | 'details'>(initialCat ? 'details' : 'category')
   const [selCat, setSelCat] = useState<Category | null>(initialCat)
@@ -166,6 +168,13 @@ function NewTicketForm({
       toAdd.push(f)
     }
     setFiles(prev => [...prev, ...toAdd])
+  }
+
+  async function takePhoto() {
+    if (files.length >= 5) { setFileError('Maximum 5 attachments per ticket.'); return }
+    setFileError('')
+    const photo = await capturePhoto()
+    if (photo) setFiles(prev => [...prev, photo])
   }
 
   async function submit() {
@@ -336,14 +345,20 @@ function NewTicketForm({
               </p>
             )}
             {files.length < 5 && (
-              <>
+              <div className={cn('grid gap-2', isNative && 'grid-cols-2')}>
                 <input ref={fileRef} type="file" multiple accept={ALLOWED_TYPES.join(',')} className="hidden"
                   onChange={e => addFiles(e.target.files)} />
                 <button type="button" onClick={() => fileRef.current?.click()}
                   className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border/70 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
                   <Paperclip className="h-3.5 w-3.5" /> Attach file
                 </button>
-              </>
+                {isNative && (
+                  <button type="button" onClick={takePhoto}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-border/70 px-3 py-2.5 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
+                    <Camera className="h-3.5 w-3.5" /> Take photo
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

@@ -3,6 +3,8 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
+import { Capacitor } from '@capacitor/core'
+import { Geolocation } from '@capacitor/geolocation'
 import {
   ArrowRight, ShieldCheck, ShieldAlert, Zap, Droplets, Calendar,
   Star, ChevronLeft, ChevronRight, MapPin, Loader2,
@@ -432,13 +434,32 @@ const BUBBLES = [
 ]
 
 // ---- Location hook -----------------------------------------------------------
+// On the web, navigator.geolocation triggers the browser's own permission
+// prompt directly. Inside the native app shell (WKWebView), that same API
+// isn't reliable for triggering iOS's native location dialog, so we go
+// through @capacitor/geolocation instead, which talks to CoreLocation
+// directly and is guaranteed to raise the system prompt (backed by
+// NSLocationWhenInUseUsageDescription in Info.plist).
 function useLocation() {
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null)
   const [denied, setDenied] = useState(false)
   const [asking, setAsking] = useState(false)
-  const request = useCallback(() => {
-    if (!navigator.geolocation) { setDenied(true); return }
+  const request = useCallback(async () => {
     setAsking(true)
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const perm = await Geolocation.requestPermissions()
+        if (perm.location === 'denied') { setDenied(true); setAsking(false); return }
+        const pos = await Geolocation.getCurrentPosition({ timeout: 8000 })
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setDenied(false)
+      } catch {
+        setDenied(true)
+      } finally {
+        setAsking(false)
+      }
+      return
+    }
+    if (!navigator.geolocation) { setDenied(true); setAsking(false); return }
     navigator.geolocation.getCurrentPosition(
       pos => { setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setDenied(false); setAsking(false) },
       ()  => { setDenied(true); setAsking(false) },

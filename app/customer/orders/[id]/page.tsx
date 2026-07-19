@@ -18,6 +18,7 @@ import { useToast } from '@/hooks/use-toast'
 import { launchGatewayCheckout } from '@/lib/payment-client'
 import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveProductIconSrc } from '@/lib/product-icons'
+import { useIsNativeApp, capturePhoto } from '@/lib/capacitor-photo'
 
 // ---- Types --------------------------------------------------
 interface OrderDetail {
@@ -638,6 +639,7 @@ function ReportIssueModal({
   orderId: string; item: OrderItem; policy: ItemProtectionPolicy
   onClose: () => void; onSuccess: () => void
 }) {
+  const isNative = useIsNativeApp()
   const [claimType, setClaimType] = useState<'damaged' | 'lost' | 'stolen'>('damaged')
   const [description, setDescription] = useState('')
   const [photos, setPhotos] = useState<File[]>([])
@@ -650,6 +652,15 @@ function ReportIssueModal({
     if (!incoming) return
     const toAdd = Array.from(incoming).slice(0, 5 - photos.length)
     setPhotos(prev => [...prev, ...toAdd])
+  }
+
+  // Camera-only on native — a live-capture-only requirement to deter
+  // customers filing claims with gallery/AI-generated fake images. No
+  // gallery/file-picker fallback is offered here on purpose.
+  async function takeClaimPhoto() {
+    if (photos.length >= 5) return
+    const photo = await capturePhoto()
+    if (photo) setPhotos(prev => [...prev, photo])
   }
 
   async function handleSubmit() {
@@ -734,11 +745,18 @@ function ReportIssueModal({
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Photos <span className="normal-case font-normal">(optional, up to 5 — strengthens your claim)</span>
           </label>
-          <label className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border/50 py-4 text-xs text-muted-foreground cursor-pointer hover:border-primary/50">
-            <Camera className="h-4 w-4"/> {photos.length > 0 ? `${photos.length} photo(s) selected` : 'Add photos'}
-            <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
-              onChange={e => addPhotos(e.target.files)} disabled={photos.length >= 5}/>
-          </label>
+          {isNative ? (
+            <button type="button" onClick={takeClaimPhoto} disabled={photos.length >= 5}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border/50 py-4 text-xs text-muted-foreground hover:border-primary/50 disabled:opacity-50">
+              <Camera className="h-4 w-4"/> {photos.length > 0 ? `${photos.length} photo(s) taken` : 'Take photo'}
+            </button>
+          ) : (
+            <label className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border/50 py-4 text-xs text-muted-foreground cursor-pointer hover:border-primary/50">
+              <Camera className="h-4 w-4"/> {photos.length > 0 ? `${photos.length} photo(s) selected` : 'Add photos'}
+              <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
+                onChange={e => addPhotos(e.target.files)} disabled={photos.length >= 5}/>
+            </label>
+          )}
         </div>
 
         {error && (
