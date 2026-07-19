@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Loader2, MapPin, Search, LocateFixed } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { loadScript } from '@/lib/payment-client'
+import { getCurrentCoords } from '@/lib/capacitor-geolocation'
 
 const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 
@@ -61,12 +62,7 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
   // Best-effort silent geolocation, used only to bias autocomplete results —
   // never blocks typing or shows a permission nag on its own.
   useEffect(() => {
-    if (!navigator.geolocation) return
-    navigator.geolocation.getCurrentPosition(
-      pos => setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => {},
-      { timeout: 4000 }
-    )
+    getCurrentCoords(4000).then(setUserCoords).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -116,17 +112,14 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
   }
 
   function useMyLocation() {
-    if (!navigator.geolocation) return
     setResolving(true)
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        setResolving(false)
+    getCurrentCoords()
+      .then(({ lat, lng }) => {
         setQuery('Current location')
-        onAreaSelected({ label: 'Current location', lat: pos.coords.latitude, lng: pos.coords.longitude })
-      },
-      () => setResolving(false),
-      { timeout: 8000 }
-    )
+        onAreaSelected({ label: 'Current location', lat, lng })
+      })
+      .catch(() => {})
+      .finally(() => setResolving(false))
   }
 
   function handleSubmit() {
