@@ -12,8 +12,24 @@ import { SplashScreen } from '@capacitor/splash-screen'
 
 export function CapacitorSplash() {
   useEffect(() => {
-    if (Capacitor.isNativePlatform()) {
-      SplashScreen.hide()
+    if (!Capacitor.isNativePlatform()) return
+
+    let cancelled = false
+
+    SplashScreen.hide().catch((err) => console.error('[splash] hide failed', err))
+
+    // Safety net: launchAutoHide is off, so the splash stays up forever if
+    // this call is ever lost (e.g. fired a tick before the native bridge
+    // finishes its startup handshake) or silently rejects. A harmless
+    // retry a few seconds later means one dropped call can never strand
+    // the user on the splash screen indefinitely.
+    const retry = setTimeout(() => {
+      if (!cancelled) SplashScreen.hide().catch((err) => console.error('[splash] retry hide failed', err))
+    }, 4000)
+
+    return () => {
+      cancelled = true
+      clearTimeout(retry)
     }
   }, [])
 
