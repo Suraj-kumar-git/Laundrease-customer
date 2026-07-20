@@ -61,7 +61,8 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGN_ENTITLEMENTS="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=YES
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            SWIFT_STRICT_CONCURRENCY=minimal
 
       - name: Package unsigned .ipa
         run: |
