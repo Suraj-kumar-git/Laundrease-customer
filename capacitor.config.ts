@@ -25,12 +25,6 @@ const config: CapacitorConfig = {
       // components/capacitor-splash.tsx.
       launchAutoHide: false,
       backgroundColor: '#ffffffff',
-      // Default is FIT_XY, which stretches the image to fill the screen
-      // non-uniformly (distorting a wide rectangular logo). CENTER_INSIDE
-      // scales it down to fit entirely on-screen preserving its aspect
-      // ratio — the whole logo stays visible and undistorted, with the
-      // matching white backgroundColor filling the padding around it.
-      androidScaleType: 'CENTER_INSIDE',
       showSpinner: true,
       spinnerColor: '#2563eb',
       androidSpinnerStyle: 'large',
