@@ -11,13 +11,14 @@ import {
   Receipt, CreditCard, Zap, CheckCircle, XCircle, Truck,
   ChevronRight, ChevronDown, Loader2, AlertCircle, Edit2, X,
   Phone, Shield, RefreshCw, Info,
-  Download, Ban, Camera, ShieldAlert,
+  Download, Ban, Camera, ShieldAlert, ImageIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { launchGatewayCheckout } from '@/lib/payment-client'
 import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveProductIconSrc } from '@/lib/product-icons'
+import { capturePhoto, useIsNativeApp } from '@/lib/capacitor-photo'
 
 // ---- Types --------------------------------------------------
 interface OrderDetail {
@@ -643,13 +644,19 @@ function ReportIssueModal({
   const [photos, setPhotos] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const isNativeApp = useIsNativeApp()
 
   const estimatedCap = Math.min(item.line_total * policy.multiplier, policy.max_cap_amount)
 
-  function addPhotos(incoming: FileList | null) {
+  function addPhotos(incoming: FileList | File[] | null) {
     if (!incoming) return
     const toAdd = Array.from(incoming).slice(0, 5 - photos.length)
     setPhotos(prev => [...prev, ...toAdd])
+  }
+
+  async function handleTakePhoto() {
+    const photo = await capturePhoto()
+    if (photo) addPhotos([photo])
   }
 
   async function handleSubmit() {
@@ -734,11 +741,23 @@ function ReportIssueModal({
           <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Photos <span className="normal-case font-normal">(optional, up to 5 — strengthens your claim)</span>
           </label>
-          <label className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border/50 py-4 text-xs text-muted-foreground cursor-pointer hover:border-primary/50">
-            <Camera className="h-4 w-4"/> {photos.length > 0 ? `${photos.length} photo(s) selected` : 'Add photos'}
-            <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
-              onChange={e => addPhotos(e.target.files)} disabled={photos.length >= 5}/>
-          </label>
+          {isNativeApp ? (
+            <>
+              <button type="button" onClick={handleTakePhoto} disabled={photos.length >= 5}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border/50 py-4 text-xs text-muted-foreground hover:border-primary/50 disabled:cursor-not-allowed disabled:opacity-50">
+                <Camera className="h-4 w-4"/> {photos.length > 0 ? `${photos.length} photo(s) taken` : 'Take photo'}
+              </button>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                Live camera photos only for claims, to help verify what happened.
+              </p>
+            </>
+          ) : (
+            <label className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border/50 py-4 text-xs text-muted-foreground cursor-pointer hover:border-primary/50">
+              <ImageIcon className="h-4 w-4"/> {photos.length > 0 ? `${photos.length} photo(s) selected` : 'Add photos'}
+              <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
+                onChange={e => addPhotos(e.target.files)} disabled={photos.length >= 5}/>
+            </label>
+          )}
         </div>
 
         {error && (

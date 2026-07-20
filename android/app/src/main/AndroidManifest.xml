@@ -49,4 +49,13 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Not required to install the app — plenty of Android devices/emulators have no camera -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- Powers the nearby-providers lookup on /customer (fetches the user's
+         location, then providers within 8km). No extra JS/native plugin
+         code needed beyond this declaration — Capacitor's WebView already
+         intercepts the standard navigator.geolocation permission prompt and
+         triggers the native runtime dialog for these automatically
+         (see BridgeWebChromeClient#onGeolocationPermissionsShowPrompt in
+         @capacitor/android's core source). -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 </manifest>

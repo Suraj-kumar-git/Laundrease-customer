@@ -16,7 +16,19 @@
     </style>
 
 
+    <!-- Android 12+ renders the launch splash via its own native SplashScreen
+         API before any of our code runs — it reads these specific attrs
+         directly, NOT a generic android:background (which is what caused
+         the image to appear as a small centered icon on a black background
+         instead of covering the screen: Android was falling back to
+         default black for the (unset) full-screen background, and treating
+         android:background as an icon-sized fallback instead).
+         Android 12+ constrains this "icon" to a small centered region no
+         matter what — that's a platform rule, not something we can expand —
+         so windowSplashScreenBackground (a solid color, this IS full-screen)
+         plus a properly icon-shaped image is the correct, supported combo. -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">#FFFFFF</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
     </style>
 </resources>
