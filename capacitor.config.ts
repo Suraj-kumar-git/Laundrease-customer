@@ -29,18 +29,17 @@ const config: CapacitorConfig = {
   ios: {
     contentInset: 'automatic',
   },
-  plugins: {
-    SplashScreen: {
-      launchShowDuration: 0,
-      launchAutoHide: false,
-      backgroundColor: '#ffffff',
-      showSpinner: false,
-    },
-    StatusBar: {
-      style: 'dark',
-      backgroundColor: '#ffffff',
-    },
-  },
+  // @capacitor/status-bar and @capacitor/splash-screen are not installed —
+  // their published Swift source (status-bar@8.0.3, splash-screen@8.0.2,
+  // including the latest nightly) fails to compile against the resolved
+  // Capacitor core (bridge.webView/viewController, PluginConfig.getString,
+  // CAPPluginCall.reject, and single-arg getInt/getBool all reported
+  // missing by the Swift compiler) — a real upstream incompatibility, not
+  // a version we could pin around. Status bar falls back to iOS's default
+  // (UIViewControllerBasedStatusBarAppearance, already set in Info.plist);
+  // the LaunchScreen storyboard still shows and self-dismisses on first
+  // frame per standard iOS behavior, just without an explicit JS-driven
+  // hide. Revisit once this is fixed upstream or can be debugged on a Mac.
 }
 
 export default config

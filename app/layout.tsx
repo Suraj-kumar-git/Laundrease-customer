@@ -1,7 +1,6 @@
 import type React from "react"
 import type { Metadata, Viewport } from "next"
 import '@/styles/globals.css'
-import { CapacitorSplash } from "@/components/capacitor-splash"
 
 // Wraps every role (customer, laundry, delivery, admin, support) — metadataBase
 // is needed here so relative OG/canonical URLs declared in role-specific
@@ -28,10 +27,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body>
-        <CapacitorSplash />
-        {children}
-      </body>
+      <body>{children}</body>
     </html>
   )
 }
