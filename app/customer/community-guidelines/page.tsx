@@ -10,6 +10,13 @@ export const metadata: Metadata = {
   title: 'Community Guidelines | Laundrease',
   description:
     'Read the Laundrease Community Guidelines — the standards of behaviour we expect from every customer, partner, and delivery agent on our platform.',
+  keywords: ['Laundrease community guidelines', 'Laundrease code of conduct'],
+  alternates: { canonical: '/customer/community-guidelines' },
+  openGraph: {
+    title: 'Community Guidelines | Laundrease', type: 'website', url: '/customer/community-guidelines',
+    description: 'The standards of behaviour we expect from every customer, partner, and delivery agent on our platform.',
+  },
+  twitter: { card: 'summary_large_image', title: 'Community Guidelines | Laundrease' },
 }
 
 // ---- Types --------------------------------------------------

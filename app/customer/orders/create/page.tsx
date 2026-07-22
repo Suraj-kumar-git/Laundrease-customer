@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/components/auth-provider'
 import { useToast } from '@/hooks/use-toast'
+import { useCart } from '@/components/cart-provider'
 
 import { AddressProviderStep } from './components/AddressProviderStep'
 import { ServiceSelectionStep } from './components/ServiceSelectionStep'
@@ -29,7 +30,9 @@ import { OrderConfirmation } from './components/OrderConfirmation'
 
 import { cn } from '@/lib/utils'
 import { Address, KgService, LaundryProvider, OrderFlowState, SelectedService, UnitProduct } from '@/types/order-types'
+import type { CartLineItem } from '@/types/pricing'
 import { SearchParamProvider } from '@/components/common/searchParamProvider'
+import { launchGatewayCheckout } from '@/lib/payment-client'
 
 const STEPS = [
   { number: 1, title: 'Address & Provider', icon: MapPin },
@@ -128,6 +131,28 @@ function ConfirmClearModal({
 
 // ---- Helpers ----------------------------------------------------------------
 
+// The wizard pushes service selections straight to the server cart (saveCartStep)
+// without going through the shared cart-provider context — so the header badge
+// must be told explicitly via syncFromServer, otherwise it only catches up once
+// the cart sheet is opened.
+function toCartLineItems(services: SelectedService[]): CartLineItem[] {
+  return services.map(s => ({
+    product_type_id:    s.product_type_id ?? 0,
+    product_type_name:  s.product_type_name,
+    pricing_model:      s.weight_kg > 0 ? 'per_kg' : 'per_unit',
+    icon:               s.icon,
+    service_id:         s.service_id,
+    service_name:       s.service_name,
+    unit_price:         s.unit_price,
+    mrp:                s.mrp,
+    quantity:           s.quantity,
+    weight_kg:          s.weight_kg,
+    is_express:         s.is_express,
+    express_multiplier: s.express_multiplier,
+    line_total:         s.line_total,
+  }))
+}
+
 // Restores OrderFlowState from cart API response
 function cartToFlowState(cartData: any, items: any[]): Partial<OrderFlowState> {
   const cart     = cartData.cart
@@ -145,6 +170,7 @@ function cartToFlowState(cartData: any, items: any[]): Partial<OrderFlowState> {
     quantity:          item.quantity,
     weight_kg:         item.weight_kg,
     unit_price:        item.unit_price,
+    mrp:               item.mrp,
     line_total:        item.line_total,
     is_express:        item.is_express,
     express_multiplier:item.express_multiplier,
@@ -167,8 +193,12 @@ function PageContent() {
   const router       = useRouter()
   const searchParams = useSearchParams()
   const resumeMode   = searchParams.get('resume') === '1'
+  // ?provider=<id> — set by the dashboard's "Providers near you" cards to
+  // auto-select that provider once step 1's provider list loads.
+  const preferredProviderId = Number(searchParams.get('provider')) || null
   const { user, isLoading: authLoading } = useAuth()
   const { toast } = useToast()
+  const { clear: clearGuestCart, syncFromServer } = useCart()
 
   const [state, setState] = useState<OrderFlowState & { draft_order_number?: string }>({
     step: 1, same_address: true, selected_services: [],
@@ -177,8 +207,54 @@ function PageContent() {
     per_kg_services: KgService[]; per_unit_products: UnitProduct[]
   }>({ per_kg_services: [], per_unit_products: [] })
 
-  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isSubmitting,       setIsSubmitting]       = useState(false)
+  const [gatewayRedirecting, setGatewayRedirecting] = useState(false)
   const [confirmed,    setConfirmed]    = useState(false)
+
+  // Ref so pageshow/popstate handlers always read the latest state without
+  // being re-registered on every render.
+  const gatewayStateRef = useRef<{ active: boolean; orderId: string | null }>({ active: false, orderId: null })
+  useEffect(() => {
+    gatewayStateRef.current = { active: gatewayRedirecting, orderId: (state as any).order_id ?? null }
+  }, [gatewayRedirecting, state])
+
+  // pageshow fires when the browser restores a bfcache snapshot (PayU/Cashfree
+  // redirect away then user presses back). Show the confirm dialog here too.
+  useEffect(() => {
+    const handlePageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted || !gatewayStateRef.current.active) return
+      const cancel = window.confirm('Are you sure you want to cancel the payment? You can retry or switch to Cash on Delivery.')
+      setGatewayRedirecting(false)
+      if (cancel) {
+        const { orderId } = gatewayStateRef.current
+        if (orderId) router.push(`/customer/orders/payment/failure?order_id=${orderId}`)
+      }
+      // "No" keeps them on the checkout page (can't navigate forward back to payment partner)
+    }
+    window.addEventListener('pageshow', handlePageShow)
+    return () => window.removeEventListener('pageshow', handlePageShow)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // popstate fires when the dummy history entry is popped (Razorpay modal case
+  // where the page never actually navigated away).
+  useEffect(() => {
+    if (!gatewayRedirecting) return
+    window.history.pushState({ gatewayRedirecting: true }, '')
+    const handlePopState = () => {
+      const cancel = window.confirm('Are you sure you want to cancel the payment? You can retry or switch to Cash on Delivery.')
+      if (cancel) {
+        setGatewayRedirecting(false)
+        const { orderId } = gatewayStateRef.current
+        if (orderId) router.push(`/customer/orders/payment/failure?order_id=${orderId}`)
+      } else {
+        window.history.pushState({ gatewayRedirecting: true }, '')
+      }
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gatewayRedirecting])
   const [cartLoading,  setCartLoading]  = useState(true)
 
   // Modal state
@@ -258,6 +334,7 @@ function PageContent() {
     try {
       await fetch('/api/customer/cart', { method: 'DELETE', credentials: 'include' })
       setState({ step: 1, same_address: true, selected_services: [] })
+      syncFromServer([])
       pendingCartData.current = null
     } catch { /* silent */ }
     finally { setClearingCart(false); setShowConfirmClear(false) }
@@ -299,12 +376,13 @@ function PageContent() {
 
   const handleStep2Complete = useCallback(async (services: SelectedService[]) => {
     setState(prev => ({ ...prev, step: 3, selected_services: services }))
+    syncFromServer(toCartLineItems(services))
     const draftNum = await saveCartStep(3, {
       services, isExpress: services.some(s => s.is_express),
       providerId: state.selected_provider?.id, addressId: state.pickup_address?.id,
     })
     if (draftNum) setState(prev => ({ ...prev, draft_order_number: draftNum }))
-  }, [saveCartStep, state.selected_provider?.id, state.pickup_address?.id])
+  }, [saveCartStep, state.selected_provider?.id, state.pickup_address?.id, syncFromServer])
 
   const handleStep3Complete = useCallback(async (date: string, timeSlot: string) => {
     setState(prev => ({ ...prev, step: 4, pickup_date: date, pickup_time_slot: timeSlot }))
@@ -317,51 +395,40 @@ function PageContent() {
 
   const handleExpressToggle = useCallback(async (isExpress: boolean, updatedServices: SelectedService[]) => {
     setState(prev => ({ ...prev, selected_services: updatedServices }))
+    syncFromServer(toCartLineItems(updatedServices))
     await saveCartStep(4, {
       services: updatedServices, isExpress,
       providerId: state.selected_provider?.id, addressId: state.pickup_address?.id,
     })
-  }, [saveCartStep, state.selected_provider?.id, state.pickup_address?.id])
+  }, [saveCartStep, state.selected_provider?.id, state.pickup_address?.id, syncFromServer])
   
-  const initiateOnlinePayment = async (orderId: number, orderNumber: string, amount: number) => {
-    const gwRes = await fetch('/api/customer/payments/create-order', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-      body: JSON.stringify({ amount, order_number: orderNumber,
-        customer_name: (user as any)?.name, customer_email: (user as any)?.email }),
+  // Order already exists in the DB at this point (created by handleSubmitOrder
+  // before this is ever called) — we just ask the order-bound /pay endpoint
+  // for gateway checkout data and launch whichever provider is active.
+  const initiateOnlinePayment = async (orderId: string, orderNumber: string) => {
+    const gwRes  = await fetch(`/api/customer/orders/${orderId}/pay`, {
+      method: 'POST', credentials: 'include',
     })
     const gwData = await gwRes.json()
-    if (!gwRes.ok || !gwData.success) throw new Error('Failed to initiate payment')
-    const { provider, gateway_order_id, client_key } = gwData.data
+    if (!gwRes.ok || !gwData.success) throw new Error(gwData.error || 'Failed to initiate payment')
 
-    if (provider === 'razorpay') {
-      await new Promise<void>((resolve, reject) => {
-        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-        // @ts-expect-error
-        const rzp = new window.Razorpay({
-          key: client_key, amount: Math.round(amount * 100), currency: 'INR',
-          order_id: gateway_order_id, name: 'Laundrease', description: `Order #${orderNumber}`,
-          prefill: { name: (user as any)?.name, email: (user as any)?.email },
-          theme: { color: '#7c3aed' },
-          handler: async (response: any) => {
-            try {
-              const vRes = await fetch('/api/customer/payments/verify', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-                body: JSON.stringify({
-                  order_id: orderId, gateway_order_id,
-                  gateway_payment_id: response.razorpay_payment_id,
-                  signature: response.razorpay_signature,
-                }),
-              })
-              const vData = await vRes.json()
-              if (vData.success && vData.data.verified) { setConfirmed(true); resolve() }
-              else reject(new Error('Payment verification failed'))
-            } catch (e) { reject(e) }
-          },
-          modal: { ondismiss: () => reject(new Error('Payment cancelled')) },
+    await launchGatewayCheckout(gwData.data, {
+      orderNumber,
+      customerName:  (user as any)?.full_name ?? (user as any)?.name,
+      customerEmail: (user as any)?.email,
+      onRazorpaySuccess: async (paymentId, signature, gatewayOrderId) => {
+        const vRes  = await fetch('/api/customer/payments/verify', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+          body: JSON.stringify({
+            order_id: orderId, gateway_order_id: gatewayOrderId,
+            gateway_payment_id: paymentId, signature,
+          }),
         })
-        rzp.open()
-      })
-    }
+        const vData = await vRes.json()
+        if (!vData.success || !vData.data.verified) throw new Error('Payment verification failed')
+        setConfirmed(true)
+      },
+    })
   }
 
   // ---- Submit order --------------------------------------------------------
@@ -402,11 +469,31 @@ function PageContent() {
       }))
 
       const isCodBased = paymentMethod === 'cod' || paymentMethod.endsWith('+cod')
-      if (result.data.payment_required && !result.data.payment_fully_covered && !isCodBased) {
-        await initiateOnlinePayment(
-          result.data.order_id, result.data.order_number,
-          result.data.remaining_amount ?? result.data.total_amount
-        )
+      const needsGateway = result.data.payment_required && !result.data.payment_fully_covered && !isCodBased
+
+      if (!needsGateway) {
+        // COD or fully wallet-covered — the order is final right now (the
+        // server cart was already cleared by the API for this case), so
+        // wipe the guest/local cart (localStorage + header badge) too.
+        clearGuestCart()
+      }
+      // For an online payment, the cart deliberately stays put — both the
+      // server cart and this local one — until the gateway callback actually
+      // confirms payment (cleared on /customer/orders/payment/success), so a
+      // failed/abandoned payment leaves checkout retryable with items intact.
+
+      if (needsGateway) {
+        // The order already exists at this point — if the gateway launch
+        // fails or the user dismisses it, send them to the failure page
+        // (Retry Payment / Continue with COD / Cancel) instead of just a toast.
+        try {
+          setGatewayRedirecting(true)
+          await initiateOnlinePayment(result.data.order_id, result.data.order_number)
+        } catch (gatewayErr: any) {
+          setGatewayRedirecting(false)
+          router.push(`/customer/orders/payment/failure?order_id=${result.data.order_id}`)
+          return
+        }
       } else {
         setConfirmed(true)
       }
@@ -415,7 +502,7 @@ function PageContent() {
     } finally {
       setIsSubmitting(false)
     }
-  }, [state, user, toast])
+  }, [state, user, toast, router])
 
   const handleBack = () => {
     if (state.step > 1) setState(prev => ({ ...prev, step: (prev.step - 1) as any }))
@@ -433,10 +520,44 @@ function PageContent() {
 
   return (
     <>
+      {/* Gateway redirect overlay — shown while browser is loading the payment page */}
+      {gatewayRedirecting && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-background/90 backdrop-blur-sm">
+          <div className="relative flex items-center justify-center">
+            <div className="h-16 w-16 rounded-full border-4 border-primary/20"/>
+            <div className="absolute h-16 w-16 animate-spin rounded-full border-4 border-transparent border-t-primary"/>
+          </div>
+          <div className="text-center space-y-1.5 px-6 max-w-xs">
+            <p className="text-base font-semibold text-foreground">Connecting to payment partner…</p>
+            <p className="text-sm text-muted-foreground">You will be redirected to our secure payment page shortly. Please do not close or refresh this tab.</p>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs text-muted-foreground shadow-sm">
+            <svg className="h-3.5 w-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            256-bit SSL encrypted &amp; secure
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const cancel = window.confirm('Are you sure you want to cancel the payment? You can retry or switch to Cash on Delivery.')
+              if (cancel) {
+                setGatewayRedirecting(false)
+                const orderId = (state as any).order_id
+                if (orderId) router.push(`/customer/orders/payment/failure?order_id=${orderId}`)
+              }
+            }}
+            className="mt-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors"
+          >
+            Cancel payment
+          </button>
+        </div>
+      )}
+
       <div className="min-h-screen bg-muted/20">
         {/* Step header */}
         <div className="sticky top-0 z-20 border-b border-border/50 bg-background/95 backdrop-blur">
-          <div className="container mx-auto flex h-14 max-w-4xl items-center justify-between gap-4 px-4">
+          <div className="container mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
             <button type="button" onClick={handleBack}
               className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
               <ArrowLeft className="h-4 w-4" />
@@ -484,7 +605,7 @@ function PageContent() {
           </div>
         </div>
 
-        <div className="container mx-auto max-w-4xl px-4 py-6 sm:py-8">
+        <div className="container mx-auto max-w-6xl px-4 py-6 sm:py-8">
           <div className="mb-6">
             <h1 className="text-xl font-bold text-foreground sm:text-2xl">
               {state.step === 1 && 'Select Address & Provider'}
@@ -504,6 +625,7 @@ function PageContent() {
                 <AddressProviderStep
                   initialAddress={state.pickup_address}
                   initialProvider={state.selected_provider}
+                  preferredProviderId={preferredProviderId}
                   onComplete={handleStep1Complete}
                 />
               )}
@@ -516,7 +638,15 @@ function PageContent() {
                 />
               )}
               {state.step === 3 && state.selected_provider && (
-                <SchedulePickup provider={state.selected_provider} onSelect={handleStep3Complete} />
+                <SchedulePickup
+                  provider={state.selected_provider}
+                  pickupAddress={state.pickup_address}
+                  onSelect={handleStep3Complete}
+                  initialDate={state.pickup_date ?? undefined}
+                  initialTimeSlot={state.pickup_time_slot ?? undefined}
+                  cartItemCount={state.selected_services.length}
+                  cartSubtotal={state.selected_services.reduce((s, i) => s + i.line_total, 0)}
+                />
               )}
               {state.step === 4 && (
                 <CheckoutStep
@@ -524,6 +654,7 @@ function PageContent() {
                   onCouponApply={coupon => setState(prev => ({ ...prev, applied_coupon: coupon ?? undefined }))}
                   onSpecialInstructions={val => setState(prev => ({ ...prev, special_instructions: val }))}
                   onExpressToggle={handleExpressToggle}
+                  onEditServices={() => setState(prev => ({ ...prev, step: 2 }))}
                   onSubmit={handleSubmitOrder}
                   isSubmitting={isSubmitting}
                 />

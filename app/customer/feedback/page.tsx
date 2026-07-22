@@ -1,12 +1,13 @@
 'use client'
 // app/customer/feedback/page.tsx
 // Platform testimonial submission form.
-// Fields: star rating, recommendation score (drag 1-10), comment, profession (optional),
-//         is_featured toggle, submit → POST /api/customer/testimonials
+// One customer can have at most one piece of feedback — this page fetches
+// it on load and prefills the form so they can edit/update or delete it,
+// rather than ever ending up with multiple submissions.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Star, Send, CheckCircle2, Loader2, Sparkles } from 'lucide-react'
+import { ArrowLeft, Star, Send, CheckCircle2, Loader2, Sparkles, Trash2, Pencil } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 
@@ -22,6 +23,16 @@ const NPS_LABELS: Record<number, { text: string; color: string }> = {
   8:  { text: "Happy to recommend",               color: 'text-green-500'  },
   9:  { text: "Would strongly recommend",         color: 'text-green-600'  },
   10: { text: "Absolutely love it — 10/10!",      color: 'text-emerald-600'},
+}
+
+interface Testimonial {
+  id: number
+  content: string
+  rating: number
+  role: string | null
+  is_featured: boolean
+  is_active: boolean
+  recommendation_score: number | null
 }
 
 // ---- Star picker -------------------------------------------------------------
@@ -103,25 +114,80 @@ function NPSSlider({ value, onChange }: { value: number; onChange: (v: number) =
   )
 }
 
+// ---- Delete confirm dialog ----------------------------------------------------
+function ConfirmDeleteDialog({ onConfirm, onCancel, loading }: {
+  onConfirm: () => void; onCancel: () => void; loading: boolean
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div onClick={onCancel} className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <div className="relative w-full max-w-sm rounded-2xl bg-background p-5 shadow-2xl">
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+          <Trash2 className="h-5 w-5 text-destructive" />
+        </div>
+        <h3 className="mb-2 text-base font-bold text-foreground">Delete your feedback?</h3>
+        <p className="mb-5 text-sm text-muted-foreground">
+          This will permanently remove your feedback. You can submit new feedback afterwards.
+        </p>
+        <div className="flex gap-3">
+          <button type="button" onClick={onCancel}
+            className="flex-1 rounded-xl border border-border/50 py-3 text-sm font-medium hover:bg-muted">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} disabled={loading}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-destructive py-3 text-sm font-semibold text-destructive-foreground disabled:opacity-50 hover:bg-destructive/90">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ---- Page -------------------------------------------------------------------
 export default function FeedbackPage() {
   const { toast } = useToast()
+  const [loadingExisting,     setLoadingExisting]    = useState(true)
+  const [existingId,          setExistingId]         = useState<number | null>(null)
   const [rating,              setRating]             = useState(0)
   const [recommendationScore, setRecommendationScore]= useState(0)
   const [content,             setContent]            = useState('')
   const [profession,          setProfession]         = useState('')
   const [isFeaturedRequest,   setIsFeaturedRequest]  = useState(false)
   const [saving,              setSaving]             = useState(false)
+  const [deleting,            setDeleting]           = useState(false)
+  const [confirmDelete,       setConfirmDelete]      = useState(false)
   const [done,                setDone]               = useState(false)
 
+  const isEditing = existingId !== null
   const isValid = rating > 0 && content.trim().length >= 20 && recommendationScore > 0
+
+  // Load the customer's own feedback (if any) so the form is prefilled.
+  useEffect(() => {
+    fetch('/api/customer/testimonials', { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => {
+        if (j.success && j.data.testimonial) {
+          const t: Testimonial = j.data.testimonial
+          setExistingId(t.id)
+          setRating(t.rating)
+          setRecommendationScore(t.recommendation_score ?? 0)
+          setContent(t.content)
+          setProfession(t.role ?? '')
+          setIsFeaturedRequest(t.is_featured)
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingExisting(false))
+  }, [])
 
   const handleSubmit = async () => {
     if (!isValid) return
     setSaving(true)
     try {
       const res  = await fetch('/api/customer/testimonials', {
-        method:  'POST',
+        method:  isEditing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
@@ -134,12 +200,39 @@ export default function FeedbackPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error ?? 'Failed')
+      if (!isEditing) setExistingId(json.data.testimonial_id)
       setDone(true)
     } catch (err: any) {
       toast({ title: 'Submission failed', description: err.message, variant: 'destructive' })
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      const res  = await fetch('/api/customer/testimonials', { method: 'DELETE', credentials: 'include' })
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error ?? 'Failed')
+      setExistingId(null)
+      setRating(0); setRecommendationScore(0); setContent(''); setProfession(''); setIsFeaturedRequest(false)
+      setDone(false)
+      setConfirmDelete(false)
+      toast({ title: 'Feedback deleted', description: 'You can submit new feedback any time.' })
+    } catch (err: any) {
+      toast({ title: 'Delete failed', description: err.message, variant: 'destructive' })
+    } finally {
+      setDeleting(false)
+    }
+  }
+
+  if (loadingExisting) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center">
+        <Loader2 className="h-7 w-7 animate-spin text-primary" />
+      </div>
+    )
   }
 
   // ---- Success state --------------------------------------------------------
@@ -151,7 +244,7 @@ export default function FeedbackPage() {
         </div>
         <h1 className="text-2xl font-bold text-foreground">Thank You! 🙌</h1>
         <p className="mt-3 text-muted-foreground leading-relaxed">
-          Your feedback has been submitted and is pending review.
+          Your feedback has been {isEditing ? 'updated' : 'submitted'} and is pending review.
           {isFeaturedRequest && ' If approved, it may appear on our app for others to see.'}
         </p>
         <div className="mt-8 flex flex-col items-center gap-3">
@@ -159,13 +252,18 @@ export default function FeedbackPage() {
             className="flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
             Back to Dashboard
           </Link>
-          <button type="button" onClick={() => {
-            setDone(false); setRating(0); setRecommendationScore(0)
-            setContent(''); setProfession(''); setIsFeaturedRequest(false)
-          }} className="text-sm text-muted-foreground hover:text-foreground hover:underline">
-            Submit another response
+          <button type="button" onClick={() => setDone(false)}
+            className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:underline">
+            <Pencil className="h-3.5 w-3.5" /> Edit my feedback
+          </button>
+          <button type="button" onClick={() => setConfirmDelete(true)}
+            className="flex items-center gap-1.5 text-sm text-destructive/80 hover:text-destructive hover:underline">
+            <Trash2 className="h-3.5 w-3.5" /> Delete my feedback
           </button>
         </div>
+        {confirmDelete && (
+          <ConfirmDeleteDialog onConfirm={handleDelete} onCancel={() => setConfirmDelete(false)} loading={deleting} />
+        )}
       </div>
     )
   }
@@ -180,11 +278,23 @@ export default function FeedbackPage() {
       </Link>
 
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-foreground">Share Your Experience</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Your honest feedback helps us improve and helps others discover Laundrease.
-        </p>
+      <div className="mb-8 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">
+            {isEditing ? 'Edit Your Feedback' : 'Share Your Experience'}
+          </h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {isEditing
+              ? 'You can update or delete your feedback any time. Editing sends it back for review.'
+              : 'Your honest feedback helps us improve and helps others discover Laundrease.'}
+          </p>
+        </div>
+        {isEditing && (
+          <button type="button" onClick={() => setConfirmDelete(true)}
+            className="flex shrink-0 items-center gap-1.5 rounded-xl border border-destructive/30 px-3 py-2 text-xs font-medium text-destructive hover:bg-destructive/10">
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </button>
+        )}
       </div>
 
       <div className="space-y-6">
@@ -294,8 +404,8 @@ export default function FeedbackPage() {
           className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-4 text-sm font-bold text-primary-foreground shadow-md shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-50"
         >
           {saving
-            ? <><Loader2 className="h-4 w-4 animate-spin" /> Submitting…</>
-            : <><Send className="h-4 w-4" /> Submit Feedback</>}
+            ? <><Loader2 className="h-4 w-4 animate-spin" /> {isEditing ? 'Updating…' : 'Submitting…'}</>
+            : <><Send className="h-4 w-4" /> {isEditing ? 'Update Feedback' : 'Submit Feedback'}</>}
         </button>
 
         {!isValid && (
@@ -306,6 +416,10 @@ export default function FeedbackPage() {
           </p>
         )}
       </div>
+
+      {confirmDelete && (
+        <ConfirmDeleteDialog onConfirm={handleDelete} onCancel={() => setConfirmDelete(false)} loading={deleting} />
+      )}
     </div>
   )
 }

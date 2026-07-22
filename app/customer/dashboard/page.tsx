@@ -25,7 +25,7 @@ interface Address {
 }
 interface StatusHistoryItem { status: string; notes: string | null; location: string | null; timestamp: string }
 interface ActiveOrder {
-  id: number; orderNumber: string; status: string; pickupAddress: string
+  id: string; orderNumber: string; status: string; pickupAddress: string
   deliveryAddress: string; pickupDate: string; pickupTimeSlot: string | null
   deliveryDate: string | null; deliveryTimeSlot: string | null; totalAmount: number
   isExpress: boolean; laundryName: string | null; createdAt: string; updatedAt: string
@@ -65,15 +65,34 @@ const ORDER_STEPS = [
   { key: 'delivered',        label: 'Delivered',        icon: CheckCircle2 },
 ]
 
+// Real order statuses → position on the 7-step visual timeline. The stepper's
+// visual steps are coarser than the DB statuses (e.g. assigned/out_for_pickup
+// both sit at "Confirmed" — the pickup hasn't happened yet).
+const STATUS_TO_STEP: Record<string, number> = {
+  pending: 0,
+  confirmed: 1, assigned_for_pickup: 1, out_for_pickup: 1,
+  picked_up: 2,
+  at_laundry: 3, processing: 3,
+  ready_for_delivery: 4, ready: 4,
+  out_for_delivery: 5,
+  delivered: 6,
+}
+
 const STATUS_META: Record<string, { label: string; color: string }> = {
-  pending:          { label: 'Order Placed',     color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400' },
-  confirmed:        { label: 'Confirmed',        color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400' },
-  picked_up:        { label: 'Picked Up',        color: 'text-violet-600 bg-violet-50 dark:bg-violet-950/40 dark:text-violet-400' },
-  processing:      { label: 'In Progress',      color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 dark:text-indigo-400' },
-  ready:            { label: 'Ready',            color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400' },
-  out_for_delivery: { label: 'Out for Delivery', color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/40 dark:text-orange-400' },
-  delivered:        { label: 'Delivered',        color: 'text-green-600 bg-green-50 dark:bg-green-950/40 dark:text-green-400' },
-  cancelled:        { label: 'Cancelled',        color: 'text-red-600 bg-red-50 dark:bg-red-950/40 dark:text-red-400' },
+  pending:             { label: 'Order Placed',        color: 'text-amber-600 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-400' },
+  confirmed:           { label: 'Confirmed',           color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400' },
+  assigned_for_pickup: { label: 'Pickup Assigned',     color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400' },
+  out_for_pickup:      { label: 'Out for Pickup',      color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400' },
+  picked_up:           { label: 'Picked Up',           color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400' },
+  at_laundry:          { label: 'At the Laundry',      color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 dark:text-indigo-400' },
+  processing:          { label: 'In Progress',         color: 'text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 dark:text-indigo-400' },
+  ready_for_delivery:  { label: 'Ready for Delivery',  color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400' },
+  ready:               { label: 'Ready',               color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400' },
+  out_for_delivery:    { label: 'Out for Delivery',    color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/40 dark:text-orange-400' },
+  delivered:           { label: 'Delivered',           color: 'text-green-600 bg-green-50 dark:bg-green-950/40 dark:text-green-400' },
+  cancelled:           { label: 'Cancelled',           color: 'text-red-600 bg-red-50 dark:bg-red-950/40 dark:text-red-400' },
+  rejected:            { label: 'Not Confirmed',       color: 'text-red-600 bg-red-50 dark:bg-red-950/40 dark:text-red-400' },
+  failed:              { label: 'Failed',              color: 'text-red-600 bg-red-50 dark:bg-red-950/40 dark:text-red-400' },
 }
 
 const LOYALTY_LABELS: Record<string, string> = {
@@ -202,7 +221,7 @@ function LoyaltyModal({ open, onClose, currentPoints, onRedeemed }: {
             <p className="text-muted-foreground">Earn <span className="font-semibold text-foreground">1% of order value</span> as points after every completed order</p>
           </div>
           <div className="flex items-start gap-2.5 text-sm">
-            <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-violet-500" />
+            <Wallet className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" />
             <p className="text-muted-foreground">Convert <span className="font-semibold text-foreground">100+ points to wallet</span> — 1 point = ₹1</p>
           </div>
         </div>
@@ -292,7 +311,7 @@ function WalletModal({ open, onClose, balance }: { open: boolean; onClose: () =>
     <Modal open={open} onClose={onClose} title="My Wallet">
       <div className="p-5 space-y-5">
         {/* Balance card */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-violet-600 to-purple-700 p-5 text-white">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-5 text-white">
           <div className="pointer-events-none absolute -right-6 -top-6 h-24 w-24 rounded-full bg-white/10" />
           <p className="text-sm font-medium text-white/80">Available Balance</p>
           <p className="mt-1 text-4xl font-black">{formatINR(balance)}</p>
@@ -415,7 +434,9 @@ function AddressDropdown({ addresses, selectedId, onSelect }: {
 // ---- Order Progress Timeline (unchanged) --------------------
 
 function OrderTimeline({ order }: { order: ActiveOrder }) {
-  const currentIndex = ORDER_STEPS.findIndex(s => s.key === order.status)
+  // Map the real DB status onto the visual steps — falls back to key lookup
+  // for safety, though STATUS_TO_STEP covers every known status.
+  const currentIndex = STATUS_TO_STEP[order.status] ?? ORDER_STEPS.findIndex(s => s.key === order.status)
   return (
     <div>
       <div className="relative mb-6">
@@ -425,6 +446,9 @@ function OrderTimeline({ order }: { order: ActiveOrder }) {
         <div className="relative flex justify-between">
           {ORDER_STEPS.map((step, i) => {
             const done = i <= currentIndex; const current = i === currentIndex; const Icon = step.icon
+            // On mobile only the current step and its neighbours get a label —
+            // seven labels side by side collide on narrow screens. sm+ shows all.
+            const showLabelOnMobile = Math.abs(i - currentIndex) <= 1
             return (
               <div key={step.key} className="flex flex-col items-center gap-1.5">
                 <div className={cn('relative z-10 flex h-8 w-8 items-center justify-center rounded-full border-2 transition-all duration-300',
@@ -432,7 +456,9 @@ function OrderTimeline({ order }: { order: ActiveOrder }) {
                   current && 'ring-4 ring-primary/20 scale-110')}>
                   <Icon className="h-3.5 w-3.5" />
                 </div>
-                <span className={cn('text-[10px] text-center leading-tight max-w-14', done ? 'font-semibold text-foreground' : 'text-muted-foreground')}>
+                <span className={cn('text-[10px] text-center leading-tight max-w-14',
+                  done ? 'font-semibold text-foreground' : 'text-muted-foreground',
+                  showLabelOnMobile ? 'block' : 'hidden sm:block')}>
                   {step.label}
                 </span>
               </div>
@@ -469,12 +495,12 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
   const handleCopy = async () => { await navigator.clipboard.writeText(coupon.code); setCopied(true); setTimeout(() => setCopied(false), 2000) }
   const discountLabel = coupon.discountType === 'percent' ? `${coupon.discountValue}% OFF` : `₹${coupon.discountValue} OFF`
   return (
-    <div className={cn('relative overflow-hidden rounded-xl border p-4',
-      coupon.isPersonal ? 'border-primary/30 bg-primary/5' : 'border-dashed border-border/60 bg-card')}>
+    <div className={cn('relative overflow-hidden rounded-xl border p-4 bg-primary/5',
+      coupon.isPersonal ? 'border-primary/30' : 'border-dashed border-border/60 bg-card')}>
       <div className="mb-3 flex items-start justify-between gap-2">
         <div>
-          <div className={cn('mb-1 inline-block rounded-lg px-2.5 py-1 text-sm font-bold',
-            coupon.isPersonal ? 'bg-primary text-primary-foreground' : 'bg-foreground text-background')}>
+          <div className={cn('mb-1 inline-block rounded-lg px-2.5 py-1 text-sm font-bold bg-primary',
+            coupon.isPersonal ? 'text-primary-foreground' : 'text-background')}>
             {discountLabel}
           </div>
           <p className="text-sm font-semibold text-foreground leading-tight">{coupon.name}</p>
@@ -500,6 +526,190 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
   )
 }
 
+// ---- Providers near you -------------------------------------
+// Horizontal scroll of provider cards for the selected address's pincode —
+// same public search endpoint the order flow's step 1 uses. "Create order"
+// deep-links into the flow with that provider pre-selected (?provider=).
+
+interface NearbyProvider {
+  id: number; business_name: string; city: string
+  rating: number; rating_count: number; is_verified: boolean
+  distance?: number
+}
+
+function ProvidersNearYou({ postalCode }: { postalCode: string | null }) {
+  const [providers, setProviders] = useState<NearbyProvider[]>([])
+  const [loading,   setLoading]   = useState(false)
+
+  useEffect(() => {
+    if (!postalCode) { setProviders([]); return }
+    let cancelled = false
+    setLoading(true)
+    fetch(`/api/customer/laundry-providers/search?location=${postalCode}`)
+      .then(r => r.json())
+      .then(j => { if (!cancelled) setProviders(j.success ? (j.data?.providers ?? []) : []) })
+      .catch(() => { if (!cancelled) setProviders([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [postalCode])
+
+  if (!postalCode || (!loading && providers.length === 0)) return null
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+      className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
+      <div className="mb-4 flex items-center gap-2">
+        <MapPin className="h-4 w-4 text-primary" />
+        <h2 className="text-sm font-semibold text-foreground">Providers near you</h2>
+      </div>
+      {loading ? (
+        <div className="flex gap-3 overflow-hidden">
+          {[1, 2, 3].map(i => <div key={i} className="h-32 w-52 shrink-0 animate-pulse rounded-xl bg-muted" />)}
+        </div>
+      ) : (
+        <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {providers.map(p => (
+            <div key={p.id} className="flex w-52 shrink-0 flex-col rounded-xl border border-border/50 bg-background p-3.5">
+              <div className="flex items-start gap-2.5">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary">
+                  {p.business_name.charAt(0)}
+                </div>
+                <div className="min-w-0">
+                  <p className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">{p.business_name}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">{p.city}</p>
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                {Number(p.rating) > 0 && (
+                  <span className="flex items-center gap-0.5 font-medium text-foreground">
+                    <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                    {Number(p.rating).toFixed(1)}
+                    {p.rating_count > 0 && <span className="font-normal text-muted-foreground">({p.rating_count})</span>}
+                  </span>
+                )}
+                {p.distance != null && <span>{Number(p.distance).toFixed(1)} km</span>}
+                {p.is_verified && (
+                  <span className="flex items-center gap-0.5 text-green-600"><ShieldCheck className="h-3 w-3" /> Verified</span>
+                )}
+              </div>
+              <Link href={`/customer/orders/create?provider=${p.id}`}
+                className="mt-3 flex items-center justify-center gap-1.5 rounded-lg bg-primary/10 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground">
+                Create order <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+          ))}
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
+// ---- Book again ---------------------------------------------
+// Last delivered order with a one-tap path back into the order flow with the
+// same provider pre-selected. Provider id isn't in the list API's payload, so
+// it's fetched lazily from the order-detail endpoint on tap — both are
+// existing endpoints, nothing server-side changed.
+
+interface LastOrder {
+  id: string; order_number: string; created_at: string
+  item_count: number; total_amount: number; provider_name: string | null
+}
+
+function BookAgain() {
+  const router = useRouter()
+  const [order,      setOrder]      = useState<LastOrder | null>(null)
+  const [navigating, setNavigating] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/customer/orders?status=delivered&limit=1', { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j.success && j.data.orders?.length > 0) setOrder(j.data.orders[0]) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  if (!order) return null
+
+  const handleBookAgain = async () => {
+    setNavigating(true)
+    try {
+      const res  = await fetch(`/api/customer/orders/${order.id}`, { credentials: 'include' })
+      const json = await res.json()
+      const providerId = json.success ? json.data?.provider?.id : null
+      router.push(providerId ? `/customer/orders/create?provider=${providerId}` : '/customer/orders/create')
+    } catch {
+      router.push('/customer/orders/create')
+    }
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }}
+      className="flex items-center justify-between gap-3 rounded-2xl border border-border/50 bg-card p-4 shadow-sm">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <RefreshCw className="h-5 w-5" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">Book again</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {order.item_count} item{order.item_count !== 1 ? 's' : ''}
+            {order.provider_name && ` with ${order.provider_name}`}
+            {' · '}{formatINR(order.total_amount)}
+          </p>
+        </div>
+      </div>
+      <button type="button" onClick={handleBookAgain} disabled={navigating}
+        className="flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-60">
+        {navigating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
+        Book again
+      </button>
+    </motion.div>
+  )
+}
+
+// ---- Popular services ---------------------------------------
+// Admin-ordered services (public catalog endpoint) as quick entry points
+// into the order flow.
+
+interface PopularService { id: number; name: string; category: string | null; icon: string | null }
+
+function PopularServices() {
+  const [services, setServices] = useState<PopularService[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/customer/public/services')
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j.success) setServices((j.data?.services ?? []).slice(0, 6)) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  if (services.length === 0) return null
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.24 }}
+      className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
+      <div className="mb-4 flex items-center gap-2">
+        <Sparkles className="h-4 w-4 text-primary" />
+        <h2 className="text-sm font-semibold text-foreground">Popular services</h2>
+      </div>
+      <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {services.map(s => (
+          <Link key={s.id} href="/customer/orders/create"
+            className="flex w-24 shrink-0 flex-col items-center gap-2 rounded-xl border border-border/50 bg-background p-3 text-center transition-colors hover:border-primary/30 hover:bg-primary/5">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-xl">
+              {s.icon || '🧺'}
+            </span>
+            <span className="line-clamp-2 text-[11px] font-medium leading-tight text-foreground">{s.name}</span>
+          </Link>
+        ))}
+      </div>
+    </motion.div>
+  )
+}
+
 // ---- Why Laundrease marketing section -----------------------
 
 // function WhyLaundrease() {
@@ -518,7 +728,7 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
 //   return (
 //     <div className="space-y-5">
 //       {/* Video placeholder — replace src with your real video URL */}
-//       <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary/80 to-violet-700 cursor-pointer shadow-lg"
+//       <div className="group relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary/80 to-blue-700 cursor-pointer shadow-lg"
 //         style={{ aspectRatio: '16/9' }}>
 //         <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
 //           <div className="mb-3 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm transition-transform group-hover:scale-110">
@@ -558,7 +768,7 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
 //       </div>
 
 //       {/* First order CTA */}
-//       <div className="flex items-center justify-between rounded-2xl bg-gradient-to-r from-primary to-violet-700 px-5 py-4">
+//       <div className="flex items-center justify-between rounded-2xl bg-gradient-to-r from-primary to-blue-700 px-5 py-4">
 //         <div>
 //           <p className="text-sm font-bold text-white">First order? Use FIRST50</p>
 //           <p className="text-xs text-white/70">Get 50% off on your first laundry order</p>
@@ -574,7 +784,7 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
   // ---- Main page ----------------------------------------------
 
 export default function CustomerDashboard() {
-  const { user } = useAuth()
+  const { user, markUnauthorized } = useAuth()
   const router   = useRouter()
 
   const [data,              setData]             = useState<DashboardData | null>(null)
@@ -595,6 +805,7 @@ export default function CustomerDashboard() {
     try {
       setRefreshing(true); setError(false)
       const res  = await fetch('/api/customer/dashboard', { credentials: 'include' })
+      if (res.status === 401 || res.status === 403) { markUnauthorized(); setError(true); return }
       if (!res.ok) { setError(true); return }
       const json = await res.json()
       if (!json.success) { setError(true); return }
@@ -606,17 +817,40 @@ export default function CustomerDashboard() {
       }
     } catch { setError(true) }
     finally { setLoading(false); setRefreshing(false) }
-  }, [])
+  }, [markUnauthorized])
 
   useEffect(() => { fetchDashboard() }, [fetchDashboard])
 
   // ---- Loading / error states ----
   if (loading) {
+    // Skeleton mirroring the real layout (header strip → stats → address/CTA
+    // → content cards) — consistent with the pulse loaders used elsewhere.
     return (
-      <div className="flex min-h-[60vh] items-center justify-center">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <p className="text-sm text-muted-foreground">Loading your dashboard…</p>
+      <div className="min-h-screen bg-muted/20">
+        <div className="border-b border-border/50 bg-background pb-5 pt-6">
+          <div className="container mx-auto animate-pulse space-y-4 px-4">
+            <div className="h-7 w-48 rounded-lg bg-muted" />
+            <div className="flex gap-2.5">
+              {[1, 2, 3, 4].map(i => <div key={i} className="h-[52px] flex-1 rounded-xl bg-muted" />)}
+            </div>
+            <div className="flex flex-col gap-2.5 sm:flex-row">
+              <div className="h-12 flex-1 rounded-2xl bg-muted" />
+              <div className="h-12 rounded-2xl bg-muted sm:w-36" />
+            </div>
+          </div>
+        </div>
+        <div className="container mx-auto px-4 pb-12">
+          <div className="mt-4 grid animate-pulse gap-6 lg:grid-cols-3">
+            <div className="space-y-6 lg:col-span-2">
+              <div className="h-72 rounded-2xl bg-muted" />
+              <div className="h-20 rounded-2xl bg-muted" />
+              <div className="h-44 rounded-2xl bg-muted" />
+            </div>
+            <div className="hidden space-y-5 lg:block">
+              <div className="h-48 rounded-2xl bg-muted" />
+              <div className="h-40 rounded-2xl bg-muted" />
+            </div>
+          </div>
         </div>
       </div>
     )
@@ -666,33 +900,24 @@ export default function CustomerDashboard() {
     <>
       <div className="min-h-screen overflow-x-hidden bg-muted/20">
 
-        {/* ---- Hero header ---- */}
-        <div className="relative overflow-hidden bg-gradient-to-br from-primary via-primary/90 to-violet-700 pb-16 pt-8">
-          <div className="pointer-events-none absolute inset-0">
-            <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full bg-white/5 blur-2xl" />
-            <div className="absolute -bottom-10 left-10 h-48 w-48 rounded-full bg-white/5 blur-2xl" />
-          </div>
-          <div className="container relative mx-auto px-4">
+        {/* ---- Compact header: greeting + stats, no heavy background ---- */}
+        <div className="border-b border-border/50 bg-background pb-5 pt-6">
+          <div className="container mx-auto px-4">
             <div className="flex items-start justify-between">
               <div>
-                <p className="mb-1 text-sm font-medium text-white/70">
+                <p className="mb-0.5 text-xs font-medium text-muted-foreground">
                   {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
                 </p>
-                <h1 className="text-2xl font-bold text-white sm:text-3xl">Hello, {firstName}! 👋</h1>
-                <p className="mt-1 text-sm text-white/75">
-                  {data.statistics.activeOrders > 0
-                    ? `You have ${data.statistics.activeOrders} active order${data.statistics.activeOrders > 1 ? 's' : ''}`
-                    : 'Ready for fresh laundry?'}
-                </p>
+                <h1 className="text-xl font-bold text-foreground sm:text-2xl">Hello, {firstName}! 👋</h1>
               </div>
               <button onClick={fetchDashboard} disabled={refreshing}
-                className="rounded-full bg-white/15 p-2.5 text-white backdrop-blur-sm transition-colors hover:bg-white/25 disabled:opacity-50">
+                className="rounded-full bg-muted p-2.5 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:opacity-50">
                 <RefreshCw className={cn('h-4 w-4', refreshing && 'animate-spin')} />
               </button>
             </div>
 
-            {/* ---- Stat pills — all clickable ---- */}
-            <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {/* ---- Stat pills — one horizontal strip on mobile, grid on sm+ ---- */}
+            <div className="mt-4 flex gap-2.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-4 sm:overflow-visible">
               {statPills.map((stat, i) => (
                 <motion.button
                   key={stat.label}
@@ -701,17 +926,28 @@ export default function CustomerDashboard() {
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.06 }}
-                  className="flex items-center gap-2.5 rounded-xl bg-white/10 px-3 py-2.5 backdrop-blur-sm transition-all hover:bg-white/20 active:scale-95 text-left cursor-pointer"
+                  className="flex min-w-[8.5rem] shrink-0 items-center gap-2.5 rounded-xl border border-border/50 bg-card px-3 py-2 transition-all hover:border-primary/30 hover:bg-muted/40 active:scale-95 text-left cursor-pointer sm:min-w-0 sm:shrink"
                 >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/20">
-                    <stat.icon className="h-4 w-4 text-white" />
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                    <stat.icon className="h-4 w-4 text-primary" />
                   </div>
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-bold leading-none text-white">{stat.value}</div>
-                    <div className="mt-0.5 truncate text-[10px] text-white/70">{stat.label}</div>
+                    <div className="truncate text-sm font-bold leading-none text-foreground">{stat.value}</div>
+                    <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{stat.label}</div>
                   </div>
                 </motion.button>
               ))}
+            </div>
+
+            {/* ---- Address + New Order — moved up from below to use this space efficiently ---- */}
+            <div className="mt-3 flex flex-col gap-2.5 sm:flex-row">
+              <div className="flex-1">
+                <AddressDropdown addresses={data.addresses} selectedId={selectedAddressId} onSelect={setSelectedAddressId} />
+              </div>
+              <Link href="/customer/orders/create"
+                className="group flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 sm:py-0">
+                <Plus className="h-4 w-4" /> New Order
+              </Link>
             </div>
           </div>
         </div>
@@ -722,19 +958,6 @@ export default function CustomerDashboard() {
 
             {/* ============ LEFT / MAIN COLUMN ============ */}
             <div className="min-w-0 space-y-6 lg:col-span-2">
-
-              {/* Address picker */}
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-                className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
-                <div className="mb-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="h-4 w-4 text-primary" />
-                    <h2 className="text-sm font-semibold text-foreground">Delivery Address</h2>
-                  </div>
-                  <Link href="/customer/addresses/new" className="text-xs font-medium text-primary hover:underline">+ Add New</Link>
-                </div>
-                <AddressDropdown addresses={data.addresses} selectedId={selectedAddressId} onSelect={setSelectedAddressId} />
-              </motion.div>
 
               {/* Active Order */}
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
@@ -817,6 +1040,18 @@ export default function CustomerDashboard() {
                   </div>
                 )}
               </motion.div>
+
+              {/* Book again — last delivered order */}
+              <BookAgain />
+
+              {/* Providers near you — based on the selected address */}
+              <ProvidersNearYou
+                postalCode={data.addresses.find(a => a.id === selectedAddressId)?.postalCode ?? null}
+              />
+
+              {/* Popular services */}
+              <PopularServices />
+
               {/* Why Laundrease — marketing section */}
               {/* <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
                 className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
@@ -848,31 +1083,17 @@ export default function CustomerDashboard() {
             {/* ============ RIGHT / SIDEBAR ============ */}
             <div className="min-w-0 space-y-5">
 
-              {/* New Order CTA */}
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-                <Link href="/customer/orders/create">
-                  <div className="group flex cursor-pointer items-center justify-between rounded-2xl bg-gradient-to-br from-primary to-violet-700 p-5 shadow-md shadow-primary/20 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-primary/30">
-                    <div>
-                      <p className="text-sm font-semibold text-white">New Laundry Order</p>
-                      <p className="mt-0.5 text-xs text-white/70">Pick up today or schedule later</p>
-                    </div>
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20 text-white transition-transform group-hover:translate-x-0.5">
-                      <Plus className="h-5 w-5" />
-                    </div>
-                  </div>
-                </Link>
-              </motion.div>
-
-              {/* Quick links */}
+              {/* Quick links — desktop only; on mobile the bottom nav and the
+                  new Book-again/providers/services sections cover these */}
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
-                className="rounded-2xl border border-border/50 bg-card p-4 shadow-sm">
+                className="hidden rounded-2xl border border-border/50 bg-card p-4 shadow-sm lg:block">
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quick Access</p>
                 <div className="space-y-1">
                   {[
-                    { key: 'qp',  href: '/quick-pickup',           icon: Zap,    label: 'Quick Pickup',      sub: 'No account needed',     onClick: null },
+                    { key: 'qp',  href: '/customer/quick-pickup',           icon: Zap,    label: 'Quick Pickup',      sub: 'No account needed',     onClick: null },
                     { key: 'wal', href: null,                       icon: Wallet, label: 'Wallet',             sub: formatINR(displayWallet), onClick: () => setWalletOpen(true) },
                     { key: 'ref', href: '/customer/refer-and-earn', icon: Gift,   label: 'Refer & Earn',       sub: 'Earn wallet credits',   onClick: null },
-                    { key: 'cal', href: '/pricing-calculator',      icon: Star,   label: 'Pricing Calculator', sub: 'Estimate your cost',    onClick: null },
+                    { key: 'cal', href: '/customer/pricing-calculator',      icon: Star,   label: 'Pricing Calculator', sub: 'Estimate your cost',    onClick: null },
                   ].map(item => {
                     const inner = (
                       <div className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors hover:bg-muted/60">
@@ -941,8 +1162,9 @@ export default function CustomerDashboard() {
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Support</p>
                 <div className="space-y-1">
                   {[
-                    { href: '/help-center',       label: 'Help Center'   },
-                    { href: '/safety-center',     label: 'Safety Center' },
+                    { href: '/customer/support',  label: 'My Tickets'    },
+                    { href: '/customer/help-center',       label: 'Help Center'   },
+                    { href: '/customer/safety-center',     label: 'Safety Center' },
                     { href: '/customer/settings', label: 'Settings'      },
                   ].map(item => (
                     <Link key={item.href} href={item.href}>

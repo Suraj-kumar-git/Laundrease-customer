@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { getAuthUser } from '@/lib/auth'
+import { resolveProfileImageUrl } from '@/lib/s3'
  
 /**
 * GET /api/customer/auth/me
@@ -38,14 +39,21 @@ export async function GET(req: NextRequest) {
     }
     
     const user = userResult.rows[0]
-    
+
+    // A valid JWT is not enough — suspension must take effect on existing
+    // sessions too, not only at the next login. The auth provider treats a
+    // 403 here as "logged out".
+    if (user.status === 'suspended') {
+      return errorResponse('Your account has been suspended. Please contact support.', 403, 'ACCOUNT_SUSPENDED')
+    }
+
     return successResponse({
       user: {
         id: user.id,
         email: user.email,
         full_name: user.full_name,
         phone: user.phone,
-        profile_image: user.profile_image,
+        profile_image: await resolveProfileImageUrl(user.profile_image),
         email_verified: user.email_verified,
         phone_verified: user.phone_verified,
         status: user.status,

@@ -427,7 +427,7 @@ export default function AddressForm({
             loading
             || (requireServiceablePostalCode && !(postalCodeValidation?.isServiceable ?? false))
           )}
-          className="flex-1 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700"
+          className="flex-1 bg-gradient-to-r from-blue-600 to-blue-600 hover:from-blue-700 hover:to-blue-700"
         >
           {loading ? (
             <>

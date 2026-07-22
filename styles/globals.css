@@ -2,6 +2,13 @@
 @import "tailwindcss";
 @plugin "tailwindcss-animate";
 
+/* Tailwind v4: make the `dark:` variant follow the `.dark` class set by the
+   theme toggles (next-themes / custom toggles) instead of the OS media query.
+   Without this, token colors (.dark { --foreground: … }) flip with the toggle
+   while `dark:*` utilities flip with the OS — mismatched states produce
+   white-on-white / black-on-black text (e.g. dashboard stat values). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Map your HSL tuple variables to Tailwind v4 color tokens via @theme.
    This enables classes like bg-background, text-foreground, border-border, ring-ring, etc. */
 @theme {
@@ -37,8 +44,9 @@
   --popover: 0 0% 100%;
   --popover-foreground: 240 10% 3.9%;
 
-  /* Primary from your app file (purple palette) */
-  --primary: 262 83% 58%;
+  /* Primary from your app file (blue palette) */
+  /* --primary: 262 83% 58%; */
+  --primary: 221 83% 53%;
   --primary-foreground: 0 0% 98%;
 
   --secondary: 240 4.8% 95.9%;
@@ -55,7 +63,8 @@
 
   --border: 240 5.9% 90%;
   --input: 240 5.9% 90%;
-  --ring: 262 83% 58%;
+  --ring: 262 83% 5/8%;
+  --ring: 221 83% 53%
 
   --radius: 0.5rem;
 
@@ -92,6 +101,7 @@
   --popover-foreground: 0 0% 98%;
 
   --primary: 262 83% 58%;
+  --primary: 217 91% 60%;
   --primary-foreground: 0 0% 98%;
 
   --secondary: 240 3.7% 15.9%;
@@ -108,7 +118,8 @@
 
   --border: 240 3.7% 15.9%;
   --input: 240 3.7% 15.9%;
-  --ring: 262 83% 58%;
+  /* --ring: 262 83% 58%; */
+  --ring: 217 91% 60%;
 
   /* Charts and sidebar (dark) */
   --chart-1: 220 70% 50%;
@@ -151,9 +162,25 @@ body {
   animation: float 3s ease-in-out infinite;
 }
 
+/* Hero: noticeable bob for the washing machine illustration */
+@keyframes hero-bob {
+  0%   { transform: translateY(0px) rotate(0deg); }
+  50%  { transform: translateY(-22px) rotate(-1.2deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+/* Hero: bubbles rise upward with a sideways sway, fading as they go */
+@keyframes hero-bubble {
+  0%   { transform: translate(0, 0) scale(1);           opacity: 0.9; }
+  50%  { transform: translate(10px, -45px) scale(1.15); opacity: 0.6; }
+  100% { transform: translate(-6px, -90px) scale(0.85); opacity: 0; }
+}
+
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
-  50% { box-shadow: 0 0 20px 5px rgba(139, 92, 246, 0.3); }
+  /* 0%, 100% { box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+  50% { box-shadow: 0 0 20px 5px rgba(139, 92, 246, 0.3); } */
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+  50% { box-shadow: 0 0 20px 5px rgba(59, 130, 246, 0.3); }
 }
 .animate-pulse-glow {
   animation: pulse-glow 2s ease-in-out infinite;
@@ -198,8 +225,11 @@ body {
 .glass-effect {
   @apply bg-background/80 backdrop-blur-md;
 }
+/* .text-gradient {
+  @apply bg-gradient-to-r from-blue-600 to-blue-600 bg-clip-text text-transparent;
+} */
 .text-gradient {
-  @apply bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent;
+  @apply bg-gradient-to-r from-blue-600 to-cyan-500 bg-clip-text text-transparent;
 }
 .hover-card-effect {
   @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-lg dark:hover:shadow-primary/10;

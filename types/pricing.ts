@@ -50,7 +50,10 @@ export interface PricingProductType {
   display_category: DisplayCategory
   icon: string
   sort_order: number
-  unit_price: number   // platform base price for this (product, service) combo
+  unit_price: number   // selling price for this (product, service) combo
+  // Provider-set MRP, only present when the provider has overridden their
+  // price for this combo. Null = no strikethrough, behave as before.
+  mrp?: number | null
 }
 
 // Grouped by service: service → available product types with prices
@@ -65,6 +68,9 @@ export interface AreaPricingData {
   pincode: string
   city: string | null
   provider_count: number
+  // Set when pricing was resolved for one specific provider (via ?provider_id=)
+  // rather than the platform base price across the whole area.
+  provider: { id: number; name: string } | null
   services: ServiceWithProducts[]
 }
 
@@ -79,6 +85,9 @@ export interface CartLineItem {
   service_id: number
   service_name: string
   unit_price: number
+  // Provider-set MRP (strikethrough display only — never used in math).
+  // Null = no strikethrough.
+  mrp?: number | null
   // For per_unit: quantity; for per_kg: weight in kg
   quantity: number   // per_unit count
   weight_kg: number  // per_kg weight

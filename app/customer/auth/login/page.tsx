@@ -78,7 +78,12 @@ function PageContent() {
           ? { email: email.trim().toLowerCase(), password }
           : { phone: phone.trim(), password }
       )
-      router.replace(returnTo)
+      // Hard navigation, not router.replace: the Next.js Router Cache can
+      // hold onto a stale "redirect to login" result for this path from
+      // before the user was authenticated, which would bounce them right
+      // back here even though the cookie was just set successfully. A full
+      // navigation always re-evaluates middleware against the fresh cookie.
+      window.location.href = returnTo
     } catch (err: any) {
       if(err.requiresVerification) {
         router.push(`/customer/auth/verify?email=${encodeURIComponent(err.email)}&phone=${encodeURIComponent(err.phone)}`)
@@ -152,7 +157,9 @@ function PageContent() {
                       setEmail(e.target.value)
                       clearError("email")
                     } else {
-                      setPhone(e.target.value)
+                      // Allow only digits, leading +, spaces and dashes
+                      const raw = e.target.value.replace(/[^\d+\s\-]/g, '')
+                      setPhone(raw)
                       clearError("phone")
                     }
                     setServerError("")

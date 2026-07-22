@@ -1,5 +1,9 @@
 import crypto from 'crypto'
-import { PaymentGatewayAdapter, GatewayConfig, GatewayOrderParams, GatewayOrder, PaymentVerificationParams, PaymentVerificationResult, WebhookVerificationParams } from './types'
+import {
+  PaymentGatewayAdapter, GatewayConfig, GatewayOrderParams, GatewayOrder,
+  PaymentVerificationParams, PaymentVerificationResult, WebhookVerificationParams,
+  RefundParams, RefundResult, RefundStatusParams, RefundStatusResult,
+} from './types'
 
 export class PayUAdapter implements PaymentGatewayAdapter {
   readonly provider = 'payu'
@@ -13,6 +17,14 @@ export class PayUAdapter implements PaymentGatewayAdapter {
     return this.config.sandbox
       ? 'https://test.payu.in'
       : 'https://secure.payu.in'
+  }
+
+  // PayU's "Info API" (refunds, status checks) lives on a separate host
+  // from the hosted-checkout host above.
+  private getInfoApiUrl(): string {
+    return this.config.sandbox
+      ? 'https://test.payu.in/merchant/postservice?form=2'
+      : 'https://info.payu.in/merchant/postservice?form=2'
   }
 
   private formatAmount(amount: number): string {
@@ -242,5 +254,86 @@ export class PayUAdapter implements PaymentGatewayAdapter {
     } catch {
       return false
     }
+  }
+
+  // PayU's cancel_refund_transaction: hash = sha512(key|command|var1|salt)
+  async initiateRefund(params: RefundParams): Promise<RefundResult> {
+    const command = 'cancel_refund_transaction'
+    const hash = crypto
+      .createHash('sha512')
+      .update(`${this.config.apiKey}|${command}|${params.gatewayPaymentId}|${this.config.apiSecret}`)
+      .digest('hex')
+
+    const body = new URLSearchParams({
+      key: this.config.apiKey,
+      command,
+      var1: params.gatewayPaymentId,       // mihpayid
+      var2: params.merchantRefundId,       // our refund reference, becomes PayU's "request_id"
+      var3: this.formatAmount(params.amount),
+      hash,
+    })
+
+    const response = await fetch(this.getInfoApiUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+
+    const data = await response.json().catch(() => ({}))
+
+    // PayU: status 1 = refund request accepted (still needs to settle async).
+    if (response.ok && data.status === 1) {
+      return { status: 'processing', gatewayRefundId: String(data.request_id ?? params.merchantRefundId), rawResponse: data }
+    }
+
+    return {
+      status: 'failed',
+      gatewayRefundId: null,
+      rawResponse: data,
+      failureReason: String(data.msg ?? data.message ?? 'PayU refund request was rejected'),
+    }
+  }
+
+  // PayU doesn't push refund-completion webhooks reliably — status is
+  // checked on demand via verify_payment, which includes refund_details
+  // for the transaction.
+  async checkRefundStatus(params: RefundStatusParams): Promise<RefundStatusResult> {
+    const command = 'verify_payment'
+    const hash = crypto
+      .createHash('sha512')
+      .update(`${this.config.apiKey}|${command}|${params.gatewayOrderId}|${this.config.apiSecret}`)
+      .digest('hex')
+
+    const body = new URLSearchParams({
+      key: this.config.apiKey,
+      command,
+      var1: params.gatewayOrderId,
+      hash,
+    })
+
+    const response = await fetch(this.getInfoApiUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    })
+
+    const data = await response.json().catch(() => ({}))
+    const txnDetails = data?.transaction_details?.[params.gatewayOrderId]
+    const refundDetails: Array<{ request_id?: string; id?: string; status?: string }> =
+      txnDetails?.refund_details ?? []
+
+    const match = params.gatewayRefundId
+      ? refundDetails.find(r => String(r.request_id ?? r.id) === params.gatewayRefundId)
+      : refundDetails[0]
+
+    if (!match) {
+      return { status: 'processing', rawResponse: data }
+    }
+
+    // PayU refund_details status: '0' queued, '1' success/credited, negative = error.
+    const statusCode = String(match.status ?? '')
+    if (statusCode === '1') return { status: 'completed', rawResponse: data }
+    if (statusCode.startsWith('-')) return { status: 'failed', rawResponse: data }
+    return { status: 'processing', rawResponse: data }
   }
 }

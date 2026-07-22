@@ -19,7 +19,7 @@ export default function EditAddressPage() {
         const res  = await fetch('/api/customer/addresses', { credentials: 'include' })
         const json = await res.json()
         if (!json.success) throw new Error('Failed to load addresses')
-        const found = (json.data?.addresses ?? json.data ?? []).find((a: any) => String(a.id) === id)
+        const found = (json.data?.addresses ?? json.data ?? []).find((a: any) => a.public_id === id)
         if (!found) throw new Error('Address not found')
         setAddress(found)
       } catch (err: any) {
@@ -32,7 +32,7 @@ export default function EditAddressPage() {
   }, [id])
 
   return (
-    <div className="container mx-auto max-w-xl px-4 py-6">
+    <div className="container mx-auto max-w-2xl px-4 py-6">
       {/* Header */}
       <div className="mb-6">
         <Link
@@ -62,9 +62,10 @@ export default function EditAddressPage() {
         </div>
       ) : (
         <AddressForm
-          addressId={Number(id)}
+          addressId={id}
           initial={{
             label:          address.label ?? '',
+            tags:           address.tags ?? [],
             address_line1:  address.address_line1 ?? '',
             address_line2:  address.address_line2 ?? '',
             landmark:       address.landmark ?? '',

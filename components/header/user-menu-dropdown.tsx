@@ -7,7 +7,7 @@ import Image from "next/image"
 import {
   User, LogIn, ChevronDown, UserPlus, Store, Truck,
   Gift, HelpCircle, Download, LogOut, ShoppingBag,
-  MapPin, Wallet, Settings, Star, ChevronRight,
+  MapPin, Wallet, Settings, Star, ChevronRight, LifeBuoy,
 } from "lucide-react"
 import { useAuth } from "@/components/auth-provider"
 import { cn } from "@/lib/utils"
@@ -36,7 +36,7 @@ const GUEST_ITEMS = [
   {
     group: 'Help',
     items: [
-      { label: 'Help Center', href: '/help-center', icon: HelpCircle },
+      { label: 'Help Center', href: '/customer/help-center', icon: HelpCircle },
       { label: 'Download App', href: '#', icon: Download, comingSoon: true },
     ],
   },
@@ -49,15 +49,15 @@ const AUTH_ITEMS = [
     items: [
       { label: 'My Orders', href: '/customer/orders', icon: ShoppingBag },
       { label: 'My Addresses', href: '/customer/addresses', icon: MapPin },
-      { label: 'Wallet & Rewards', href: '/customer/wallet', icon: Wallet },
       { label: 'Refer & Earn', href: '/customer/refer-and-earn', icon: Gift },
     ],
   },
   {
     group: 'Preferences',
     items: [
+      { label: 'My Tickets', href: '/customer/support', icon: LifeBuoy },
       { label: 'Settings', href: '/customer/settings', icon: Settings },
-      { label: 'Help Center', href: '/help-center', icon: HelpCircle },
+      { label: 'Help Center', href: '/customer/help-center', icon: HelpCircle },
     ],
   },
 ]
