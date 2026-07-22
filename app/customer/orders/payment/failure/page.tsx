@@ -117,7 +117,7 @@ function PaymentFailureContent() {
       const res  = await fetch(`/api/customer/orders/${order.id}/switch-to-cod`, { method: 'POST', credentials: 'include' })
       const json = await res.json()
       if (!json.success) throw new Error(json.error ?? 'Failed to switch to COD')
-      router.push(`/customer/orders/payment/success?order_id=${order.id}`)
+      router.push(`/customer/orders/payment/success?order_id=${order.id}&source=cod_switch`)
     } catch (err: any) {
       setActionError(err.message || 'Could not switch to Cash on Delivery.')
       setActionLoading(null)
@@ -154,7 +154,7 @@ function PaymentFailureContent() {
       <div className="container mx-auto max-w-md px-4 py-16 text-center">
         <AlertCircle className="mx-auto mb-4 h-12 w-12 text-muted-foreground/40" />
         <p className="font-medium text-foreground">{loadError ?? 'Order not found'}</p>
-        <Button className="mt-6" onClick={() => router.push('/customer')}>Go to Home</Button>
+        <Button className="mt-6" onClick={() => router.push('/customer/dashboard')}>Go to Dashboard</Button>
       </div>
     )
   }
@@ -196,7 +196,7 @@ function PaymentFailureContent() {
             <Button
               onClick={handleRetryPayment}
               disabled={actionLoading !== null}
-              className="w-full bg-violet-600 hover:bg-violet-700 h-12 text-base font-semibold"
+              className="w-full bg-blue-600 hover:bg-blue-700 h-12 text-base font-semibold"
             >
               {actionLoading === 'retry'
                 ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -238,14 +238,14 @@ function PaymentFailureContent() {
           <h3 className="mb-3 font-semibold">Need Help?</h3>
           <div className="grid gap-3 md:grid-cols-2">
             <a href="tel:+919876543210" className="flex items-center gap-3 rounded-lg p-3 transition-colors hover:bg-white dark:hover:bg-gray-800">
-              <Phone className="h-5 w-5 text-violet-600" />
+              <Phone className="h-5 w-5 text-blue-600" />
               <div>
                 <p className="text-sm font-medium">Call Us</p>
                 <p className="text-xs text-muted-foreground">+91 98765 43210</p>
               </div>
             </a>
             <a href="mailto:support@laundrease.in" className="flex items-center gap-3 rounded-lg p-3 transition-colors hover:bg-white dark:hover:bg-gray-800">
-              <Mail className="h-5 w-5 text-violet-600" />
+              <Mail className="h-5 w-5 text-blue-600" />
               <div>
                 <p className="text-sm font-medium">Email Us</p>
                 <p className="text-xs text-muted-foreground">support@laundrease.in</p>

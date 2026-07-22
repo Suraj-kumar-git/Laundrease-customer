@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { Loader2, MapPin, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { PlaceAutocompleteInput } from '@/components/common/PlaceAutocompleteInput'
 
 interface AddressFormProps {
   /** When editing — pass existing address values */
@@ -140,15 +141,48 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
   const removeTag = (tag: string) =>
     setForm(prev => ({ ...prev, tags: prev.tags.filter(t => t !== tag) }))
 
+  // Live validation — recomputed on every change. Field errors are only
+  // *shown* once the field has been touched (or a submit was attempted),
+  // and the submit button stays disabled until everything required is valid.
+  const computeErrors = (data: AddressFormData): Partial<Record<keyof AddressFormData, string>> => {
+    const errs: Partial<Record<keyof AddressFormData, string>> = {}
+    if (!data.label.trim())         errs.label         = 'Label is required'
+    if (!data.address_line1.trim()) errs.address_line1  = 'Address line 1 is required'
+    if (!/^\d{6}$/.test(data.postal_code.trim())) errs.postal_code = 'Enter a valid 6-digit PIN code'
+    if (!data.city.trim())          errs.city           = 'City is required'
+    if (!data.country_code.trim())  errs.country_code   = 'Country code is required'
+    if (!data.contact_name.trim())  errs.contact_name   = 'Contact name is required'
+    // Required — the DB rejects an empty contact_phone (the format CHECK
+    // constraint doesn't accept '', only NULL or a valid number), which
+    // previously surfaced as a generic "Failed to save address" error.
+    if (!data.contact_phone.trim()) {
+      errs.contact_phone = 'Contact phone is required'
+    } else {
+      const digits = data.contact_phone.replace(/^\+91/, '').replace(/\D/g, '')
+      if (!/^[6-9]\d{9}$/.test(digits)) errs.contact_phone = 'Enter a valid 10-digit Indian mobile number'
+    }
+    return errs
+  }
+
+  const [touched, setTouched] = useState<Partial<Record<keyof AddressFormData, boolean>>>({})
+  const liveErrors = computeErrors(form)
+  const formValid  = Object.keys(liveErrors).length === 0
+
+  const touch = (field: keyof AddressFormData) => () =>
+    setTouched(prev => ({ ...prev, [field]: true }))
+
+  // Show an error only for touched fields (or after a submit attempt)
+  const shownError = (field: keyof AddressFormData): string | undefined =>
+    (touched[field] || errors[field]) ? liveErrors[field] : undefined
+
   const validate = (): boolean => {
-    const errs: typeof errors = {}
-    if (!form.label.trim())         errs.label         = 'Label is required'
-    if (!form.address_line1.trim()) errs.address_line1  = 'Address line 1 is required'
-    if (!/^\d{6}$/.test(form.postal_code.trim())) errs.postal_code = 'Enter a valid 6-digit PIN code'
-    if (!form.city.trim())          errs.city           = 'City is required'
-    if (!form.country_code.trim())  errs.country_code   = 'Country code is required'
-    setErrors(errs)
-    return Object.keys(errs).length === 0
+    setErrors(liveErrors)
+    // Mark everything touched so all remaining errors surface at once
+    setTouched({
+      label: true, address_line1: true, postal_code: true, city: true, country_code: true,
+      contact_name: true, contact_phone: true,
+    })
+    return formValid
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -183,7 +217,7 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-5">
       {/* Label presets */}
-      <Field label="Address Label" required error={errors.label}>
+      <Field label="Address Label" required error={shownError('label')}>
         <div className="flex gap-2">
           {LABEL_PRESETS.map(preset => (
             <button
@@ -213,9 +247,23 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
         </div>
       </Field>
 
-      <Field label="Address Line 1" required error={errors.address_line1}>
-        <Input value={form.address_line1} onChange={set('address_line1')}
-          placeholder="Flat / House No., Building / Street name" maxLength={255} />
+      <Field label="Address Line 1" required error={shownError('address_line1')}>
+        <PlaceAutocompleteInput
+          value={form.address_line1}
+          onChange={v => setForm(prev => ({ ...prev, address_line1: v }))}
+          placeholder="Search building, street or area…"
+          className="mt-1 w-full pl-9 pr-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          types={['geocode']}
+          onAddressComponents={({ address_line1, city, state, postal_code }) => {
+            setForm(prev => ({
+              ...prev,
+              address_line1: address_line1 || prev.address_line1,
+              city:          city          || prev.city,
+              state:         state         || prev.state,
+              postal_code:   postal_code   || prev.postal_code,
+            }))
+          }}
+        />
       </Field>
 
       <Field label="Address Line 2">
@@ -237,9 +285,9 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
       {/* PIN code drives the city/state auto-fill below — entering it first
           means the customer usually never has to type the next two fields. */}
       <div className="grid grid-cols-2 gap-3">
-        <Field label="PIN Code" required error={errors.postal_code}>
+        <Field label="PIN Code" required error={shownError('postal_code')}>
           <div className="relative">
-            <Input value={form.postal_code} onChange={set('postal_code')}
+            <Input value={form.postal_code} onChange={set('postal_code')} onBlur={touch('postal_code')}
               placeholder="6-digit PIN" maxLength={6} inputMode="numeric" className="pr-9" />
             {pincodeLookup === 'checking' && (
               <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
@@ -252,8 +300,8 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
             <p className="mt-1 text-xs text-amber-600">Couldn&apos;t find this PIN code — please enter city/state manually.</p>
           )}
         </Field>
-        <Field label="City" required error={errors.city}>
-          <Input value={form.city} onChange={set('city')} placeholder="City" maxLength={100} />
+        <Field label="City" required error={shownError('city')}>
+          <Input value={form.city} onChange={set('city')} onBlur={touch('city')} placeholder="City" maxLength={100} />
         </Field>
       </div>
 
@@ -285,13 +333,23 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
 
       {/* Contact */}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Contact Name">
-          <Input value={form.contact_name} onChange={set('contact_name')}
+        <Field label="Contact Name" required error={shownError('contact_name')}>
+          <Input value={form.contact_name} onChange={set('contact_name')} onBlur={touch('contact_name')}
             placeholder="Person to contact" maxLength={100} />
         </Field>
-        <Field label="Contact Phone">
-          <Input value={form.contact_phone} onChange={set('contact_phone')}
-            placeholder="+91 98765 43210" type="tel" maxLength={20} />
+        <Field label="Contact Phone" required error={shownError('contact_phone')}>
+          <Input
+            value={form.contact_phone}
+            onChange={e => {
+              const raw = e.target.value.replace(/[^\d+]/g, '')
+              if (raw.length <= 13) setForm(prev => ({ ...prev, contact_phone: raw }))
+            }}
+            onBlur={touch('contact_phone')}
+            placeholder="+91 98765 43210"
+            type="tel"
+            inputMode="tel"
+            maxLength={13}
+          />
         </Field>
       </div>
 
@@ -366,8 +424,9 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
         </button>
         <button
           type="submit"
-          disabled={saving}
-          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-50"
+          disabled={saving || !formValid}
+          title={!formValid ? 'Fill all required fields (marked *) to continue' : undefined}
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? (
             <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>

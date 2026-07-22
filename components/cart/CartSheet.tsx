@@ -216,7 +216,7 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
                               <div className="min-w-0 flex-1">
                                 <p className="truncate text-sm font-medium text-foreground">{item.product_type_name}</p>
                                 <p className="text-xs text-muted-foreground">
-                                  {item.pricing_model === 'per_kg' ? `${item.weight_kg} kg` : `×${item.quantity}`}
+                                  {(item.pricing_model === 'per_kg' && item.weight_kg != null) ? `${item.weight_kg} kg` : `×${item.quantity}`}
                                   {item.is_express && <span className="ml-1 text-amber-600">· Express</span>}
                                 </p>
                               </div>
@@ -277,7 +277,7 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
                     {cart.pickup_date && (
                       <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                         <Calendar className="h-3.5 w-3.5 text-primary" />
-                        <span>{new Date(cart.pickup_date + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
+                        <span>{new Date(cart.pickup_date.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>
                         {cart.pickup_time_slot && <span>· {cart.pickup_time_slot}</span>}
                       </div>
                     )}
@@ -296,7 +296,7 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-medium text-foreground">{item.product_type_name}</p>
                               <p className="text-xs text-muted-foreground">
-                                {item.pricing_model === 'per_kg' ? `${item.weight_kg} kg` : `×${item.quantity}`}
+                                {(item.pricing_model === 'per_kg' && item.weight_kg != null) ? `${item.weight_kg} kg` : `×${item.quantity}`}
                                 {item.is_express && <span className="ml-1 text-amber-600">· Express</span>}
                               </p>
                             </div>

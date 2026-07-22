@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
-import { transaction, query } from '@/lib/db'
+import { transaction, query, queryOne } from '@/lib/db'
 import { enqueueOrderConfirmationEmail } from '@/lib/sqs'
+import { sendProviderNewOrderEmail } from '@/lib/notifications/email'
 import { calculateEstimatedDeliveryDate } from '@/lib/delivery-estimate'
 import { getActiveGateway } from '@/lib/payment'
 import { getMixedLoadProductTypeId } from '@/lib/product-types'
@@ -157,12 +158,17 @@ export async function POST(req: NextRequest) {
 
       // ---- Customer ---------------------------------------------------------
       const custRes = await client.query(
-        `SELECT u.email, u.full_name
+        `SELECT u.email, u.full_name, u.status
          FROM users u JOIN customer_profiles cp ON cp.user_id = u.id WHERE u.id = $1`,
         [userId]
       )
       if (custRes.rowCount === 0) throw new Error('CUSTOMER_NOT_FOUND')
       const customer = custRes.rows[0]
+
+      // Suspension must block ordering even for sessions issued before the
+      // suspension (the JWT alone doesn't reflect account status).
+      if (customer.status === 'suspended')
+        throw new Error('Your account has been suspended. Please contact support.')
 
       // ---- Subtotal ---------------------------------------------------------
       const subtotal = Math.round(
@@ -191,7 +197,7 @@ export async function POST(req: NextRequest) {
       if (body.coupon_code) {
         const couponRes = await client.query(
           `SELECT code, discount_type, discount_value, max_discount,
-                  min_order_amount, usage_limit_per_user
+                  min_order_amount, usage_limit_global, usage_limit_per_user, first_order_only
            FROM coupons
            WHERE code = $1 AND is_active = TRUE
              AND (starts_at IS NULL OR starts_at <= NOW())
@@ -201,15 +207,57 @@ export async function POST(req: NextRequest) {
         if (couponRes.rowCount! > 0) {
           const c = couponRes.rows[0]
           const meetsMin = !c.min_order_amount || subtotal >= parseFloat(c.min_order_amount)
+
+          // Usage-limit checks mirror /api/customer/coupons/validate exactly —
+          // a redemption tied to a failed/cancelled order never actually
+          // consumed the coupon, so it must not count against either limit.
           let perUserOk = true
           if (c.usage_limit_per_user) {
             const usage = await client.query(
-              `SELECT COUNT(*) AS n FROM coupon_redemptions WHERE coupon_code=$1 AND user_id=$2`,
+              `SELECT COUNT(*)::int AS n FROM coupon_redemptions cr
+               LEFT JOIN orders o ON o.id = cr.order_id
+               WHERE cr.coupon_code = $1 AND cr.user_id = $2
+                 AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))`,
               [c.code, userId]
             )
-            perUserOk = parseInt(usage.rows[0].n) < parseInt(c.usage_limit_per_user)
+            perUserOk = usage.rows[0].n < parseInt(c.usage_limit_per_user)
           }
-          if (meetsMin && perUserOk) {
+
+          // Global cap on TOTAL redemptions across every customer — distinct
+          // from usage_limit_per_user. A shared coupon like a first-order
+          // discount has no global cap (usage_limit_global is NULL) and stays
+          // available to every new customer; is_active is a separate,
+          // admin-only on/off switch that a redemption must never touch.
+          let globalOk = true
+          if (c.usage_limit_global) {
+            const globalUsage = await client.query(
+              `SELECT COUNT(*)::int AS n FROM coupon_redemptions cr
+               LEFT JOIN orders o ON o.id = cr.order_id
+               WHERE cr.coupon_code = $1
+                 AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))`,
+              [c.code]
+            )
+            globalOk = globalUsage.rows[0].n < parseInt(c.usage_limit_global)
+          }
+
+          // first_order_only — same "actually placed" definition used by
+          // /api/customer/coupons/validate and the dashboard/orders-list
+          // routes: a pending online-payment order that hasn't paid yet
+          // doesn't count as placed.
+          let firstOrderOk = true
+          if (c.first_order_only) {
+            const historyRes = await client.query(
+              `SELECT COUNT(*)::int AS n
+               FROM orders
+               WHERE customer_id = $1
+                 AND status NOT IN ('cancelled', 'failed', 'rejected')
+                 AND (payment_method LIKE '%cod%' OR payment_status = 'paid')`,
+              [userId]
+            )
+            firstOrderOk = historyRes.rows[0].n === 0
+          }
+
+          if (meetsMin && perUserOk && globalOk && firstOrderOk) {
             discountAmount = c.discount_type === 'percent'
               ? (subtotal * parseFloat(c.discount_value)) / 100
               : parseFloat(c.discount_value)
@@ -385,11 +433,9 @@ export async function POST(req: NextRequest) {
            VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
           [appliedCouponCode, userId, orderId, discountAmount]
         )
-        await client.query(
-          `UPDATE coupons SET is_active = FALSE
-          WHERE code = $1`,
-          [appliedCouponCode]
-        )
+        // is_active is an admin-only on/off switch and must never be flipped
+        // by a redemption — usage_limit_global/usage_limit_per_user (checked
+        // above) are what actually cap how many times a coupon can be used.
       }
 
       // ---- Wallet debit (atomic inside transaction) -------------------------
@@ -469,8 +515,10 @@ export async function POST(req: NextRequest) {
     })
 
     // ---- Post-transaction --------------------------------------------------
-    try { await query(`SELECT auto_assign_delivery_partner($1)`, [result.orderId]) }
-    catch (e) { console.warn('[orders/create] Auto-assign skipped:', (e as Error).message) }
+    // NOTE: delivery auto-assignment intentionally does NOT run here anymore.
+    // It runs when the laundry provider CONFIRMS the order
+    // (app/api/laundry/orders/[id]/status) so partners are only assigned to
+    // orders that are actually going ahead.
 
     const needsGatewayPayment = !result.paymentFullyCovered && !isCodBased
 
@@ -484,19 +532,47 @@ export async function POST(req: NextRequest) {
       catch { /* non-fatal */ }
     }
 
-    try {
-      await enqueueOrderConfirmationEmail({
-        orderId:       result.orderId,
-        orderNumber:   result.orderNumber,
-        customerEmail: result.customer.email,
-        customerName:  result.customer.full_name,
-        totalAmount:   result.totalAmount,
-        pickupDate:    result.pickupDate,
-        pickupTimeSlot:result.pickupTimeSlot,
-        providerName:  result.provider.business_name,
-        paymentMethod: body.payment_method,
-      })
-    } catch (e) { console.warn('[orders/create] SQS error:', e) }
+    // try {
+    //   await enqueueOrderConfirmationEmail({
+    //     orderId:       result.orderId,
+    //     orderNumber:   result.orderNumber,
+    //     customerEmail: result.customer.email,
+    //     customerName:  result.customer.full_name,
+    //     totalAmount:   result.totalAmount,
+    //     pickupDate:    result.pickupDate,
+    //     pickupTimeSlot:result.pickupTimeSlot,
+    //     providerName:  result.provider.business_name,
+    //     paymentMethod: body.payment_method,
+    //   })
+    // } catch (e) { console.warn('[orders/create] SQS error:', e) }
+
+    // Email the provider about the new order — but only when no gateway
+    // payment is still pending, so providers never hear about orders whose
+    // payment might be abandoned. (Gateway-paid orders currently reach the
+    // provider via the dashboard/in-app notification once paid.)
+    if (!needsGatewayPayment) {
+      try {
+        const providerContact = await queryOne<{ email: string | null; business_name: string }>(
+          `SELECT pu.email, lp.business_name
+           FROM laundry_profiles lp INNER JOIN users pu ON pu.id = lp.user_id
+           WHERE lp.id = $1`,
+          [result.provider.id]
+        )
+        if (providerContact?.email) {
+          const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL || 'http://localhost:3000'
+          sendProviderNewOrderEmail({
+            to: providerContact.email,
+            providerName: providerContact.business_name,
+            orderNumber: result.orderNumber,
+            pickupDate: result.pickupDate,
+            pickupSlot: result.pickupTimeSlot,
+            orderUrl: `${baseUrl}/laundry/orders/${result.orderPublicId}`,
+          }).catch(e => console.error('[orders/create] provider new-order email failed:', e))
+        }
+      } catch (e) {
+        console.error('[orders/create] provider new-order lookup failed:', e)
+      }
+    }
 
     return successResponse({
       order_id:              result.orderPublicId,
