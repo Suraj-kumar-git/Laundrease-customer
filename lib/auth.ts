@@ -3,6 +3,7 @@ import { cookies } from 'next/headers'
 import bcrypt from 'bcryptjs'
 import { SignJWT, jwtVerify } from 'jose'
 import crypto from 'crypto'
+import { queryOne } from '@/lib/db'
  
 // ============================================
 // PASSWORD UTILITIES
@@ -394,7 +395,7 @@ export async function getAuthUser(req?: NextRequest): Promise<AuthUser | null> {
     // Verify JWT token using existing verifyAccessToken
     const decoded = await verifyAccessToken(accessToken)
     
-    if (!decoded || !decoded.userId) {
+    if (!decoded?.userId) {
       return null
     }
     

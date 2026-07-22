@@ -55,10 +55,16 @@ export async function POST(req: NextRequest) {
 
     const newSubtotal = updatedServices.reduce((s, i) => s + i.line_total, 0)
 
+    // Resolve the cart's provider so provider-specific delivery fee/MOV overrides apply
+    const cartRow = await query<{ id: number; provider_id: number | null }>(
+      `SELECT id, provider_id FROM shopping_carts WHERE user_id = $1`, [userId]
+    )
+    const providerId = cartRow.rows[0]?.provider_id ?? null
+
     // Fetch updated fee breakdown from DB function
     const feesResult = await query(
-      `SELECT calculate_order_fees($1, $2, NULL, NULL) AS fees`,
-      [newSubtotal, body.is_express]
+      `SELECT calculate_order_fees($1, $2, NULL, $3) AS fees`,
+      [newSubtotal, body.is_express, providerId]
     )
     const feeRows: any[] = feesResult.rows[0].fees ?? []
     const feesTotal  = feeRows.reduce((s: number, f: any) => s + parseFloat(String(f.amount)), 0)
@@ -67,12 +73,9 @@ export async function POST(req: NextRequest) {
     // Persist the updated services back to cart (background — non-fatal)
     try {
       await transaction(async (client) => {
-        const cartRes = await client.query(
-          `SELECT id FROM shopping_carts WHERE user_id = $1`, [userId]
-        )
-        if (cartRes.rowCount === 0) return
+        if (cartRow.rowCount === 0) return
 
-        const cartId = cartRes.rows[0].id
+        const cartId = cartRow.rows[0].id
 
         // Update cart is_express flag
         await client.query(

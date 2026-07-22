@@ -3,14 +3,15 @@
 // PATCH /api/customer/orders/[id] — reschedule pickup (date + time slot)
 
 import { NextRequest } from 'next/server'
-import { query, transaction } from '@/lib/db'
+import { query, queryOne, transaction } from '@/lib/db'
 import {
   successResponse, errorResponse, notFoundResponse,
   serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
-
-// Statuses that are still reschedulable (not yet picked up)
-const RESCHEDULABLE_STATUSES = new Set(['pending', 'confirmed'])
+import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from '@/lib/order-status'
+import { getRefundBreakdown } from '@/lib/payment/refund'
+import { rescheduleOrder } from '@/lib/order-reschedule'
+import { autoCancelForRescheduleLimit } from '@/lib/order-cancellation'
 
 export async function GET(
   req: NextRequest,
@@ -19,20 +20,29 @@ export async function GET(
   const userId  = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  const { id } = await params
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return notFoundResponse('Order not found')
+  const { id: publicId } = await params
 
   try {
+    const orderLookup = await queryOne<{ id: number }>(
+      `SELECT id FROM orders WHERE public_id = $1 AND customer_id = $2`,
+      [publicId, userId]
+    )
+    if (!orderLookup) return notFoundResponse('Order not found')
+    const orderId = orderLookup.id
+
     // Main order row
     const orderRes = await query(
       `SELECT
-         o.id, o.order_number, o.status, o.assignment_status,
+         o.id, o.public_id, o.order_number, o.status, o.assignment_status,
          o.pickup_address, o.delivery_address,
          o.pickup_date, o.pickup_time_slot,
-         o.delivery_date, o.delivery_time_slot,
+         o.delivery_date, o.delivery_time_slot, o.estimated_delivery_date,
+         o.delivered_at,
+         o.rejection_reason, o.rejected_at,
          o.special_instructions, o.is_express,
          o.subtotal, o.tax_amount, o.discount_amount, o.total_amount,
+         o.original_subtotal, o.original_total_amount,
+         o.modified_by_delivery, o.delivery_modified_at,
          o.payment_status, o.payment_method,
          o.created_at, o.updated_at,
          -- Provider
@@ -59,6 +69,9 @@ export async function GET(
     const itemsRes = await query(
       `SELECT
          oi.id, oi.quantity, oi.weight_kg, oi.garment_label,
+         oi.status        AS item_status,
+         oi.modification_note,
+         oi.modified_at,
          pt.name          AS product_type_name,
          pt.icon,
          s.id             AS service_id,
@@ -79,7 +92,7 @@ export async function GET(
 
     // Payments
     const paymentsRes = await query(
-      `SELECT id, amount, payment_method, status, merchant_txn_id, created_at
+      `SELECT id, amount, payment_method, provider, status, merchant_txn_id, created_at
        FROM payments WHERE order_id = $1 ORDER BY created_at`,
       [orderId]
     )
@@ -108,12 +121,39 @@ export async function GET(
       [orderId]
     )
 
-    // Can the order be rescheduled?
+    // Item-protection claims already filed on this order, plus the policy
+    // (cap/window) so the UI can show the right deadline without a second call.
+    const claimsRes = await query(
+      `SELECT gc.id, gc.order_item_id, gc.claim_type, gc.description, gc.status,
+              gc.cleaning_charge_snapshot, gc.cap_amount, gc.compensation_amount,
+              gc.decision_note, gc.created_at, gc.paid_at,
+              gc.provider_comment, gc.provider_decided_at,
+              lp.business_name AS provider_name
+       FROM garment_claims gc
+       LEFT JOIN orders o2 ON o2.id = gc.order_id
+       LEFT JOIN laundry_profiles lp ON lp.id = o2.laundry_profile_id
+       WHERE gc.order_id = $1 ORDER BY gc.created_at DESC`,
+      [orderId]
+    )
+    const policy = await queryOne<{
+      multiplier: string; max_cap_amount: string; claim_window_hours: number; is_active: boolean
+    }>(`SELECT multiplier, max_cap_amount, claim_window_hours, is_active FROM item_protection_policy ORDER BY id LIMIT 1`)
+
+    // Can the order be rescheduled / cancelled?
     const canReschedule = RESCHEDULABLE_STATUSES.has(order.status)
+    const canCancel     = CANCELLABLE_STATUSES.has(order.status)
+
+    // Captured so far (wallet + gateway) vs the current total — a positive
+    // balance means the customer can pay online (or in cash at delivery).
+    // Relevant after the delivery partner modifies items at pickup.
+    const { totalRefundable: amountPaid } = await getRefundBreakdown(
+      (text, p) => query(text, p), orderId
+    )
+    const balanceDue = Math.max(0, Math.round((parseFloat(order.total_amount) - amountPaid) * 100) / 100)
 
     return successResponse({
       order: {
-        id:                 order.id,
+        id:                 order.public_id,
         order_number:       order.order_number,
         status:             order.status,
         assignment_status:  order.assignment_status,
@@ -123,17 +163,28 @@ export async function GET(
         pickup_time_slot:   order.pickup_time_slot,
         delivery_date:      order.delivery_date,
         delivery_time_slot: order.delivery_time_slot,
+        estimated_delivery_date: order.estimated_delivery_date,
+        delivered_at:       order.delivered_at,
+        rejection_reason:   order.rejection_reason,
+        rejected_at:        order.rejected_at,
         special_instructions: order.special_instructions,
         is_express:         order.is_express,
         subtotal:           parseFloat(order.subtotal),
         tax_amount:         parseFloat(order.tax_amount),
         discount_amount:    parseFloat(order.discount_amount),
         total_amount:       parseFloat(order.total_amount),
+        original_subtotal:     order.original_subtotal != null ? parseFloat(order.original_subtotal) : null,
+        original_total_amount: order.original_total_amount != null ? parseFloat(order.original_total_amount) : null,
+        modified_by_delivery:  order.modified_by_delivery,
+        delivery_modified_at:  order.delivery_modified_at,
+        amount_paid:        amountPaid,
+        balance_due:        balanceDue,
         payment_status:     order.payment_status,
         payment_method:     order.payment_method,
         created_at:         order.created_at,
         updated_at:         order.updated_at,
         can_reschedule:     canReschedule,
+        can_cancel:         canCancel,
         provider: order.provider_id ? {
           id:      order.provider_id,
           name:    order.provider_name,
@@ -162,6 +213,18 @@ export async function GET(
       coupons:        couponsRes.rows.map(r => ({
         ...r, amount_discounted: parseFloat(r.amount_discounted),
       })),
+      claims: claimsRes.rows.map(r => ({
+        ...r,
+        cleaning_charge_snapshot: parseFloat(r.cleaning_charge_snapshot),
+        cap_amount:               parseFloat(r.cap_amount),
+        compensation_amount:      r.compensation_amount != null ? parseFloat(r.compensation_amount) : null,
+      })),
+      item_protection_policy: policy ? {
+        multiplier:         parseFloat(policy.multiplier),
+        max_cap_amount:     parseFloat(policy.max_cap_amount),
+        claim_window_hours: policy.claim_window_hours,
+        is_active:          policy.is_active,
+      } : null,
     })
   } catch (error) {
     console.error('[GET /api/customer/orders/:id]', error)
@@ -177,9 +240,7 @@ export async function PATCH(
   const userId  = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  const { id } = await params
-  const orderId = parseInt(id, 10)
-  if (isNaN(orderId)) return notFoundResponse('Order not found')
+  const { id: publicId } = await params
 
   let body: { pickup_date: string; pickup_time_slot: string }
   try { body = await req.json() } catch { return errorResponse('Invalid body', 400) }
@@ -194,29 +255,42 @@ export async function PATCH(
   if (newDate <= today)         return errorResponse('Pickup date must be in the future', 400)
 
   try {
-    const result = await transaction(async (client) => {
+    const { orderId, result } = await transaction(async (client) => {
       // Set user context for triggers
       await client.query(`SELECT set_config('app.current_user_id', $1, TRUE)`, [userId])
 
       // Verify order belongs to user and is reschedulable
       const check = await client.query(
-        `SELECT status FROM orders WHERE id = $1 AND customer_id = $2 FOR UPDATE`,
-        [orderId, userId]
+        `SELECT id, status, laundry_profile_id FROM orders WHERE public_id = $1 AND customer_id = $2 FOR UPDATE`,
+        [publicId, userId]
       )
       if (check.rowCount === 0) throw new Error('NOT_FOUND')
       if (!RESCHEDULABLE_STATUSES.has(check.rows[0].status)) throw new Error('NOT_RESCHEDULABLE')
+      const orderId = check.rows[0].id
 
-      await client.query(
-        `UPDATE orders
-         SET pickup_date = $1, pickup_time_slot = $2, updated_at = NOW()
-         WHERE id = $3`,
-        [body.pickup_date, body.pickup_time_slot, orderId]
-      )
+      const result = await rescheduleOrder({
+        client, orderId, laundryProfileId: check.rows[0].laundry_profile_id,
+        newPickupDate: body.pickup_date, newPickupTimeSlot: body.pickup_time_slot,
+        reasonNote: `Rescheduled by customer — new pickup slot: ${body.pickup_date} (${body.pickup_time_slot})`,
+        initiatedBy: userId, initiatedByRole: 'customer',
+      })
 
-      return { pickup_date: body.pickup_date, pickup_time_slot: body.pickup_time_slot }
+      return { orderId, result }
     })
 
-    return successResponse(result)
+    if (result.autoCancelThresholdReached) {
+      await autoCancelForRescheduleLimit(orderId)
+      return successResponse({
+        cancelled: true,
+        message: 'This order has been automatically cancelled after 3 reschedules. A refund has been initiated to your original payment method.',
+      })
+    }
+
+    return successResponse({
+      pickup_date: result.pickupDate,
+      pickup_time_slot: result.pickupTimeSlot,
+      estimated_delivery_date: result.estimatedDeliveryDate,
+    })
   } catch (error: any) {
     if (error.message === 'NOT_FOUND')         return notFoundResponse('Order not found')
     if (error.message === 'NOT_RESCHEDULABLE') return errorResponse(

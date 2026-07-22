@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
        LEFT JOIN laundry_profiles lp ON lp.id = o.laundry_profile_id
        LEFT JOIN delivery_profiles dp ON dp.id = o.delivery_profile_id
        LEFT JOIN users u ON u.id = dp.user_id
-       WHERE o.id = $1 AND o.customer_id = $2`,
+       WHERE o.public_id = $1 AND o.customer_id = $2`,
       [orderId, userId]
     )
 
@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
   if (!userId) return unauthorizedResponse()
 
   let body: {
-    order_id:        number
+    order_id:        string
     service_rating?: number | null
     delivery_rating?:number | null
     overall_rating?: number | null
@@ -92,7 +92,7 @@ export async function POST(req: NextRequest) {
       // Verify order belongs to user and is in reviewable state
       const order = await client.query(
         `SELECT id, status, laundry_profile_id, delivery_profile_id, customer_id
-         FROM orders WHERE id = $1 AND customer_id = $2`,
+         FROM orders WHERE public_id = $1 AND customer_id = $2`,
         [body.order_id, userId]
       )
       if (order.rowCount === 0) throw Object.assign(new Error('NOT_FOUND'), { code: 'NOT_FOUND' })
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
            updated_at      = NOW()
          RETURNING id`,
         [
-          body.order_id, userId,
+          o.id, userId,
           o.laundry_profile_id || null,
           o.delivery_profile_id || null,
           service_rating  || null,

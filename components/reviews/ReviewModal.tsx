@@ -12,7 +12,7 @@ import { useToast } from '@/hooks/use-toast'
 interface ReviewModalProps {
   open:                  boolean
   onClose:               () => void
-  orderId:               number
+  orderId:               string
   orderNumber:           string
   providerName?:         string | null
   deliveryPartnerName?:  string | null

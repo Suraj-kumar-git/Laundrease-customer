@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 
 export default function RootRedirect() {
-  redirect('/customer');
+  const role = process.env.ROLE || null;
+  redirect(`/${role}`);
 }

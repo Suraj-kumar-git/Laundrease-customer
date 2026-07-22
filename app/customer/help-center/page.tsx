@@ -12,6 +12,13 @@ import { FaqAccordion } from '@/components/ui/faq-accordion'
 export const metadata: Metadata = {
   title: 'Help Center | Laundrease',
   description: 'Find answers to common questions about Laundrease — orders, payments, delivery, and more.',
+  keywords: ['Laundrease help', 'laundry order support', 'Laundrease customer service'],
+  alternates: { canonical: '/customer/help-center' },
+  openGraph: {
+    title: 'Help Center | Laundrease', type: 'website', url: '/customer/help-center',
+    description: 'Find answers to common questions about Laundrease — orders, payments, delivery, and more.',
+  },
+  twitter: { card: 'summary_large_image', title: 'Help Center | Laundrease' },
 }
 
 export const revalidate = 21600
@@ -57,24 +64,44 @@ export default async function HelpCenterPage() {
   const heroBody = hero?.body as HeroBody | undefined
   const contactCards = contact?.body as CardItem[] | undefined
 
+  const faqJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: faqGroups.flatMap((block) => {
+      const body = block.body as FaqGroupBody
+      return (body.items || []).map((item) => ({
+        '@type': 'Question',
+        name: item.q,
+        acceptedAnswer: { '@type': 'Answer', text: item.a },
+      }))
+    }),
+  }
+
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'Help Center' }]}>
+      {faqJsonLd.mainEntity.length > 0 && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+        />
+      )}
       {/* Hero */}
       <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
-        <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full bg-primary/10 blur-3xl" />
-        <PageSection className="relative py-20 md:py-28">
-          <div className="text-center">
+        <div className="pointer-events-none absolute -top-40 -right-40 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 -left-20 h-72 w-72 rounded-full bg-primary/8 blur-3xl" />
+        <PageSection className="relative py-24 md:py-32">
+          <div className="max-w-3xl">
             {heroBody?.badge && (
               <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
                 <HelpCircle className="h-3 w-3" />
                 {heroBody.badge}
               </span>
             )}
-            <h1 className="mt-2 text-4xl font-bold tracking-tight text-foreground sm:text-5xl">
+            <h1 className="mt-2 text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl md:text-6xl">
               {hero?.title ?? 'Help Center'}
             </h1>
             {hero?.subtitle && (
-              <p className="mx-auto mt-4 max-w-xl text-lg text-muted-foreground">
+              <p className="mt-6 text-xl text-muted-foreground leading-relaxed">
                 {hero.subtitle}
               </p>
             )}
@@ -134,7 +161,7 @@ export default async function HelpCenterPage() {
               subtitle={contact?.subtitle ?? undefined}
               centered
             />
-            <div className="grid gap-6 sm:grid-cols-3">
+            <div className={`grid gap-6 ${contactCards.length === 2 ? 'mx-auto max-w-2xl sm:grid-cols-2' : 'sm:grid-cols-3'}`}>
               {contactCards.map((card, i) => (
                 <a
                   key={i}

@@ -8,6 +8,13 @@ import { EMPLOYMENT_TYPE_LABELS } from '@/types/footer-pages'
 export const metadata: Metadata = {
   title: 'Careers | Laundrease',
   description: 'Join the Laundrease team. We are building the future of on-demand laundry in India.',
+  keywords: ['jobs at Laundrease', 'Laundrease careers', 'laundry startup jobs Pune'],
+  alternates: { canonical: '/customer/careers' },
+  openGraph: {
+    title: 'Careers | Laundrease', type: 'website', url: '/customer/careers',
+    description: 'Join the Laundrease team. We are building the future of on-demand laundry in India.',
+  },
+  twitter: { card: 'summary_large_image', title: 'Careers | Laundrease' },
 }
 
 export const revalidate = 3600 // 1 hour
@@ -33,7 +40,7 @@ const TYPE_STYLES: Record<EmploymentType, string> = {
   full_time: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400',
   part_time: 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400',
   contract: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400',
-  internship: 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-400',
+  internship: 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-400',
 }
 
 // ---- Job Card ----------------------------------------------

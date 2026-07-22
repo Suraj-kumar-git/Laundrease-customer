@@ -77,6 +77,7 @@ export async function POST(req: NextRequest) {
       await client.query(
         `UPDATE orders
          SET payment_status = 'paid',
+             status = CASE WHEN status = 'failed' THEN 'pending' ELSE status END,
              updated_at = NOW()
          WHERE id = $1`,
         [body.order_id]
@@ -88,7 +89,8 @@ export async function POST(req: NextRequest) {
              transaction_id = $1,
              method_details = $2,
              updated_at = NOW()
-         WHERE order_id = $3`,
+         WHERE order_id = $3 AND provider <> 'cod' AND provider <> 'wallet'
+           AND status IN ('initiated', 'failed')`,
         [
           body.gateway_payment_id,
           JSON.stringify({
@@ -104,6 +106,11 @@ export async function POST(req: NextRequest) {
         ]
       )
     })
+
+    // Cart was deliberately kept around (not cleared at order-create time)
+    // until payment is actually confirmed — clear it now that it is.
+    try { await query(`DELETE FROM shopping_carts WHERE user_id = $1`, [userId]) }
+    catch { /* non-fatal */ }
 
     return successResponse({
       verified: true,

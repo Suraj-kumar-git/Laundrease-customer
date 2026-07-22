@@ -115,7 +115,7 @@ export interface InvoiceData {
 
 // ---- Palette & styles ----------------------------------------
 
-const VIOLET = '#3b82f6'
+const BLUE = '#3b82f6'
 const VIOLET2 = '#ede9fe'
 const GRAY1 = '#111827'
 const GRAY2 = '#374151'
@@ -123,7 +123,10 @@ const GRAY3 = '#6b7280'
 const GRAY4 = '#e5e7eb'
 const GREEN = '#059669'
 const WHITE = '#ffffff'
-const logoUrl= `${process.env.NEXT_PUBLIC_CUSTOMER_URL}/laundrease-logo.PNG`
+// S3 first so branding can be updated without a redeploy; falls back to the
+// app's own bundled public asset if that env var isn't set.
+const logoUrl = process.env.NEXT_PUBLIC_S3_LOGO_URL
+  || `${process.env.NEXT_PUBLIC_CUSTOMER_URL}/laundrease-logo.PNG`
 
 const s = StyleSheet.create({
   logoImage: {
@@ -134,7 +137,7 @@ const s = StyleSheet.create({
   logoTextFallback: {
     fontSize: 22,
     fontFamily: 'Helvetica-Bold',
-    color: VIOLET,
+    color: BLUE,
   },
   page: {
     fontFamily: 'Helvetica',
@@ -155,7 +158,7 @@ const s = StyleSheet.create({
   logo: {
     fontSize: 22,
     fontFamily: 'Helvetica-Bold',
-    color: VIOLET,
+    color: BLUE,
     letterSpacing: 0.5,
   },
   logoTag: {
@@ -191,7 +194,7 @@ const s = StyleSheet.create({
   },
   hrThick: {
     borderBottomWidth: 2,
-    borderBottomColor: VIOLET,
+    borderBottomColor: BLUE,
     marginVertical: 14,
   },
 
@@ -300,7 +303,7 @@ const s = StyleSheet.create({
   },
   orderFieldLabel: {
     fontSize: 7,
-    color: VIOLET,
+    color: BLUE,
     fontFamily: 'Helvetica-Bold',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
@@ -338,7 +341,7 @@ const s = StyleSheet.create({
   // Table
   tableHeader: {
     flexDirection: 'row',
-    backgroundColor: VIOLET,
+    backgroundColor: BLUE,
     borderRadius: 4,
     paddingHorizontal: 8,
     paddingVertical: 7,
@@ -479,7 +482,7 @@ const s = StyleSheet.create({
   totalsFinalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    backgroundColor: VIOLET,
+    backgroundColor: BLUE,
     borderRadius: 4,
     paddingHorizontal: 8,
     paddingVertical: 7,
@@ -650,7 +653,7 @@ const s = StyleSheet.create({
   footerThank: {
     fontSize: 10,
     fontFamily: 'Helvetica-Bold',
-    color: VIOLET,
+    color: BLUE,
     marginBottom: 3,
   },
   footerSub: {
@@ -712,7 +715,12 @@ function formatAddress(a: string | null) {
 type InvoiceDocumentProps = DocumentProps & { data: InvoiceData };
 export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docProps }) => {
   const taxableAmount = data.taxableAmount ?? data.subtotal
-  const effectiveTaxRate = data.taxRate ?? 0
+  // taxRate is rarely passed in explicitly — derive it from the actual
+  // amounts when it isn't, so CGST/SGST show their real rate instead of
+  // defaulting to 0% while still charging real money.
+  const effectiveTaxRate = data.taxRate ?? (
+    taxableAmount > 0 ? Math.round((data.taxAmount / taxableAmount) * 100 * 100) / 100 : 0
+  )
   const cgstRate = data.cgstRate ?? effectiveTaxRate / 2
   const sgstRate = data.sgstRate ?? effectiveTaxRate / 2
   const cgstAmount = data.cgstAmount ?? (data.taxAmount > 0 ? data.taxAmount / 2 : 0)
@@ -877,7 +885,7 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docPr
             <Text style={s.orderFieldValue}>{fmtDate(data.pickupDate)}</Text>
 
             {data.pickupTimeSlot && (
-              <Text style={[s.orderFieldValue, { fontSize: 7.5, color: VIOLET }]}>
+              <Text style={[s.orderFieldValue, { fontSize: 7.5, color: BLUE }]}>
                 {data.pickupTimeSlot}
               </Text>
             )}
@@ -889,7 +897,7 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docPr
               <Text style={s.orderFieldValue}>{fmtDate(data.deliveryDate)}</Text>
 
               {data.deliveryTimeSlot && (
-                <Text style={[s.orderFieldValue, { fontSize: 7.5, color: VIOLET }]}>
+                <Text style={[s.orderFieldValue, { fontSize: 7.5, color: BLUE }]}>
                   {data.deliveryTimeSlot}
                 </Text>
               )}
@@ -1064,25 +1072,6 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docPr
                   </Text>
                 </View>
               ))}
-
-            <View style={s.totalsRow}>
-              <Text style={s.totalsLabel}>Taxable Amount</Text>
-              <Text style={s.totalsValue}>{fmt(taxableAmount)}</Text>
-            </View>
-
-            {cgstAmount > 0 && (
-              <View style={s.totalsRow}>
-                <Text style={s.totalsLabel}>CGST</Text>
-                <Text style={s.totalsValue}>{fmt(cgstAmount)}</Text>
-              </View>
-            )}
-
-            {sgstAmount > 0 && (
-              <View style={s.totalsRow}>
-                <Text style={s.totalsLabel}>SGST</Text>
-                <Text style={s.totalsValue}>{fmt(sgstAmount)}</Text>
-              </View>
-            )}
 
             <View style={s.totalsFinalRow}>
               <Text style={s.totalsFinalLabel}>Total Amount</Text>

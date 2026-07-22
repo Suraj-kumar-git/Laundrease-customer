@@ -5,58 +5,86 @@ import {
   errorResponse,
   serverErrorResponse,
 } from '@/lib/api-response'
+import { PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL } from '@/lib/subscription'
 
 // GET /api/customer/public/pricing/services-by-area
 // Public — no auth required
 //
-// Query params (one required):
-//   ?pincode=411045
+// Query params:
+//   ?pincode=411045              (one of pincode/city/provider_id required)
 //   ?city=Pune
+//   ?provider_id=42              — optional. When given, pricing is resolved
+//                                   for that exact provider (override > base)
+//                                   instead of showing platform base rates
+//                                   across the whole area.
 //
 // Returns:
 //   - covered: boolean — whether we have active providers in this area
 //   - provider_count: number
+//   - provider: { id, name } | null — set when provider_id was used
 //   - services: ServiceWithProducts[] — only services offered by providers in that area
-//     Each service includes product_types with base pricing
-//
-// Pricing resolution order (cheapest wins for display):
-//   1. provider_product_service_prices (provider override for this product+service)
-//   2. product_service_prices (platform base price)
-// We show the platform base price — provider-specific overrides are shown
-// only after a provider is selected in the actual order flow.
+//     Each service includes product_types with pricing (provider override if
+//     provider_id was given, otherwise the platform base price)
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const pincode = searchParams.get('pincode')?.trim()
   const city = searchParams.get('city')?.trim()
+  const providerIdParam = searchParams.get('provider_id')?.trim()
+  const requestedProviderId = providerIdParam ? parseInt(providerIdParam, 10) : null
 
-  if (!pincode && !city) {
-    return errorResponse('Provide pincode or city query parameter', 400)
+  if (!pincode && !city && !requestedProviderId) {
+    return errorResponse('Provide pincode, city, or provider_id query parameter', 400)
   }
 
   try {
-    // ---- Step 1: Find active providers in this area ---------
-    const providerQuery = pincode
-      ? `SELECT DISTINCT lp.id, lp.city
-         FROM laundry_profiles lp
-         JOIN provider_service_areas psa ON psa.provider_id = lp.id
-         WHERE lp.status = 'active'
-           AND lp.is_verified = TRUE
-           AND psa.is_active = TRUE
-           AND psa.postal_code = $1`
-      : `SELECT DISTINCT lp.id, lp.city
-         FROM laundry_profiles lp
-         WHERE lp.status = 'active'
-           AND lp.is_verified = TRUE
-           AND lp.city ILIKE $1`
+    let providerIds: number[]
+    let cityName: string | null
+    let selectedProvider: { id: number; name: string } | null = null
 
-    const providerResult = await query<{ id: number; city: string }>(
-      providerQuery,
-      [pincode ?? `%${city}%`]
-    )
+    if (requestedProviderId) {
+      // ---- Specific provider requested — skip area lookup ---------
+      const providerRow = await query<{ id: number; city: string; business_name: string }>(
+        `SELECT lp.id, lp.city, lp.business_name FROM laundry_profiles lp
+         WHERE lp.id = $1 AND lp.status = 'active' AND lp.is_verified = TRUE
+           AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}`,
+        [requestedProviderId]
+      )
+      if (providerRow.rowCount === 0) {
+        return successResponse({
+          covered: false, pincode: pincode ?? '', city: city ?? null,
+          provider_count: 0, provider: null, services: [],
+        })
+      }
+      providerIds = [providerRow.rows[0].id]
+      cityName = providerRow.rows[0].city
+      selectedProvider = { id: providerRow.rows[0].id, name: providerRow.rows[0].business_name }
+    } else {
+      // ---- Step 1: Find active providers in this area ---------
+      const providerQuery = pincode
+        ? `SELECT DISTINCT lp.id, lp.city
+           FROM laundry_profiles lp
+           JOIN provider_service_areas psa ON psa.provider_id = lp.id
+           WHERE lp.status = 'active'
+             AND lp.is_verified = TRUE
+             AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}
+             AND psa.is_active = TRUE
+             AND psa.postal_code = $1`
+        : `SELECT DISTINCT lp.id, lp.city
+           FROM laundry_profiles lp
+           WHERE lp.status = 'active'
+             AND lp.is_verified = TRUE
+             AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}
+             AND lp.city ILIKE $1`
 
-    const providerIds = providerResult.rows.map((r) => r.id)
-    const cityName = providerResult.rows[0]?.city ?? city ?? null
+      const providerResult = await query<{ id: number; city: string }>(
+        providerQuery,
+        [pincode ?? `%${city}%`]
+      )
+
+      providerIds = providerResult.rows.map((r) => r.id)
+      cityName = providerResult.rows[0]?.city ?? city ?? null
+    }
 
     if (providerIds.length === 0) {
       // Area not covered — return empty but valid structure
@@ -65,6 +93,7 @@ export async function GET(req: NextRequest) {
         pincode: pincode ?? '',
         city: cityName,
         provider_count: 0,
+        provider: null,
         services: [],
       })
     }
@@ -97,7 +126,7 @@ export async function GET(req: NextRequest) {
       [providerIds]
     )
 
-    if (servicesResult.rowCount === 0) {
+    if (servicesResult.rowCount === 0 && !selectedProvider) {
       // Providers exist but haven't configured their services yet — show all platform services
       // This is a graceful fallback during early platform growth
       const allServices = await query(
@@ -114,13 +143,17 @@ export async function GET(req: NextRequest) {
         pincode: pincode ?? '',
         city: cityName,
         provider_count: providerIds.length,
+        provider: selectedProvider,
         services: [],
       })
     }
 
     const serviceIds = servicesResult.rows.map((r) => r.service_id)
 
-    // ---- Step 3: Product types + platform pricing -----------
+    // ---- Step 3: Product types + pricing ---------------------
+    // When a specific provider is selected, resolve their override price
+    // (provider_product_service_prices) before falling back to the platform
+    // base price — same resolution order as the order-creation flow.
     const pricingResult = await query<{
       service_id: number
       product_type_id: number
@@ -131,23 +164,45 @@ export async function GET(req: NextRequest) {
       icon: string
       sort_order: number
       unit_price: number
+      mrp: number | null
     }>(
-      `SELECT
-         psp.service_id,
-         pt.id             AS product_type_id,
-         pt.name           AS product_type_name,
-         pt.description    AS product_description,
-         pt.pricing_model,
-         pt.display_category,
-         pt.icon,
-         pt.sort_order,
-         psp.unit_price
-       FROM product_service_prices psp
-       JOIN product_types pt ON pt.id = psp.product_type_id
-       WHERE psp.service_id = ANY($1::int[])
-         AND pt.is_active = TRUE
-       ORDER BY pt.display_category, pt.sort_order, pt.name`,
-      [serviceIds]
+      selectedProvider
+        ? `SELECT
+             psp.service_id,
+             pt.id             AS product_type_id,
+             pt.name           AS product_type_name,
+             pt.description    AS product_description,
+             pt.pricing_model,
+             pt.display_category,
+             pt.icon,
+             pt.sort_order,
+             COALESCE(ppsp.unit_price, psp.unit_price) AS unit_price,
+             ppsp.mrp          AS mrp
+           FROM product_service_prices psp
+           JOIN product_types pt ON pt.id = psp.product_type_id
+           LEFT JOIN provider_product_service_prices ppsp
+             ON ppsp.provider_id = $2
+             AND ppsp.product_type_id = psp.product_type_id
+             AND ppsp.service_id = psp.service_id
+           WHERE psp.service_id = ANY($1::int[])
+             AND pt.is_active = TRUE
+           ORDER BY pt.display_category, pt.sort_order, pt.name`
+        : `SELECT
+             psp.service_id,
+             pt.id             AS product_type_id,
+             pt.name           AS product_type_name,
+             pt.description    AS product_description,
+             pt.pricing_model,
+             pt.display_category,
+             pt.icon,
+             pt.sort_order,
+             psp.unit_price
+           FROM product_service_prices psp
+           JOIN product_types pt ON pt.id = psp.product_type_id
+           WHERE psp.service_id = ANY($1::int[])
+             AND pt.is_active = TRUE
+           ORDER BY pt.display_category, pt.sort_order, pt.name`,
+      selectedProvider ? [serviceIds, selectedProvider.id] : [serviceIds]
     )
 
     // ---- Step 4: Group product types by service -------------
@@ -179,6 +234,7 @@ export async function GET(req: NextRequest) {
           icon: p.icon,
           sort_order: p.sort_order,
           unit_price: Number(p.unit_price),
+          mrp: p.mrp != null ? Number(p.mrp) : null,
         })),
       }))
       // Only return services that have at least one priced product type
@@ -189,6 +245,7 @@ export async function GET(req: NextRequest) {
       pincode: pincode ?? '',
       city: cityName,
       provider_count: providerIds.length,
+      provider: selectedProvider,
       services,
     })
   } catch (error) {

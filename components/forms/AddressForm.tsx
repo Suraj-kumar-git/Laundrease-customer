@@ -2,21 +2,23 @@
 // components/forms/AddressForm.tsx
 // Reusable form used by both /customer/addresses/new and /customer/addresses/[id]/edit
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Loader2, MapPin, Check } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { PlaceAutocompleteInput } from '@/components/common/PlaceAutocompleteInput'
 
 interface AddressFormProps {
   /** When editing — pass existing address values */
   initial?: Partial<AddressFormData>
-  addressId?: number
+  addressId?: string
   onSuccess?: () => void
 }
 
 export interface AddressFormData {
   label:          string
+  tags:           string[]
   address_line1:  string
   address_line2:  string
   landmark:       string
@@ -32,9 +34,10 @@ export interface AddressFormData {
 }
 
 const LABEL_PRESETS = ['Home', 'Work', 'Other']
+const TAG_PRESETS = ['Front Gate', 'Evening Delivery', 'Call Before', 'No Bell', 'Pet Friendly', 'Security Desk']
 
 const EMPTY: AddressFormData = {
-  label: '', address_line1: '', address_line2: '', landmark: '',
+  label: '', tags: [], address_line1: '', address_line2: '', landmark: '',
   neighborhood: '', city: '', state: '', postal_code: '', country_code: 'IN',
   instructions: '', contact_name: '', contact_phone: '', is_default: false,
 }
@@ -83,19 +86,103 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
   const [form,   setForm]   = useState<AddressFormData>({ ...EMPTY, ...initial })
   const [errors, setErrors] = useState<Partial<Record<keyof AddressFormData, string>>>({})
   const [saving, setSaving] = useState(false)
+  const [customTag, setCustomTag] = useState('')
+  const [pincodeLookup, setPincodeLookup] = useState<'idle' | 'checking' | 'found' | 'not_found'>('idle')
+  const lastLookedUp = useRef<string | null>(null)
+
+  // Auto-fill city/state from the PIN code, debounced — once 6 digits are
+  // entered we already know the city/state, so don't make the customer
+  // type something we can derive.
+  useEffect(() => {
+    const pin = form.postal_code.trim()
+    if (!/^\d{6}$/.test(pin)) {
+      setPincodeLookup('idle')
+      return
+    }
+    if (lastLookedUp.current === pin) return
+
+    setPincodeLookup('checking')
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/customer/public/pincode?pincode=${pin}`)
+        const json = await res.json()
+        lastLookedUp.current = pin
+        if (json.success && json.data?.found) {
+          setPincodeLookup('found')
+          setForm(prev => ({ ...prev, city: json.data.city, state: json.data.state }))
+        } else {
+          setPincodeLookup('not_found')
+        }
+      } catch {
+        setPincodeLookup('not_found')
+      }
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [form.postal_code])
 
   const set = (field: keyof AddressFormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
       setForm(prev => ({ ...prev, [field]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value }))
 
+  const toggleTag = (tag: string) =>
+    setForm(prev => ({
+      ...prev,
+      tags: prev.tags.includes(tag) ? prev.tags.filter(t => t !== tag) : [...prev.tags, tag],
+    }))
+
+  const addCustomTag = () => {
+    const tag = customTag.trim()
+    if (tag && !form.tags.includes(tag)) {
+      setForm(prev => ({ ...prev, tags: [...prev.tags, tag] }))
+    }
+    setCustomTag('')
+  }
+
+  const removeTag = (tag: string) =>
+    setForm(prev => ({ ...prev, tags: prev.tags.filter(t => t !== tag) }))
+
+  // Live validation — recomputed on every change. Field errors are only
+  // *shown* once the field has been touched (or a submit was attempted),
+  // and the submit button stays disabled until everything required is valid.
+  const computeErrors = (data: AddressFormData): Partial<Record<keyof AddressFormData, string>> => {
+    const errs: Partial<Record<keyof AddressFormData, string>> = {}
+    if (!data.label.trim())         errs.label         = 'Label is required'
+    if (!data.address_line1.trim()) errs.address_line1  = 'Address line 1 is required'
+    if (!/^\d{6}$/.test(data.postal_code.trim())) errs.postal_code = 'Enter a valid 6-digit PIN code'
+    if (!data.city.trim())          errs.city           = 'City is required'
+    if (!data.country_code.trim())  errs.country_code   = 'Country code is required'
+    if (!data.contact_name.trim())  errs.contact_name   = 'Contact name is required'
+    // Required — the DB rejects an empty contact_phone (the format CHECK
+    // constraint doesn't accept '', only NULL or a valid number), which
+    // previously surfaced as a generic "Failed to save address" error.
+    if (!data.contact_phone.trim()) {
+      errs.contact_phone = 'Contact phone is required'
+    } else {
+      const digits = data.contact_phone.replace(/^\+91/, '').replace(/\D/g, '')
+      if (!/^[6-9]\d{9}$/.test(digits)) errs.contact_phone = 'Enter a valid 10-digit Indian mobile number'
+    }
+    return errs
+  }
+
+  const [touched, setTouched] = useState<Partial<Record<keyof AddressFormData, boolean>>>({})
+  const liveErrors = computeErrors(form)
+  const formValid  = Object.keys(liveErrors).length === 0
+
+  const touch = (field: keyof AddressFormData) => () =>
+    setTouched(prev => ({ ...prev, [field]: true }))
+
+  // Show an error only for touched fields (or after a submit attempt)
+  const shownError = (field: keyof AddressFormData): string | undefined =>
+    (touched[field] || errors[field]) ? liveErrors[field] : undefined
+
   const validate = (): boolean => {
-    const errs: typeof errors = {}
-    if (!form.label.trim())         errs.label         = 'Label is required'
-    if (!form.address_line1.trim()) errs.address_line1  = 'Address line 1 is required'
-    if (!form.city.trim())          errs.city           = 'City is required'
-    if (!form.country_code.trim())  errs.country_code   = 'Country code is required'
-    setErrors(errs)
-    return Object.keys(errs).length === 0
+    setErrors(liveErrors)
+    // Mark everything touched so all remaining errors surface at once
+    setTouched({
+      label: true, address_line1: true, postal_code: true, city: true, country_code: true,
+      contact_name: true, contact_phone: true,
+    })
+    return formValid
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -130,7 +217,7 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-5">
       {/* Label presets */}
-      <Field label="Address Label" required error={errors.label}>
+      <Field label="Address Label" required error={shownError('label')}>
         <div className="flex gap-2">
           {LABEL_PRESETS.map(preset => (
             <button
@@ -160,9 +247,23 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
         </div>
       </Field>
 
-      <Field label="Address Line 1" required error={errors.address_line1}>
-        <Input value={form.address_line1} onChange={set('address_line1')}
-          placeholder="Flat / House No., Building / Street name" maxLength={255} />
+      <Field label="Address Line 1" required error={shownError('address_line1')}>
+        <PlaceAutocompleteInput
+          value={form.address_line1}
+          onChange={v => setForm(prev => ({ ...prev, address_line1: v }))}
+          placeholder="Search building, street or area…"
+          className="mt-1 w-full pl-9 pr-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          types={['geocode']}
+          onAddressComponents={({ address_line1, city, state, postal_code }) => {
+            setForm(prev => ({
+              ...prev,
+              address_line1: address_line1 || prev.address_line1,
+              city:          city          || prev.city,
+              state:         state         || prev.state,
+              postal_code:   postal_code   || prev.postal_code,
+            }))
+          }}
+        />
       </Field>
 
       <Field label="Address Line 2">
@@ -181,23 +282,36 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
         </Field>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="City" required error={errors.city}>
-          <Input value={form.city} onChange={set('city')} placeholder="City" maxLength={100} />
+      {/* PIN code drives the city/state auto-fill below — entering it first
+          means the customer usually never has to type the next two fields. */}
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="PIN Code" required error={shownError('postal_code')}>
+          <div className="relative">
+            <Input value={form.postal_code} onChange={set('postal_code')} onBlur={touch('postal_code')}
+              placeholder="6-digit PIN" maxLength={6} inputMode="numeric" className="pr-9" />
+            {pincodeLookup === 'checking' && (
+              <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+            )}
+            {pincodeLookup === 'found' && (
+              <Check className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-500" />
+            )}
+          </div>
+          {pincodeLookup === 'not_found' && (
+            <p className="mt-1 text-xs text-amber-600">Couldn&apos;t find this PIN code — please enter city/state manually.</p>
+          )}
         </Field>
-        <Field label="State">
-          <Input value={form.state} onChange={set('state')} placeholder="State" maxLength={100} />
+        <Field label="City" required error={shownError('city')}>
+          <Input value={form.city} onChange={set('city')} onBlur={touch('city')} placeholder="City" maxLength={100} />
         </Field>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="PIN Code">
-          <Input value={form.postal_code} onChange={set('postal_code')}
-            placeholder="6-digit PIN" maxLength={20} />
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="State">
+          <Input value={form.state} onChange={set('state')} placeholder="State" maxLength={100} />
         </Field>
-        <Field label="Country Code" required error={errors.country_code}>
-          <Input value={form.country_code} onChange={set('country_code')}
-            placeholder="IN" maxLength={2} className="uppercase" />
+        <Field label="Country Code">
+          <Input value={form.country_code} disabled
+            className="uppercase disabled:cursor-not-allowed disabled:opacity-70" />
         </Field>
       </div>
 
@@ -219,34 +333,84 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
 
       {/* Contact */}
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Contact Name">
-          <Input value={form.contact_name} onChange={set('contact_name')}
+        <Field label="Contact Name" required error={shownError('contact_name')}>
+          <Input value={form.contact_name} onChange={set('contact_name')} onBlur={touch('contact_name')}
             placeholder="Person to contact" maxLength={100} />
         </Field>
-        <Field label="Contact Phone">
-          <Input value={form.contact_phone} onChange={set('contact_phone')}
-            placeholder="+91 98765 43210" type="tel" maxLength={20} />
+        <Field label="Contact Phone" required error={shownError('contact_phone')}>
+          <Input
+            value={form.contact_phone}
+            onChange={e => {
+              const raw = e.target.value.replace(/[^\d+]/g, '')
+              if (raw.length <= 13) setForm(prev => ({ ...prev, contact_phone: raw }))
+            }}
+            onBlur={touch('contact_phone')}
+            placeholder="+91 98765 43210"
+            type="tel"
+            inputMode="tel"
+            maxLength={13}
+          />
         </Field>
       </div>
 
-      {/* Default address toggle */}
-      <label className="flex cursor-pointer items-center gap-3 rounded-2xl border border-border/50 bg-card p-4 transition-all hover:border-border">
-        <div className={cn(
-          'flex h-5 w-5 items-center justify-center rounded border-2 transition-all',
-          form.is_default ? 'border-primary bg-primary' : 'border-muted-foreground/30 bg-background'
-        )}>
-          {form.is_default && <Check className="h-3 w-3 text-primary-foreground" />}
+      {/* Tags */}
+      <Field label="Tags">
+        <div className="flex flex-wrap gap-2">
+          {TAG_PRESETS.map(tag => (
+            <button
+              key={tag}
+              type="button"
+              onClick={() => toggleTag(tag)}
+              className={cn(
+                'rounded-xl border px-3 py-1.5 text-xs font-medium transition-all',
+                form.tags.includes(tag)
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border/50 bg-card text-muted-foreground hover:border-border hover:text-foreground'
+              )}
+            >
+              {tag}
+            </button>
+          ))}
         </div>
+        {form.tags.filter(t => !TAG_PRESETS.includes(t)).length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {form.tags.filter(t => !TAG_PRESETS.includes(t)).map(tag => (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => removeTag(tag)}
+                className="rounded-xl border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary"
+              >
+                {tag} ×
+              </button>
+            ))}
+          </div>
+        )}
+        <div className="mt-2 flex gap-2">
+          <Input
+            value={customTag}
+            onChange={e => setCustomTag(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomTag() } }}
+            placeholder="Add custom tag…"
+            maxLength={50}
+            className="flex-1"
+          />
+          <button type="button" onClick={addCustomTag}
+            className="rounded-xl border border-border/50 px-4 text-sm font-medium text-muted-foreground hover:bg-muted">
+            Add
+          </button>
+        </div>
+      </Field>
+
+      {/* Default address toggle */}
+      <label className="flex cursor-pointer items-center gap-2">
         <input
           type="checkbox"
           checked={form.is_default}
           onChange={set('is_default') as any}
-          className="sr-only"
+          className="h-4 w-4 rounded border-muted-foreground/30 text-primary focus:ring-primary/30"
         />
-        <div>
-          <p className="text-sm font-medium text-foreground">Set as default address</p>
-          <p className="text-xs text-muted-foreground">This address will be pre-selected when creating orders</p>
-        </div>
+        <span className="text-sm text-foreground">Set as default address</span>
       </label>
 
       {/* Submit */}
@@ -260,8 +424,9 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
         </button>
         <button
           type="submit"
-          disabled={saving}
-          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-50"
+          disabled={saving || !formValid}
+          title={!formValid ? 'Fill all required fields (marked *) to continue' : undefined}
+          className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {saving ? (
             <><Loader2 className="h-4 w-4 animate-spin" /> Saving…</>
