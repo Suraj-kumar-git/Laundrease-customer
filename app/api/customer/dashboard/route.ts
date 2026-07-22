@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
           SELECT 1
           FROM orders o
           WHERE o.customer_id = $1
-            AND o.status NOT IN ('cancelled', 'failed')
+            AND o.status NOT IN ('cancelled', 'failed', 'rejected')
             AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')
         ) AS has_placed_order
       )
