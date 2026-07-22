@@ -100,7 +100,7 @@ export const EMPLOYMENT_TYPE_LABELS: Record<EmploymentType, string> = {
 }
  
 export interface CareerJob {
-  id: number
+  id: string
   title: string
   department: string
   location: string

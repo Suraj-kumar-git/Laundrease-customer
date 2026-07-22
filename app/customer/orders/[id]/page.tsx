@@ -9,36 +9,71 @@ import { format, addDays, startOfDay } from 'date-fns'
 import {
   ArrowLeft, Package, MapPin, Store, Calendar, Clock,
   Receipt, CreditCard, Zap, CheckCircle, XCircle, Truck,
-  ChevronRight, Loader2, AlertCircle, Edit2, X,
+  ChevronRight, ChevronDown, Loader2, AlertCircle, Edit2, X,
   Phone, Shield, RefreshCw, Info,
-  Download,
+  Download, Ban, Camera, ShieldAlert,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { launchGatewayCheckout } from '@/lib/payment-client'
+import { ProductIcon } from '@/components/customer/ProductIcon'
+import { resolveProductIconSrc } from '@/lib/product-icons'
 
 // ---- Types --------------------------------------------------
 interface OrderDetail {
-  id: number; order_number: string; status: string; assignment_status: string
+  id: string; order_number: string; status: string; assignment_status: string
   pickup_address: any; delivery_address: any
   pickup_date: string; pickup_time_slot: string
   delivery_date: string | null; delivery_time_slot: string | null
+  estimated_delivery_date: string | null
+  delivered_at: string | null
+  rejection_reason: string | null; rejected_at: string | null
   special_instructions: string | null; is_express: boolean
   subtotal: number; tax_amount: number; discount_amount: number; total_amount: number
+  original_subtotal: number | null; original_total_amount: number | null
+  modified_by_delivery: boolean; delivery_modified_at: string | null
+  amount_paid: number; balance_due: number
   payment_status: string; payment_method: string
-  created_at: string; updated_at: string; can_reschedule: boolean
+  created_at: string; updated_at: string; can_reschedule: boolean; can_cancel: boolean
   provider: { id: number; name: string; address: string; city: string; phone: string } | null
   delivery_partner: { name: string; phone: string } | null
 }
 
+interface GarmentClaim {
+  id: number; order_item_id: number; claim_type: 'damaged' | 'lost' | 'stolen'
+  description: string; status: string; cleaning_charge_snapshot: number; cap_amount: number
+  compensation_amount: number | null; decision_note: string | null; created_at: string
+  paid_at: string | null
+  provider_comment: string | null; provider_decided_at: string | null
+  provider_name: string | null
+}
+
+// Customer-friendly labels + styling per claim status (new multi-stage flow)
+const CLAIM_STATUS_META: Record<string, { label: string; cls: string }> = {
+  submitted:         { label: 'Awaiting laundry review',   cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' },
+  under_review:      { label: 'Under review',              cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400' },
+  provider_approved: { label: 'Approved by laundry',       cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400' },
+  provider_rejected: { label: 'Rejected by laundry',       cls: 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400' },
+  amount_issued:     { label: 'Compensation processing',   cls: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400' },
+  approved:          { label: 'Approved',                  cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400' },
+  paid:              { label: 'Credited to wallet',        cls: 'bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400' },
+  rejected:          { label: 'Rejected',                  cls: 'bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400' },
+}
+
+interface ItemProtectionPolicy {
+  multiplier: number; max_cap_amount: number; claim_window_hours: number; is_active: boolean
+}
+
 interface OrderItem {
   id: number; quantity: number; weight_kg: number | null; garment_label: string | null
+  item_status: string | null; modification_note: string | null
   product_type_name: string; icon: string
   service_id: number; service_name: string; service_category: string
   unit_price: number; line_total: number; is_express: boolean; express_multiplier: number
 }
 
 interface Payment {
-  id: number; amount: number; payment_method: string; status: string
+  id: number; amount: number; payment_method: string; provider: string | null; status: string
   transaction_id: string | null; created_at: string
 }
 
@@ -52,8 +87,9 @@ interface StatusEntry { status: string; notes: string | null; created_at: string
 const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; step: number }> = {
   pending:          { label: 'Order Placed',     color: 'text-amber-700',   bg: 'bg-amber-100 dark:bg-amber-950/40',   step: 1 },
   confirmed:        { label: 'Confirmed',        color: 'text-blue-700',    bg: 'bg-blue-100 dark:bg-blue-950/40',     step: 2 },
-  assigned_for_pickup: { label: 'Delivery Partner Assigned', color: 'text-blue-700', bg: 'bg-green-100 dark:bg-blue-950/40',     step: 2 },
-  picked_up:        { label: 'Picked Up',        color: 'text-violet-700',  bg: 'bg-violet-100 dark:bg-violet-950/40', step: 3 },
+  assigned_for_pickup: { label: 'Delivery Partner Assigned', color: 'text-blue-700', bg: 'bg-blue-100 dark:bg-blue-950/40',     step: 2 },
+  out_for_pickup:   { label: 'Partner On the Way for Pickup', color: 'text-cyan-700', bg: 'bg-cyan-100 dark:bg-cyan-950/40',   step: 3 },
+  picked_up:        { label: 'Picked Up',        color: 'text-blue-700',  bg: 'bg-blue-100 dark:bg-blue-950/40', step: 3 },
   at_laundry:       { label: 'Delivered to Laundry',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 7 },
   processing:       { label: 'Being Cleaned',    color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40', step: 4 },
   ready:            { label: 'Ready',            color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40',     step: 5 },
@@ -61,6 +97,8 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   delivered:        { label: 'Delivered',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 7 },
   completed:        { label: 'Completed',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 8 },
   cancelled:        { label: 'Cancelled',        color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
+  failed:           { label: 'Order Failed',     color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
+  rejected:         { label: 'Rejected',         color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
   // returned:         { label: 'Returned',         color: 'text-orange-700',  bg: 'bg-orange-100 dark:bg-orange-950/40', step: -1 },
 }
 
@@ -97,26 +135,50 @@ function methodLabel(pm: string): string {
 }
 
 // ---- Section card -------------------------------------------
-function Section({ title, icon: Icon, children, className }: {
+function Section({ title, icon: Icon, children, className, collapsible = false, defaultOpen = false }: {
   title: string; icon: React.ComponentType<{ className?: string }>; children: React.ReactNode; className?: string
+  collapsible?: boolean; defaultOpen?: boolean
 }) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className={cn('rounded-2xl border border-border/50 bg-card overflow-hidden', className)}>
-      <div className="flex items-center gap-2 border-b border-border/40 bg-muted/20 px-4 py-3">
-        <Icon className="h-4 w-4 text-primary" />
-        <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+    <div className={cn('rounded-xl border border-border/50 bg-card overflow-hidden', className)}>
+      <div
+        onClick={collapsible ? () => setOpen(v => !v) : undefined}
+        className={cn(
+          'flex items-center gap-2 border-b border-border/40 bg-muted/20 px-3.5 py-2',
+          collapsible && 'cursor-pointer select-none'
+        )}>
+        <Icon className="h-3.5 w-3.5 text-primary" />
+        <h3 className="text-xs font-semibold text-foreground flex-1">{title}</h3>
+        {collapsible && (
+          <ChevronDown className={cn('h-3.5 w-3.5 text-muted-foreground transition-transform duration-200', open && 'rotate-180')} />
+        )}
       </div>
-      <div className="p-4">{children}</div>
+      {collapsible ? (
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.25 }}
+              className="overflow-hidden">
+              <div className="p-3.5">{children}</div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      ) : (
+        <div className="p-3.5">{children}</div>
+      )}
     </div>
   )
 }
 
 // ---- Reschedule modal ---------------------------------------
 function RescheduleModal({
-  orderId, currentDate, currentSlot, onClose, onSuccess,
+  orderId, currentDate, currentSlot, onClose, onSuccess, onCancelled,
 }: {
-  orderId: number; currentDate: string; currentSlot: string
-  onClose: () => void; onSuccess: (date: string, slot: string) => void
+  orderId: string; currentDate: string; currentSlot: string
+  onClose: () => void; onSuccess: (date: string, slot: string, estimatedDeliveryDate: string | null) => void
+  onCancelled: (message: string) => void
 }) {
   const { toast }         = useToast()
   const [selectedDate, setSelectedDate] = useState<string>(currentDate)
@@ -142,8 +204,13 @@ function RescheduleModal({
       })
       const json = await res.json()
       if (!json.success) throw new Error(json.error ?? 'Failed to reschedule')
+      if (json.data.cancelled) {
+        toast({ title: 'Order Cancelled', description: json.data.message })
+        onCancelled(json.data.message)
+        return
+      }
       toast({ title: 'Pickup Rescheduled ✓', description: `New date: ${formatDate(selectedDate)}` })
-      onSuccess(selectedDate, selectedSlot)
+      onSuccess(selectedDate, selectedSlot, json.data.estimated_delivery_date ?? null)
     } catch (err: any) {
       toast({ title: 'Reschedule failed', description: err.message, variant: 'destructive' })
     } finally {
@@ -252,6 +319,449 @@ function RescheduleModal({
   )
 }
 
+// ---- Cancel order modal ---------------------------------------
+function CancelOrderModal({
+  orderId, payments, onClose, onSuccess,
+}: {
+  orderId: string; payments: Payment[]
+  onClose: () => void; onSuccess: (message: string) => void
+}) {
+  const { toast }     = useToast()
+  const [reason,   setReason]   = useState('')
+  const [cancelling, setCancelling] = useState(false)
+  const [error,    setError]    = useState<string | null>(null)
+  const [refundMethod, setRefundMethod] = useState<'wallet' | 'original'>('wallet')
+
+  // What was actually captured, by source (mirrors the backend's
+  // getRefundBreakdown). The wallet-paid slice can only return to the
+  // wallet; only the gateway slice offers a destination choice — this is
+  // what gives wallet+online split orders the choice too.
+  const completed   = payments.filter(p => p.status === 'completed')
+  const walletPaid  = completed.filter(p => p.payment_method === 'wallet').reduce((s, p) => s + p.amount, 0)
+  const gatewayPaid = completed.filter(p => ['payu', 'cashfree'].includes(p.provider || '')).reduce((s, p) => s + p.amount, 0)
+  const totalRefundable = walletPaid + gatewayPaid
+  const willRefund = totalRefundable > 0
+  const canRefundToOriginal = gatewayPaid > 0
+
+  const handleConfirm = async () => {
+    if (!reason.trim()) {
+      setError('Please tell us why you\'re cancelling this order')
+      return
+    }
+    setCancelling(true)
+    setError(null)
+    try {
+      const res  = await fetch(`/api/customer/orders/${orderId}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          reason: reason.trim(),
+          refund_method: canRefundToOriginal ? refundMethod : undefined,
+        }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error ?? 'Failed to cancel order')
+      toast({ title: 'Order Cancelled', description: json.data.message })
+      onSuccess(json.data.message)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-4">
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+      />
+      <motion.div
+        initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
+        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+        className="relative w-full max-w-md rounded-2xl bg-background p-5 shadow-2xl"
+      >
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-red-100 text-red-600 dark:bg-red-950/40">
+              <Ban className="h-4.5 w-4.5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-foreground">Cancel Order</h2>
+              <p className="text-xs text-muted-foreground">This action cannot be undone</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose}
+            className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <p className="mb-3 text-sm text-muted-foreground">
+          Are you sure you want to cancel this order?
+          {willRefund && !canRefundToOriginal && (
+            <> ₹{totalRefundable.toFixed(2)} will be credited to your Laundrease wallet.</>
+          )}
+        </p>
+
+        {canRefundToOriginal && (
+          <div className="mb-4 space-y-2">
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Refund ₹{gatewayPaid.toFixed(2)} to
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { key: 'wallet' as const, label: 'Laundrease wallet', hint: 'Instant credit' },
+                { key: 'original' as const, label: 'Original payment method', hint: '5-7 business days' },
+              ].map(opt => {
+                const selected = refundMethod === opt.key
+                return (
+                  <button key={opt.key} type="button" onClick={() => setRefundMethod(opt.key)}
+                    aria-pressed={selected}
+                    className={`relative rounded-xl border-2 p-3 pr-8 text-left transition-all
+                      ${selected
+                        ? 'border-primary bg-primary/10 ring-2 ring-primary/25 shadow-sm'
+                        : 'border-border/50 hover:border-border hover:bg-muted'}`}>
+                    {selected && (
+                      <CheckCircle className="absolute right-2 top-2 h-4 w-4 text-primary"/>
+                    )}
+                    <p className={`text-sm font-medium ${selected ? 'text-primary' : 'text-foreground'}`}>{opt.label}</p>
+                    <p className="text-[10px] text-muted-foreground">{opt.hint}</p>
+                  </button>
+                )
+              })}
+            </div>
+            {walletPaid > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                ₹{walletPaid.toFixed(2)} paid from your wallet will be credited back to your wallet in both cases.
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="mb-4">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Reason <span className="text-red-600">*</span>
+          </label>
+          <textarea
+            value={reason}
+            onChange={e => setReason(e.target.value)}
+            rows={3}
+            maxLength={500}
+            required
+            placeholder="Let us know why you're cancelling…"
+            className="w-full resize-none rounded-xl border border-border/50 bg-card p-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none"
+          />
+        </div>
+
+        {error && (
+          <div className="mb-4 flex items-center gap-1.5 text-xs text-red-600">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0" /> {error}
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button type="button" onClick={onClose} disabled={cancelling}
+            className="flex-1 rounded-xl border border-border/50 py-3 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-50">
+            Keep Order
+          </button>
+          <button type="button" onClick={handleConfirm} disabled={cancelling || !reason.trim()}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-red-600 py-3 text-sm font-semibold text-white disabled:opacity-50 hover:bg-red-700">
+            {cancelling ? <><Loader2 className="h-4 w-4 animate-spin" /> Cancelling...</> : 'Yes, Cancel Order'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
+// ---- Claim status detail modal --------------------------------
+// Shows the customer where their report stands: a stage timeline, the
+// laundry provider's decision comment, and the credited amount once paid.
+function ClaimStatusModal({ claim, itemName, onClose }: {
+  claim: GarmentClaim; itemName: string; onClose: () => void
+}) {
+  const meta = CLAIM_STATUS_META[claim.status] ?? { label: claim.status.replace(/_/g, ' '), cls: 'bg-muted text-foreground' }
+  const isRejected = ['provider_rejected', 'rejected'].includes(claim.status)
+
+  // Ordered stages for the progress timeline (rejection short-circuits it)
+  const stages = [
+    { key: 'submitted', label: 'Report submitted', done: true, at: claim.created_at },
+    {
+      key: 'provider',
+      label: isRejected && claim.status === 'provider_rejected' ? 'Rejected by laundry provider' : 'Laundry provider review',
+      done: !!claim.provider_decided_at || ['provider_approved', 'amount_issued', 'paid', 'approved'].includes(claim.status),
+      at: claim.provider_decided_at,
+      failed: claim.status === 'provider_rejected',
+    },
+    {
+      key: 'amount',
+      label: 'Compensation determined',
+      done: ['amount_issued', 'paid'].includes(claim.status),
+      at: null,
+      hidden: isRejected,
+    },
+    {
+      key: 'paid',
+      label: claim.compensation_amount != null && claim.status === 'paid'
+        ? `${formatINR(claim.compensation_amount)} credited to your wallet`
+        : 'Amount credited to wallet',
+      done: claim.status === 'paid',
+      at: claim.paid_at,
+      hidden: isRejected,
+    },
+  ].filter(s => !('hidden' in s && s.hidden))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-background p-5 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-bold text-foreground">Your report — {itemName}</h3>
+          <button onClick={onClose}><X className="h-5 w-5 text-muted-foreground"/></button>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${meta.cls}`}>{meta.label}</span>
+            <span className="text-xs text-muted-foreground capitalize">{claim.claim_type} item</span>
+          </div>
+
+          {/* Timeline */}
+          <div className="space-y-0">
+            {stages.map((s, i) => (
+              <div key={s.key} className="flex items-start gap-3">
+                <div className="flex flex-col items-center">
+                  <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0
+                    ${('failed' in s && s.failed) ? 'bg-red-100 dark:bg-red-900/20'
+                      : s.done ? 'bg-green-100 dark:bg-green-900/20' : 'bg-muted'}`}>
+                    {('failed' in s && s.failed)
+                      ? <XCircle className="w-3.5 h-3.5 text-red-600"/>
+                      : s.done
+                        ? <CheckCircle className="w-3.5 h-3.5 text-green-600"/>
+                        : <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40"/>}
+                  </div>
+                  {i < stages.length - 1 && <div className="w-0.5 h-6 bg-border"/>}
+                </div>
+                <div className="pt-0.5 pb-2">
+                  <p className={`text-sm ${s.done ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>{s.label}</p>
+                  {s.at && <p className="text-[10px] text-muted-foreground">{formatDateTime(s.at)}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Your description */}
+          <div className="rounded-xl bg-muted/30 p-3">
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-1">What you reported</p>
+            <p className="text-sm text-foreground">{claim.description}</p>
+          </div>
+
+          {/* Provider's comment */}
+          {claim.provider_comment && (
+            <div className={`rounded-xl p-3 border ${claim.status === 'provider_rejected'
+              ? 'bg-red-50 dark:bg-red-900/10 border-red-200 dark:border-red-800'
+              : 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800'}`}>
+              <p className="text-[10px] font-semibold text-muted-foreground uppercase mb-1">
+                {claim.provider_name || 'Laundry provider'}&apos;s response
+              </p>
+              <p className={`text-sm ${claim.status === 'provider_rejected' ? 'text-red-700 dark:text-red-400' : 'text-blue-800 dark:text-blue-300'}`}>
+                {claim.provider_comment}
+              </p>
+            </div>
+          )}
+
+          {claim.status === 'paid' && claim.compensation_amount != null && (
+            <div className="rounded-xl bg-green-50 dark:bg-green-900/10 border border-green-200 dark:border-green-800 p-3 text-sm text-green-700 dark:text-green-400">
+              {formatINR(claim.compensation_amount)} has been credited to your Laundrease wallet. Thank you for your patience.
+            </div>
+          )}
+          {claim.status === 'provider_rejected' && (
+            <p className="text-[11px] text-muted-foreground">
+              This decision is final. If you believe it is incorrect, please reach out to our support team from the Help section.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---- All reported items — consolidated list ------------------
+// The per-item badge (in Services & Items) is easy to miss once there's
+// more than a couple of items — this surfaces every claim on the order in
+// one place, each row opening the same ClaimStatusModal for full detail.
+function AllClaimsModal({ claims, items, onSelect, onClose }: {
+  claims: GarmentClaim[]
+  items: OrderItem[]
+  onSelect: (entry: { claim: GarmentClaim; itemName: string }) => void
+  onClose: () => void
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-background p-5 shadow-2xl max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-bold text-foreground">Reported items ({claims.length})</h3>
+          <button onClick={onClose}><X className="h-5 w-5 text-muted-foreground"/></button>
+        </div>
+
+        <div className="space-y-2">
+          {claims.map(claim => {
+            const item = items.find(i => i.id === claim.order_item_id)
+            const itemName = item?.product_type_name ?? 'Item'
+            const meta = CLAIM_STATUS_META[claim.status] ?? { label: claim.status.replace(/_/g, ' '), cls: 'bg-muted text-foreground' }
+            return (
+              <button key={claim.id} onClick={() => onSelect({ claim, itemName })}
+                className="flex w-full items-center justify-between gap-3 rounded-xl border border-border/50 p-3 text-left transition-colors hover:bg-muted/50">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">{itemName}</p>
+                  <p className="text-xs text-muted-foreground capitalize">{claim.claim_type} · reported {formatDateTime(claim.created_at)}</p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${meta.cls}`}>{meta.label}</span>
+                  <ChevronRight className="h-3.5 w-3.5 text-muted-foreground"/>
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---- Report an issue modal (item-protection claim) -----------
+function ReportIssueModal({
+  orderId, item, policy, onClose, onSuccess,
+}: {
+  orderId: string; item: OrderItem; policy: ItemProtectionPolicy
+  onClose: () => void; onSuccess: () => void
+}) {
+  const [claimType, setClaimType] = useState<'damaged' | 'lost' | 'stolen'>('damaged')
+  const [description, setDescription] = useState('')
+  const [photos, setPhotos] = useState<File[]>([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const estimatedCap = Math.min(item.line_total * policy.multiplier, policy.max_cap_amount)
+
+  function addPhotos(incoming: FileList | null) {
+    if (!incoming) return
+    const toAdd = Array.from(incoming).slice(0, 5 - photos.length)
+    setPhotos(prev => [...prev, ...toAdd])
+  }
+
+  async function handleSubmit() {
+    if (!description.trim() || description.trim().length < 10) {
+      setError('Please describe what happened (min 10 characters)'); return
+    }
+    setSaving(true); setError(null)
+    try {
+      const res  = await fetch(`/api/customer/orders/${orderId}/claims`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ order_item_id: item.id, claim_type: claimType, description: description.trim() }),
+      })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error ?? 'Failed to submit claim')
+
+      const claimId = json.data.id
+      for (const file of photos) {
+        const fd = new FormData()
+        fd.append('file', file)
+        await fetch(`/api/customer/orders/${orderId}/claims/${claimId}/photos`, {
+          method: 'POST', body: fd, credentials: 'include',
+        }).catch(() => {})
+      }
+      onSuccess()
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onClose} className="absolute inset-0 bg-black/50 backdrop-blur-sm"/>
+      <motion.div initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 40 }}
+        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+        className="relative w-full max-w-md rounded-2xl bg-background p-5 shadow-2xl max-h-[90vh] overflow-y-auto">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-950/40">
+              <ShieldAlert className="h-4.5 w-4.5"/>
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-foreground">Report an issue</h2>
+              <p className="text-xs text-muted-foreground">{item.product_type_name}</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted">
+            <X className="h-5 w-5"/>
+          </button>
+        </div>
+
+        <div className="mb-3 rounded-xl bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 px-3 py-2.5">
+          <p className="text-xs text-blue-700 dark:text-blue-400">
+            Up to <span className="font-bold">₹{estimatedCap.toFixed(2)}</span> compensation if approved
+            ({policy.multiplier}× the service charge for this item, capped at ₹{policy.max_cap_amount.toLocaleString('en-IN')}).
+          </p>
+        </div>
+
+        <div className="mb-3">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">What happened?</label>
+          <div className="grid grid-cols-3 gap-2">
+            {(['damaged', 'lost', 'stolen'] as const).map(t => (
+              <button key={t} type="button" onClick={() => setClaimType(t)}
+                className={`rounded-xl border-2 py-2 text-xs font-semibold capitalize transition-all
+                  ${claimType === t ? 'border-amber-500 bg-amber-50 dark:bg-amber-900/10 text-amber-700 dark:text-amber-400' : 'border-border text-muted-foreground hover:border-muted-foreground'}`}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-3">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Description</label>
+          <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} maxLength={1000}
+            placeholder="Describe the damage, or when/how you noticed it was missing…"
+            className="w-full resize-none rounded-xl border border-border/50 bg-card p-3 text-sm text-foreground placeholder:text-muted-foreground/60 focus:border-primary/50 focus:outline-none"/>
+        </div>
+
+        <div className="mb-4">
+          <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Photos <span className="normal-case font-normal">(optional, up to 5 — strengthens your claim)</span>
+          </label>
+          <label className="flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-border/50 py-4 text-xs text-muted-foreground cursor-pointer hover:border-primary/50">
+            <Camera className="h-4 w-4"/> {photos.length > 0 ? `${photos.length} photo(s) selected` : 'Add photos'}
+            <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden"
+              onChange={e => addPhotos(e.target.files)} disabled={photos.length >= 5}/>
+          </label>
+        </div>
+
+        {error && (
+          <div className="mb-4 flex items-center gap-1.5 text-xs text-red-600">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0"/> {error}
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button type="button" onClick={onClose} disabled={saving}
+            className="flex-1 rounded-xl border border-border/50 py-3 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="button" onClick={handleSubmit} disabled={saving}
+            className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-amber-600 py-3 text-sm font-semibold text-white disabled:opacity-50 hover:bg-amber-700">
+            {saving ? <><Loader2 className="h-4 w-4 animate-spin"/> Submitting…</> : 'Submit claim'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 // ---- Main page ----------------------------------------------
 export default function OrderDetailPage() {
   const { id }    = useParams<{ id: string }>()
@@ -263,15 +773,24 @@ export default function OrderDetailPage() {
   const [payments,   setPayments]   = useState<Payment[]>([])
   const [adjustments,setAdjustments]= useState<Adjustment[]>([])
   const [history,    setHistory]    = useState<StatusEntry[]>([])
-  const [coupons,    setCoupons]    = useState<any[]>([])
   const [loading,    setLoading]    = useState(true)
   const [error,      setError]      = useState<string | null>(null)
   const [showReschedule, setShowReschedule] = useState(false)
+  const [showCancel,    setShowCancel]    = useState(false)
   // Invoice download state
   const [invoiceLoading, setInvoiceLoading] = useState(false)
   const [invoiceError,   setInvoiceError]   = useState<string | null>(null)
   // fee_code → display_name from order_fee_config (loaded once)
   const [feeLabels,  setFeeLabels]  = useState<Record<string, string>>({})
+  // Pay-online state (COD orders paying before delivery)
+  const [payLoading, setPayLoading] = useState(false)
+  const [payError,   setPayError]   = useState<string | null>(null)
+  // Item-protection claims
+  const [claims, setClaims] = useState<GarmentClaim[]>([])
+  const [itemProtectionPolicy, setItemProtectionPolicy] = useState<ItemProtectionPolicy | null>(null)
+  const [reportIssueItem, setReportIssueItem] = useState<OrderItem | null>(null)
+  const [viewClaim, setViewClaim] = useState<{ claim: GarmentClaim; itemName: string } | null>(null)
+  const [showAllClaims, setShowAllClaims] = useState(false)
 
   useEffect(() => {
     // Load fee labels from order_fee_config (once per page load)
@@ -281,32 +800,83 @@ export default function OrderDetailPage() {
       .catch(() => {})
   }, [])
 
-  useEffect(() => {
-    const fetchOrder = async () => {
-      setLoading(true)
-      try {
-        const res  = await fetch(`/api/customer/orders/${id}`, { credentials: 'include' })
-        const json = await res.json()
-        if (res.status === 404) { setError('Order not found'); return }
-        if (!json.success) throw new Error(json.error ?? 'Failed')
-        setOrder(json.data.order)
-        setItems(json.data.items)
-        setPayments(json.data.payments)
-        setAdjustments(json.data.adjustments)
-        setHistory(json.data.status_history)
-        setCoupons(json.data.coupons)
-      } catch (err: any) {
-        setError(err.message)
-      } finally {
-        setLoading(false)
-      }
+  const fetchOrder = async () => {
+    setLoading(true)
+    try {
+      const res  = await fetch(`/api/customer/orders/${id}`, { credentials: 'include' })
+      const json = await res.json()
+      if (res.status === 404) { setError('Order not found'); return }
+      if (!json.success) throw new Error(json.error ?? 'Failed')
+      setOrder(json.data.order)
+      setItems(json.data.items)
+      setPayments(json.data.payments)
+      setAdjustments(json.data.adjustments)
+      setHistory(json.data.status_history)
+      setClaims(json.data.claims || [])
+      setItemProtectionPolicy(json.data.item_protection_policy || null)
+    } catch (err: any) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
     }
-    fetchOrder()
-  }, [id])
+  }
 
-  const handleRescheduleSuccess = (date: string, slot: string) => {
-    setOrder(prev => prev ? { ...prev, pickup_date: date, pickup_time_slot: slot } : prev)
+  useEffect(() => { fetchOrder() }, [id])
+
+  const handleRescheduleSuccess = (date: string, slot: string, estimatedDeliveryDate: string | null) => {
+    setOrder(prev => prev ? {
+      ...prev, pickup_date: date, pickup_time_slot: slot,
+      estimated_delivery_date: estimatedDeliveryDate ?? prev.estimated_delivery_date,
+    } : prev)
     setShowReschedule(false)
+  }
+  const handleCancelSuccess = (message: string) => {
+    setOrder(prev => prev ? { ...prev, status: 'cancelled', can_cancel: false, can_reschedule: false } : prev)
+    setShowCancel(false)
+  }
+  // A reschedule can itself trigger an auto-cancellation once an order hits
+  // 3 reschedules — the modal shows a toast for that case instead of the
+  // normal "rescheduled" one, so this must NOT set a new pickup_date.
+  const handleRescheduleCancelled = () => {
+    setOrder(prev => prev ? { ...prev, status: 'cancelled', can_cancel: false, can_reschedule: false } : prev)
+    setShowReschedule(false)
+    fetchOrder()
+  }
+
+  // Pay online any time before delivery — eliminates needing a card/scanner
+  // at the door for COD orders. Razorpay's modal stays in-app, so on success
+  // we just refetch the order instead of navigating away; PayU/Cashfree
+  // redirect the whole browser to the gateway and come back via the
+  // existing server-side callback routes.
+  const handlePayOnline = async () => {
+    if (!order) return
+    setPayLoading(true); setPayError(null)
+    try {
+      const res  = await fetch(`/api/customer/orders/${order.id}/pay`, { method: 'POST', credentials: 'include' })
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error ?? 'Failed to initiate payment')
+
+      await launchGatewayCheckout(json.data, {
+        orderNumber: order.order_number,
+        onRazorpaySuccess: async (paymentId, signature, gatewayOrderId) => {
+          const vRes  = await fetch('/api/customer/payments/verify', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+            body: JSON.stringify({
+              order_id: order.id, gateway_order_id: gatewayOrderId,
+              gateway_payment_id: paymentId, signature,
+            }),
+          })
+          const vData = await vRes.json()
+          if (!vData.success || !vData.data.verified) throw new Error('Payment verification failed')
+          toast({ title: 'Payment successful ✓', description: 'Your order is now fully paid.' })
+          fetchOrder()
+        },
+      })
+    } catch (err: any) {
+      setPayError(err.message || 'Payment failed. Please try again.')
+    } finally {
+      setPayLoading(false)
+    }
   }
   const handleDownloadInvoice = async () => {
     if (!id) return
@@ -350,7 +920,7 @@ export default function OrderDetailPage() {
   }
 
   const statusCfg = STATUS_CONFIG[order.status] ?? { label: order.status, color: 'text-foreground', bg: 'bg-muted', step: 0 }
-  const isCancelled = order.status === 'cancelled' || order.status === 'returned'
+  const isCancelled = order.status === 'cancelled' || order.status === 'returned' || order.status === 'failed' || order.status === 'rejected'
   const currentStep = statusCfg.step
 
   // Group items by service category for display
@@ -363,7 +933,27 @@ export default function OrderDetailPage() {
 
   return (
     <>
-      <div className="container mx-auto max-w-2xl px-4 py-6">
+      {/* Full-page payment redirect overlay */}
+      {payLoading && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-5 bg-background/90 backdrop-blur-sm">
+          <div className="relative flex items-center justify-center">
+            <div className="h-16 w-16 rounded-full border-4 border-primary/20"/>
+            <div className="absolute h-16 w-16 animate-spin rounded-full border-4 border-transparent border-t-primary"/>
+          </div>
+          <div className="text-center space-y-1.5 px-6">
+            <p className="text-base font-semibold text-foreground">Connecting to payment partner…</p>
+            <p className="text-sm text-muted-foreground">You will be redirected to our secure payment page shortly. Please do not close or refresh this tab.</p>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border border-border bg-card px-4 py-2 text-xs text-muted-foreground shadow-sm">
+            <svg className="h-3.5 w-3.5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            256-bit SSL encrypted &amp; secure
+          </div>
+        </div>
+      )}
+
+      <div className="container mx-auto max-w-5xl px-4 py-6">
         {/* Back + header */}
         <div className="mb-6">
           <Link
@@ -399,24 +989,52 @@ export default function OrderDetailPage() {
                 )}
               </div>
             </div>
-            <div className="flex">
-              <button
-                onClick={handleDownloadInvoice}
-                disabled={invoiceLoading}
-                title="Download invoice as PDF"
-                aria-label="Download invoice as PDF"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 md:w-auto md:justify-start"
-              >
-                {invoiceLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4" />
-                )}
-                {/* Short label on mobile, longer on desktop */}
-                <span>
-                  {invoiceLoading ? 'Generating Invoice…' : 'Download Invoice PDF'}
-                </span>
-              </button>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              {/* No invoice for an order that never went through — nothing
+                  was actually billed/serviced. */}
+              {!isCancelled && (
+                <button
+                  onClick={handleDownloadInvoice}
+                  disabled={invoiceLoading}
+                  title="Download invoice as PDF"
+                  aria-label="Download invoice as PDF"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto sm:justify-start"
+                >
+                  {invoiceLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  {/* Short label on mobile, longer on desktop */}
+                  <span>
+                    {invoiceLoading ? 'Generating Invoice…' : 'Download Invoice PDF'}
+                  </span>
+                </button>
+              )}
+
+              {claims.length > 0 && (
+                <button
+                  onClick={() => setShowAllClaims(true)}
+                  title="View reported items"
+                  aria-label="View reported items"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 shadow-sm transition-all hover:bg-amber-100 active:scale-95 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-400 dark:hover:bg-amber-950/50 sm:w-auto sm:justify-start"
+                >
+                  <ShieldAlert className="h-4 w-4" />
+                  <span>Reported Items ({claims.length})</span>
+                </button>
+              )}
+
+              {order.can_cancel && (
+                <button
+                  onClick={() => setShowCancel(true)}
+                  title="Cancel this order"
+                  aria-label="Cancel this order"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 shadow-sm transition-all hover:bg-red-100 active:scale-95 dark:border-red-900/40 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/50 sm:w-auto sm:justify-start"
+                >
+                  <Ban className="h-4 w-4" />
+                  <span>Cancel Order</span>
+                </button>
+              )}
             </div>
 
             {/* Error (keep compact and visible below the button) */}
@@ -428,6 +1046,37 @@ export default function OrderDetailPage() {
             )}
           </div>
         </div>
+
+        {/* Rejection banner — laundry provider declined this order before confirming it */}
+        {order.status === 'rejected' && (
+          <div className="mb-5 rounded-2xl border border-red-200 bg-red-50 p-4 dark:border-red-900/40 dark:bg-red-950/30">
+            <div className="flex items-start gap-3">
+              <XCircle className="h-5 w-5 shrink-0 text-red-600 mt-0.5" />
+              <div className="flex-1 space-y-2">
+                <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+                  This order was rejected by the laundry provider
+                </p>
+                {order.rejection_reason && (
+                  <p className="text-sm text-red-700 dark:text-red-400">
+                    <span className="font-medium">Reason: </span>{order.rejection_reason}
+                  </p>
+                )}
+                <p className="text-sm text-red-700/90 dark:text-red-400/90">
+                  {order.payment_status === 'refunded'
+                    ? `₹${order.total_amount.toLocaleString('en-IN')} has been credited to your Laundrease wallet. `
+                    : ''}
+                  Please place a new order and we&apos;ll match you with another laundry provider.
+                </p>
+                <Link
+                  href="/customer/orders/create"
+                  className="mt-1 inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700"
+                >
+                  Place a New Order
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Progress tracker — hidden if cancelled/returned */}
         {!isCancelled && (
@@ -470,46 +1119,60 @@ export default function OrderDetailPage() {
           </div>
         )}
 
-        <div className="space-y-4">
-          {/* Pickup & Delivery schedule */}
-          <Section title="Schedule" icon={Calendar}>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="rounded-xl bg-muted/30 p-3">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Pickup</p>
-                <p className="text-sm font-semibold text-foreground">{formatDate(order.pickup_date)}</p>
-                {order.pickup_time_slot && (
-                  <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                    <Clock className="h-3 w-3" /> {order.pickup_time_slot}
-                  </p>
-                )}
-                {/* Reschedule button */}
-                {order.can_reschedule && (
-                  <button
-                    type="button"
-                    onClick={() => setShowReschedule(true)}
-                    className="mt-2 flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
-                  >
-                    <Edit2 className="h-3 w-3" /> Change date
-                  </button>
-                )}
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+          {/* Pickup & Delivery schedule — meaningless once the order never
+              went through (cancelled/rejected/returned/failed), so hidden
+              alongside the progress tracker for those statuses. */}
+          {!isCancelled && (
+            <Section title="Schedule" icon={Calendar}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl bg-muted/30 p-3">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Pickup</p>
+                  <p className="text-sm font-semibold text-foreground">{formatDate(order.pickup_date)}</p>
+                  {order.pickup_time_slot && (
+                    <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3" /> {order.pickup_time_slot}
+                    </p>
+                  )}
+                  {/* Reschedule button */}
+                  {order.can_reschedule && (
+                    <button
+                      type="button"
+                      onClick={() => setShowReschedule(true)}
+                      className="mt-2 flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                    >
+                      <Edit2 className="h-3 w-3" /> Change date
+                    </button>
+                  )}
+                </div>
+                <div className="rounded-xl bg-muted/30 p-3">
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Delivery</p>
+                  {order.delivered_at ? (
+                    <>
+                      <p className="text-sm font-semibold text-foreground">{formatDateTime(order.delivered_at)}</p>
+                      <p className="mt-0.5 text-[11px] text-emerald-600 dark:text-emerald-400">Delivered</p>
+                    </>
+                  ) : order.delivery_date ? (
+                    <>
+                      <p className="text-sm font-semibold text-foreground">{formatDate(order.delivery_date)}</p>
+                      {order.delivery_time_slot && (
+                        <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                          <Clock className="h-3 w-3" /> {order.delivery_time_slot}
+                        </p>
+                      )}
+                    </>
+                  ) : order.estimated_delivery_date ? (
+                    <>
+                      <p className="text-sm font-semibold text-foreground">{formatDate(order.estimated_delivery_date)}</p>
+                      <p className="mt-0.5 text-[11px] text-muted-foreground">Estimated — exact time slot confirmed once out for delivery</p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">To be scheduled</p>
+                  )}
+                </div>
               </div>
-              <div className="rounded-xl bg-muted/30 p-3">
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Delivery</p>
-                {order.delivery_date ? (
-                  <>
-                    <p className="text-sm font-semibold text-foreground">{formatDate(order.delivery_date)}</p>
-                    {order.delivery_time_slot && (
-                      <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="h-3 w-3" /> {order.delivery_time_slot}
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">To be scheduled</p>
-                )}
-              </div>
-            </div>
-          </Section>
+            </Section>
+          )}
 
           {/* Addresses */}
           <Section title="Addresses" icon={MapPin}>
@@ -565,7 +1228,7 @@ export default function OrderDetailPage() {
                   )}
                 </div>
               )}
-              {order.assignment_status === 'unassigned' && (
+              {!isCancelled && order.assignment_status === 'unassigned' && (
                 <div className="mt-3 flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 dark:bg-amber-950/30">
                   <Info className="h-4 w-4 shrink-0 text-amber-600" />
                   <p className="text-xs text-amber-700 dark:text-amber-400">Delivery partner will be assigned soon</p>
@@ -580,23 +1243,86 @@ export default function OrderDetailPage() {
               <div key={serviceName} className="mb-4 last:mb-0">
                 <p className="mb-2 text-xs font-semibold text-muted-foreground">{serviceName}</p>
                 <div className="space-y-2">
-                  {serviceItems.map(item => (
-                    <div key={item.id} className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="text-lg shrink-0">{item.icon ?? '🧺'}</span>
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-medium text-foreground">{item.product_type_name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {item.weight_kg ? `${item.weight_kg} kg` : `×${item.quantity}`}
-                            {item.is_express && <span className="ml-1 text-amber-600">· Express</span>}
-                          </p>
+                  {serviceItems.map(item => {
+                    const claim = claims.find(c => c.order_item_id === item.id)
+                    const withinWindow = itemProtectionPolicy && order.delivered_at
+                      ? (() => {
+                          const deadline = new Date(order.delivered_at!)
+                          deadline.setHours(deadline.getHours() + itemProtectionPolicy.claim_window_hours)
+                          return new Date() <= deadline
+                        })()
+                      : false
+                    // Per-kg items are a whole weighed batch, not one
+                    // identifiable garment — no reliable way to verify a
+                    // damage/loss claim against a single piece within it.
+                    const canReportIssue = itemProtectionPolicy?.is_active
+                      && ['delivered', 'completed'].includes(order.status)
+                      && withinWindow
+                      && !claim
+                      && item.weight_kg == null
+
+                    const claimMeta = claim
+                      ? (CLAIM_STATUS_META[claim.status] ?? { label: claim.status.replace(/_/g, ' '), cls: 'bg-muted text-muted-foreground' })
+                      : null
+
+                    return (
+                      <div key={item.id} className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <ProductIcon
+                            src={resolveProductIconSrc(item.product_type_name)}
+                            fallbackEmoji={item.icon ?? '🧺'}
+                            alt={item.product_type_name}
+                            size={28}
+                            className="shrink-0 rounded-md"
+                          />
+                          <div className="min-w-0">
+                            <p className={cn('truncate text-sm font-medium',
+                              item.item_status === 'not_picked_up' ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                              {item.product_type_name}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {item.weight_kg ? `${item.weight_kg} kg` : `×${item.quantity}`}
+                              {item.is_express && <span className="ml-1 text-amber-600">· Express</span>}
+                            </p>
+                            {item.item_status === 'not_picked_up' && (
+                              <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-400"
+                                title={item.modification_note || undefined}>
+                                Not picked up
+                              </span>
+                            )}
+                            {item.item_status === 'added_by_delivery' && (
+                              <span className="mt-1 inline-block rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-400"
+                                title={item.modification_note || undefined}>
+                                Added at pickup
+                              </span>
+                            )}
+                            {claim && claimMeta && (
+                              <button
+                                onClick={() => setViewClaim({ claim, itemName: item.product_type_name })}
+                                className={`mt-1 inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold hover:opacity-80 transition-opacity ${claimMeta.cls}`}
+                                title="View report status"
+                              >
+                                <span className="capitalize">{claim.claim_type}</span> report — {claimMeta.label}
+                                <ChevronRight className="h-2.5 w-2.5"/>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <span className={cn('text-sm font-semibold',
+                            item.item_status === 'not_picked_up' ? 'text-muted-foreground line-through' : 'text-foreground')}>
+                            {formatINR(item.line_total)}
+                          </span>
+                          {canReportIssue && (
+                            <button onClick={() => setReportIssueItem(item)}
+                              className="flex items-center gap-1 text-[10px] font-medium text-amber-600 hover:underline">
+                              <ShieldAlert className="h-3 w-3"/> Report an issue
+                            </button>
+                          )}
                         </div>
                       </div>
-                      <span className="shrink-0 text-sm font-semibold text-foreground">
-                        {formatINR(item.line_total)}
-                      </span>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             ))}
@@ -640,23 +1366,70 @@ export default function OrderDetailPage() {
                   </div>
                 ))
               }
-              {/* order_coupons fallback */}
-              {coupons.map(c => (
-                <div key={c.coupon_code} className="flex justify-between text-emerald-600 dark:text-emerald-400">
-                  <span>Coupon ({c.coupon_code})</span>
-                  <span className="font-semibold">-{formatINR(c.amount_discounted)}</span>
-                </div>
-              ))}
 
               <div className="flex justify-between border-t border-border/40 pt-2.5 text-base">
-                <span className="font-bold text-foreground">Total</span>
+                <span className="font-bold text-foreground">
+                  Total
+                  {order.modified_by_delivery && order.original_total_amount != null
+                    && order.original_total_amount !== order.total_amount && (
+                    <span className="ml-2 text-xs font-normal text-muted-foreground line-through">
+                      {formatINR(order.original_total_amount)}
+                    </span>
+                  )}
+                </span>
                 <span className="font-bold text-primary">{formatINR(order.total_amount)}</span>
               </div>
+
+              {/* Paid vs balance — only interesting once the totals diverge */}
+              {order.modified_by_delivery && order.amount_paid > 0 && (
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Paid so far</span>
+                    <span className="font-medium text-emerald-600">{formatINR(order.amount_paid)}</span>
+                  </div>
+                  {order.balance_due > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Balance due</span>
+                      <span className="font-semibold text-amber-600">{formatINR(order.balance_due)}</span>
+                    </div>
+                  )}
+                  {order.amount_paid > order.total_amount && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">Overpaid (credited to wallet after pickup)</span>
+                      <span className="font-semibold text-blue-600">{formatINR(Math.round((order.amount_paid - order.total_amount) * 100) / 100)}</span>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </Section>
 
           {/* Payment — shows split clearly for wallet+COD / wallet+UPI */}
           <Section title="Payment" icon={CreditCard}>
+            {(() => {
+              const NOT_PAYABLE = new Set(['delivered', 'completed', 'cancelled', 'returned', 'failed', 'rejected'])
+              // A positive balance covers both classic COD orders and prepaid
+              // orders whose total grew after items were modified at pickup.
+              const canPayOnline = order.balance_due > 0
+                && order.payment_status !== 'paid'
+                && !NOT_PAYABLE.has(order.status)
+              if (!canPayOnline) return null
+              return (
+                <div className="mb-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 dark:border-blue-800 dark:bg-blue-950/20">
+                  <p className="text-sm font-medium text-foreground">
+                    {order.modified_by_delivery && order.amount_paid > 0
+                      ? `Your order was updated at pickup — ₹${order.balance_due.toFixed(2)} is remaining to pay.`
+                      : 'Skip the cash/card at the door — pay online any time before delivery.'}
+                  </p>
+                  {payError && <p className="mt-1.5 text-xs text-destructive">{payError}</p>}
+                  <button onClick={handlePayOnline} disabled={payLoading}
+                    className="mt-2.5 flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-blue-700 disabled:opacity-60">
+                    {payLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
+                    {payLoading ? 'Processing…' : `Pay ${formatINR(order.balance_due)} Online Now`}
+                  </button>
+                </div>
+              )
+            })()}
             {payments.length === 0 ? (
               <p className="text-sm text-muted-foreground">No payment records yet</p>
             ) : (
@@ -685,14 +1458,14 @@ export default function OrderDetailPage() {
                   return (
                     <div key={p.id} className={cn(
                       'flex items-start justify-between gap-3 rounded-xl px-4 py-3',
-                      isWallet ? 'bg-violet-50 dark:bg-violet-950/20 border border-violet-200 dark:border-violet-800' :
+                      isWallet ? 'bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800' :
                       isCOD    ? 'bg-amber-50  dark:bg-amber-950/20  border border-amber-200  dark:border-amber-800'  :
                       'bg-muted/30'
                     )}>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-foreground">{methodLabel(p.payment_method)}</p>
                         {isWallet && p.status === 'completed' && (
-                          <p className="mt-0.5 text-xs text-violet-600 dark:text-violet-400">Paid from wallet balance</p>
+                          <p className="mt-0.5 text-xs text-blue-600 dark:text-blue-400">Paid from wallet balance</p>
                         )}
                         {isCOD && isPending && (
                           <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">To be collected at delivery</p>
@@ -735,44 +1508,49 @@ export default function OrderDetailPage() {
             </Section>
           )}
 
-          {/* Status history */}
-          <Section title="Order Timeline" icon={Clock}>
-            <div className="relative space-y-4 pl-5">
-              {/* Vertical line */}
-              <div className="absolute left-2 top-1 bottom-1 w-px bg-border/50" />
-
-              {history.map((entry, i) => {
-                const cfg = STATUS_CONFIG[entry.status] ?? { label: entry.status, bg: 'bg-muted', color: 'text-foreground' }
-                return (
-                  <div key={i} className="relative flex gap-3">
-                    {/* Dot */}
-                    <div className={cn('absolute -left-5 mt-0.5 h-4 w-4 rounded-full border-2 border-background', cfg.bg)} />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={cn('text-sm font-semibold', cfg.color)}>{cfg.label}</span>
-                        {entry.changed_by_name && (
-                          <span className="text-xs text-muted-foreground">by {entry.changed_by_name}</span>
-                        )}
+          {/* Order Timeline — an accordion, collapsed by default. Every
+              reschedule (customer, delivery partner, admin/support, or the
+              automatic "not picked up" sweep) logs a note here, so this can
+              grow long — hidden until the customer taps to expand it. */}
+          <Section title={`Order Timeline (${history.length})`} icon={Clock} collapsible defaultOpen={false}>
+            {(() => {
+              const sorted = [...history].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+              return (
+                <div className="relative space-y-3 pl-5">
+                  <div className="absolute left-2 top-1 bottom-1 w-px bg-border/50" />
+                  {sorted.map((entry, i) => {
+                    const cfg = STATUS_CONFIG[entry.status] ?? { label: entry.status, bg: 'bg-muted', color: 'text-foreground' }
+                    return (
+                      <div key={i} className="relative flex gap-3">
+                        <div className={cn('absolute -left-5 mt-0.5 h-4 w-4 rounded-full border-2 border-background', cfg.bg)} />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className={cn('text-xs font-semibold', cfg.color)}>{cfg.label}</span>
+                            {entry.changed_by_name && (
+                              <span className="text-[11px] text-muted-foreground">by {entry.changed_by_name}</span>
+                            )}
+                          </div>
+                          {entry.notes && (
+                            <p className="mt-0.5 text-[11px] text-muted-foreground">{entry.notes}</p>
+                          )}
+                          <p className="mt-0.5 text-[11px] text-muted-foreground">{formatDateTime(entry.created_at)}</p>
+                        </div>
                       </div>
-                      {entry.notes && (
-                        <p className="mt-0.5 text-xs text-muted-foreground">{entry.notes}</p>
-                      )}
-                      <p className="mt-0.5 text-xs text-muted-foreground">{formatDateTime(entry.created_at)}</p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+                    )
+                  })}
+                </div>
+              )
+            })()}
           </Section>
 
           {/* Help CTA */}
-          <div className="flex items-center gap-3 rounded-2xl border border-border/50 bg-card p-4">
+          <div className="flex items-center gap-3 rounded-2xl border border-border/50 bg-card p-4 lg:col-span-2">
             <Shield className="h-8 w-8 shrink-0 text-primary/40" />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-foreground">Need help with this order?</p>
               <p className="text-xs text-muted-foreground">Our support team is here for you</p>
             </div>
-            <Link href="/help-center"
+            <Link href={`/customer/support?category=order&order_id=${order.id}`}
               className="shrink-0 rounded-xl border border-border/50 px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted">
               Get Help
             </Link>
@@ -789,9 +1567,58 @@ export default function OrderDetailPage() {
             currentSlot={order.pickup_time_slot}
             onClose={() => setShowReschedule(false)}
             onSuccess={handleRescheduleSuccess}
+            onCancelled={handleRescheduleCancelled}
           />
         )}
       </AnimatePresence>
+
+      {/* Cancel order modal */}
+      <AnimatePresence>
+        {showCancel && (
+          <CancelOrderModal
+            orderId={order.id}
+            payments={payments}
+            onClose={() => setShowCancel(false)}
+            onSuccess={handleCancelSuccess}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Report an issue modal (item-protection claim) */}
+      <AnimatePresence>
+        {reportIssueItem && itemProtectionPolicy && (
+          <ReportIssueModal
+            orderId={order.id}
+            item={reportIssueItem}
+            policy={itemProtectionPolicy}
+            onClose={() => setReportIssueItem(null)}
+            onSuccess={() => {
+              setReportIssueItem(null)
+              toast({ title: 'Report submitted', description: 'The laundry provider will review it shortly' })
+              fetchOrder()
+            }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* All reported items — consolidated list */}
+      {showAllClaims && (
+        <AllClaimsModal
+          claims={claims}
+          items={items}
+          onClose={() => setShowAllClaims(false)}
+          onSelect={entry => { setShowAllClaims(false); setViewClaim(entry) }}
+        />
+      )}
+
+      {/* Claim status detail modal */}
+      {viewClaim && (
+        <ClaimStatusModal
+          claim={viewClaim.claim}
+          itemName={viewClaim.itemName}
+          onClose={() => setViewClaim(null)}
+        />
+      )}
     </>
   )
 }

@@ -50,16 +50,24 @@ async function exchangeGoogleCode(code: string) {
 }
 
 async function exchangeFacebookCode(code: string) {
+  const tokenParams = new URLSearchParams({
+    client_id: process.env.FACEBOOK_APP_ID || '',
+    redirect_uri: `${process.env.NEXT_PUBLIC_CUSTOMER_URL}/api/customer/auth/oauth/callback`,
+    client_secret: process.env.FACEBOOK_APP_SECRET || '',
+    code,
+  })
+
   const tokenResponse = await fetch(
-    `https://graph.facebook.com/v18.0/oauth/access_token?` +
-    `client_id=${process.env.FACEBOOK_APP_ID}` +
-    `&redirect_uri=${process.env.NEXT_PUBLIC_CUSTOMER_URL}/api/customer/auth/oauth/callback` +
-    `&client_secret=${process.env.FACEBOOK_APP_SECRET}` +
-    `&code=${code}`,
+    `https://graph.facebook.com/v18.0/oauth/access_token?${tokenParams.toString()}`,
     { method: 'GET' }
   )
 
   if (!tokenResponse.ok) {
+    // Facebook's error body (e.g. "redirect_uri does not match", "invalid
+    // code") is the single most useful thing for diagnosing OAuth setup
+    // issues — surface it instead of swallowing it into a generic message.
+    const errorBody = await tokenResponse.text().catch(() => '')
+    console.error('Facebook token exchange failed:', tokenResponse.status, errorBody)
     throw new Error('Failed to exchange Facebook code')
   }
 
@@ -67,10 +75,15 @@ async function exchangeFacebookCode(code: string) {
 
   // Get user info
   const userResponse = await fetch(
-    `https://graph.facebook.com/me?fields=id,name,email,picture&access_token=${tokens.access_token}`
+    `https://graph.facebook.com/me?${new URLSearchParams({
+      fields: 'id,name,email,picture',
+      access_token: tokens.access_token,
+    }).toString()}`
   )
 
   if (!userResponse.ok) {
+    const errorBody = await userResponse.text().catch(() => '')
+    console.error('Facebook user info fetch failed:', userResponse.status, errorBody)
     throw new Error('Failed to get Facebook user info')
   }
 
@@ -87,35 +100,38 @@ async function exchangeFacebookCode(code: string) {
 }
 
 export async function GET(req: NextRequest) {
-  let jumpToDashboard;
+  const searchParams = req.nextUrl.searchParams
+  const code = searchParams.get('code')
+  const stateStr = searchParams.get('state')
+  const error = searchParams.get('error')
+  const errorReason = searchParams.get('error_reason') || searchParams.get('error_description')
+
+  // These are real, expected outcomes (user denied access, provider sent a
+  // malformed callback, etc.) — redirect immediately, outside any try/catch,
+  // so Next's redirect() throw isn't accidentally caught below and silently
+  // rewritten into a generic 'oauth_failed' with the real reason lost.
+  if (error) {
+    console.error('OAuth provider returned an error:', error, errorReason)
+    redirect(`/customer/auth/login?error=oauth_failed&reason=${encodeURIComponent(error)}`)
+  }
+
+  if (!code || !stateStr) {
+    redirect('/customer/auth/login?error=invalid_oauth')
+  }
+
+  const state = JSON.parse(stateStr)
+  const { provider, returnTo } = state
+  let jumpToDashboard = returnTo
+
+  if (provider !== 'google' && provider !== 'facebook') {
+    redirect('/customer/auth/login?error=invalid_provider')
+  }
+
   try {
-    const searchParams = req.nextUrl.searchParams
-    const code = searchParams.get('code')
-    const stateStr = searchParams.get('state')
-    const error = searchParams.get('error')
-
-    if (error) {
-      console.error('OAuth error:', error)
-      redirect('/customer/auth/login?error=oauth_failed')
-    }
-
-    if (!code || !stateStr) {
-      redirect('/customer/auth/login?error=invalid_oauth')
-    }
-
-    const state = JSON.parse(stateStr)
-    const { provider, returnTo } = state;
-    jumpToDashboard = returnTo;
-
     // Exchange code for tokens and get user info
-    let oauthData
-    if (provider === 'google') {
-      oauthData = await exchangeGoogleCode(code!)
-    } else if (provider === 'facebook') {
-      oauthData = await exchangeFacebookCode(code!)
-    } else {
-      redirect('/customer/auth/login?error=invalid_provider')
-    }
+    const oauthData = provider === 'google'
+      ? await exchangeGoogleCode(code)
+      : await exchangeFacebookCode(code)
 
     // Check if email exists
     if (!oauthData.email) {
@@ -281,7 +297,15 @@ export async function GET(req: NextRequest) {
     // Set cookies
     await setAuthCookies(accessToken, refreshToken)
 
-  } catch (error) {
+  } catch (error: any) {
+    // redirect() throws internally (digest starts with 'NEXT_REDIRECT') so
+    // Next can perform the actual navigation — the no_email redirect above
+    // is one of these. Let it propagate instead of treating it as a real
+    // failure, otherwise the real reason gets lost behind a generic
+    // 'oauth_failed' every time.
+    if (typeof error?.digest === 'string' && error.digest.startsWith('NEXT_REDIRECT')) {
+      throw error
+    }
     console.error('OAuth callback error:', error)
     redirect('/customer/auth/login?error=oauth_failed')
   }

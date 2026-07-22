@@ -121,6 +121,14 @@ export default function ProfilePage() {
   const [pwSaving, setPwSaving] = useState(false)
   const [showPw, setShowPw] = useState(false)
 
+  // Email change (OTP-verified) state
+  const [emailSection, setEmailSection] = useState(false)
+  const [emailStep, setEmailStep] = useState<'enter' | 'otp'>('enter')
+  const [newEmail, setNewEmail] = useState('')
+  const [emailOtp, setEmailOtp] = useState('')
+  const [emailErrors, setEmailErrors] = useState<Record<string, string>>({})
+  const [emailSaving, setEmailSaving] = useState(false)
+
   // Photo upload
   const [photoUploading, setPhotoUploading] = useState(false)
 
@@ -234,6 +242,59 @@ export default function ProfilePage() {
     }
   }
 
+  const handleRequestEmailOtp = async () => {
+    const trimmed = newEmail.trim()
+    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setEmailErrors({ new_email: 'Enter a valid email address' }); return
+    }
+    setEmailSaving(true)
+    try {
+      const res = await fetch('/api/customer/profile/email/request-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ new_email: trimmed }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        if (json.meta?.errors) { setEmailErrors(json.meta.errors); return }
+        throw new Error(json.error || 'Failed to send code')
+      }
+      setEmailErrors({})
+      setEmailStep('otp')
+      toast({ title: 'Verification code sent', description: `Check ${trimmed} for the 6-digit code.` })
+    } catch (err: any) {
+      toast({ title: 'Failed', description: err.message, variant: 'destructive' })
+    } finally {
+      setEmailSaving(false)
+    }
+  }
+
+  const handleConfirmEmailOtp = async () => {
+    if (!emailOtp.trim()) { setEmailErrors({ otp: 'Enter the 6-digit code' }); return }
+    setEmailSaving(true)
+    try {
+      const res = await fetch('/api/customer/profile/email/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ otp: emailOtp.trim() }),
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        if (json.meta?.errors) { setEmailErrors(json.meta.errors); return }
+        throw new Error(json.error || 'Verification failed')
+      }
+      setProfile((prev) => prev ? { ...prev, email: json.data.email, email_verified: true } : prev)
+      setEmailSection(false); setEmailStep('enter'); setNewEmail(''); setEmailOtp(''); setEmailErrors({})
+      toast({ title: 'Email address updated!' })
+    } catch (err: any) {
+      toast({ title: 'Failed', description: err.message, variant: 'destructive' })
+    } finally {
+      setEmailSaving(false)
+    }
+  }
+
   if (loading) {
     return (
       <FooterPageLayout>
@@ -333,17 +394,81 @@ export default function ProfilePage() {
                   error={editErrors.full_name}
                   onChange={(v) => { setEditData((p) => ({ ...p, full_name: v })); setEditErrors((p) => { const n = { ...p }; delete n.full_name; return n }) }} />
 
-                <EditableField label="Phone Number" name="phone" icon={Phone}
-                  value={editing ? editData.phone : (profile.phone ?? '')}
-                  placeholder="+919876543210"
-                  readonly={!editing}
-                  error={editErrors.phone}
-                  onChange={(v) => { setEditData((p) => ({ ...p, phone: v })); setEditErrors((p) => { const n = { ...p }; delete n.phone; return n }) }} />
+                <div>
+                  <EditableField label="Phone Number" name="phone" icon={Phone}
+                    value={editing ? editData.phone : (profile.phone ?? '')}
+                    placeholder="+919876543210"
+                    readonly={!editing || profile.phone_verified}
+                    error={editErrors.phone}
+                    onChange={(v) => { setEditData((p) => ({ ...p, phone: v })); setEditErrors((p) => { const n = { ...p }; delete n.phone; return n }) }} />
+                  {profile.phone_verified && (
+                    <p className="mt-1 text-xs text-muted-foreground">Phone number is verified and cannot be changed here. Contact support if you need to update it.</p>
+                  )}
+                </div>
 
                 <div className="sm:col-span-2">
                   <EditableField label="Email Address" name="email" type="email" icon={Mail}
                     value={profile.email} readonly />
-                  <p className="mt-1 text-xs text-muted-foreground">Email cannot be changed after verification.</p>
+                  {isOwner && !emailSection && (
+                    <button onClick={() => setEmailSection(true)}
+                      className="mt-1.5 inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
+                      <Edit2 className="h-3 w-3" /> Change email address
+                    </button>
+                  )}
+
+                  {emailSection && (
+                    <div className="mt-3 space-y-3 rounded-xl border border-border/50 bg-muted/30 p-4">
+                      {emailStep === 'enter' ? (
+                        <>
+                          <label className="mb-1.5 block text-sm font-medium text-foreground">New Email Address</label>
+                          <input type="email" value={newEmail}
+                            onChange={(e) => { setNewEmail(e.target.value); setEmailErrors((p) => { const n = { ...p }; delete n.new_email; return n }) }}
+                            placeholder="you@example.com"
+                            className={cn(
+                              'w-full rounded-xl border bg-background px-3.5 py-2.5 text-sm outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20',
+                              emailErrors.new_email ? 'border-destructive' : 'border-input'
+                            )} />
+                          {emailErrors.new_email && <p className="mt-1 text-xs text-destructive">{emailErrors.new_email}</p>}
+                          <div className="flex gap-3 pt-1">
+                            <button onClick={handleRequestEmailOtp} disabled={emailSaving}
+                              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60 hover:bg-primary/90">
+                              {emailSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                              Send Code
+                            </button>
+                            <button onClick={() => { setEmailSection(false); setNewEmail(''); setEmailErrors({}) }}
+                              className="rounded-xl border border-border/50 px-4 py-2 text-sm font-medium text-muted-foreground hover:border-border">
+                              Cancel
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <label className="mb-1.5 block text-sm font-medium text-foreground">
+                            Enter the code sent to {newEmail}
+                          </label>
+                          <input type="text" inputMode="numeric" maxLength={6} value={emailOtp}
+                            onChange={(e) => { setEmailOtp(e.target.value); setEmailErrors((p) => { const n = { ...p }; delete n.otp; return n }) }}
+                            placeholder="6-digit code"
+                            className={cn(
+                              'w-full rounded-xl border bg-background px-3.5 py-2.5 text-sm tracking-widest outline-none transition-all focus:border-primary focus:ring-2 focus:ring-primary/20',
+                              emailErrors.otp ? 'border-destructive' : 'border-input'
+                            )} />
+                          {emailErrors.otp && <p className="mt-1 text-xs text-destructive">{emailErrors.otp}</p>}
+                          <div className="flex gap-3 pt-1">
+                            <button onClick={handleConfirmEmailOtp} disabled={emailSaving}
+                              className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground disabled:opacity-60 hover:bg-primary/90">
+                              {emailSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                              Verify &amp; Save
+                            </button>
+                            <button onClick={() => { setEmailStep('enter'); setEmailOtp(''); setEmailErrors({}) }}
+                              className="rounded-xl border border-border/50 px-4 py-2 text-sm font-medium text-muted-foreground hover:border-border">
+                              Back
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 

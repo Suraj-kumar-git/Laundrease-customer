@@ -44,6 +44,10 @@ export async function GET(
            s.price_per_kg,
            s.base_price
          )                       AS price_per_kg,
+         -- MRP is provider-only — only meaningful when the provider has set
+         -- their own override price; never derived from the platform default.
+         CASE WHEN ps.price_per_kg_override IS NOT NULL OR ps.price_override IS NOT NULL
+              THEN ps.price_per_kg_mrp END AS mrp_per_kg,
          COALESCE(ps.turnaround_hours_override, s.turnaround_hours) AS effective_turnaround,
          COALESCE(ps.is_express_available_override, s.is_express_available) AS effective_express,
          COALESCE(ps.express_multiplier_override, s.express_multiplier) AS effective_multiplier
@@ -72,7 +76,10 @@ export async function GET(
          COALESCE(
            ppsp.unit_price,
            psp.unit_price
-         )                       AS unit_price
+         )                       AS unit_price,
+         -- MRP is provider-only — only present when the provider has their
+         -- own override row, never derived from the platform base price.
+         ppsp.mrp                AS mrp
        FROM product_service_prices psp
        JOIN product_types pt ON pt.id = psp.product_type_id
        JOIN services s ON s.id = psp.service_id
@@ -98,6 +105,7 @@ export async function GET(
         category: r.category,
         description: r.description,
         price_per_kg: parseFloat(r.price_per_kg),
+        mrp_per_kg: r.mrp_per_kg ? parseFloat(r.mrp_per_kg) : null,
         is_express_available: r.effective_express,
         express_multiplier: parseFloat(r.effective_multiplier),
         turnaround_hours: r.effective_turnaround,
@@ -110,6 +118,7 @@ export async function GET(
         service_id: r.service_id,
         service_name: r.service_name,
         unit_price: parseFloat(r.unit_price),
+        mrp: r.mrp ? parseFloat(r.mrp) : null,
         is_express_available: r.is_express_available,
         express_multiplier: parseFloat(r.express_multiplier),
       })),

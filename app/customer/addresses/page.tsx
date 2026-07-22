@@ -11,13 +11,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   MapPin, Plus, Home, Briefcase, Building2,
   Edit2, Trash2, Star, Loader2, AlertCircle,
-  Phone, Navigation, CheckCircle,
+  Phone, Navigation, CheckCircle, ArrowLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 
 interface Address {
   id:             number
+  public_id:      string
   label:          string
   address_line1:  string
   address_line2:  string | null
@@ -85,8 +86,8 @@ export default function AddressesPage() {
   const [addresses, setAddresses] = useState<Address[]>([])
   const [loading,   setLoading]   = useState(true)
   const [error,     setError]     = useState<string | null>(null)
-  const [deleting,  setDeleting]  = useState<number | null>(null) // address id being deleted
-  const [confirmId, setConfirmId] = useState<number | null>(null) // dialog open for this id
+  const [deleting,  setDeleting]  = useState<string | null>(null) // address public_id being deleted
+  const [confirmId, setConfirmId] = useState<string | null>(null) // dialog open for this public_id
 
   const fetchAddresses = useCallback(async () => {
     setLoading(true); setError(null)
@@ -104,15 +105,15 @@ export default function AddressesPage() {
 
   useEffect(() => { fetchAddresses() }, [fetchAddresses])
 
-  const handleDelete = async (id: number) => {
-    setDeleting(id)
+  const handleDelete = async (publicId: string) => {
+    setDeleting(publicId)
     try {
-      const res  = await fetch(`/api/customer/addresses/manage?id=${id}`, {
+      const res  = await fetch(`/api/customer/addresses/manage?id=${publicId}`, {
         method: 'DELETE', credentials: 'include',
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error ?? 'Failed')
-      setAddresses(prev => prev.filter(a => a.id !== id))
+      setAddresses(prev => prev.filter(a => a.public_id !== publicId))
       toast({ title: 'Address removed', description: 'The address has been deleted' })
     } catch (err: any) {
       toast({ title: 'Delete failed', description: err.message, variant: 'destructive' })
@@ -122,12 +123,15 @@ export default function AddressesPage() {
     }
   }
 
-  const toDelete = addresses.find(a => a.id === confirmId)
+  const toDelete = addresses.find(a => a.public_id === confirmId)
 
   return (
     <>
-      <div className="container mx-auto max-w-2xl px-4 py-6">
+      <div className="container mx-auto max-w-5xl px-4 py-6">
         {/* Header */}
+        <Link href="/customer/dashboard" className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-3.5 w-3.5" /> Dashboard
+        </Link>
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground">My Addresses</h1>
@@ -175,10 +179,11 @@ export default function AddressesPage() {
           </div>
         ) : (
           <div className="space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <AnimatePresence>
               {addresses.map(addr => (
                 <motion.div
-                  key={addr.id}
+                  key={addr.public_id}
                   layout
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -249,7 +254,7 @@ export default function AddressesPage() {
                     <div className="flex items-center gap-2">
                       {/* Edit */}
                       <Link
-                        href={`/customer/addresses/${addr.id}/edit`}
+                        href={`/customer/addresses/${addr.public_id}/edit`}
                         className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                       >
                         <Edit2 className="h-3.5 w-3.5" /> Edit
@@ -258,11 +263,11 @@ export default function AddressesPage() {
                       {/* Delete */}
                       <button
                         type="button"
-                        onClick={() => setConfirmId(addr.id)}
-                        disabled={deleting === addr.id}
+                        onClick={() => setConfirmId(addr.public_id)}
+                        disabled={deleting === addr.public_id}
                         className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
                       >
-                        {deleting === addr.id
+                        {deleting === addr.public_id
                           ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                           : <Trash2 className="h-3.5 w-3.5" />}
                         Remove
@@ -272,6 +277,7 @@ export default function AddressesPage() {
                 </motion.div>
               ))}
             </AnimatePresence>
+            </div>
 
             {/* Max limit notice */}
             {addresses.length >= 10 && (

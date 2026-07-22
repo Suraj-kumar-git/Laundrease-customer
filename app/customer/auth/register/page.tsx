@@ -81,11 +81,67 @@ function PageContent() {
   const [serverError, setServerError] = useState("")
   const [pwdFocused,  setPwdFocused]  = useState(false)
 
-  // Pre-fill referral code from URL
+  // Referral-code lookup — debounced as the user types, so they see the
+  // referrer's name (or why the code doesn't work) before submitting.
+  const [referralCheck, setReferralCheck] = useState<{
+    status: "idle" | "checking" | "valid" | "invalid"
+    referrerName?: string
+    reason?: string
+  }>({ status: "idle" })
+
+  // Pre-fill from sessionStorage draft (set when coming back from verify page)
+  // then layer URL params on top (ref=, email=, phone= override saved values).
   useEffect(() => {
-    const ref = searchParams.get("ref")
-    if (ref) setForm(prev => ({ ...prev, referral_code: ref.toUpperCase() }))
+    try {
+      const saved = sessionStorage.getItem("reg_draft")
+      if (saved) {
+        const draft = JSON.parse(saved)
+        setForm(prev => ({
+          ...prev,
+          full_name:     draft.full_name     || prev.full_name,
+          email:         draft.email         || prev.email,
+          phone:         draft.phone         || prev.phone,
+          referral_code: draft.referral_code || prev.referral_code,
+        }))
+      }
+    } catch { /* sessionStorage unavailable */ }
+
+    // URL params override the draft (verify page passes email/phone back)
+    const ref   = searchParams.get("ref")
+    const email = searchParams.get("email")
+    const phone = searchParams.get("phone")
+    setForm(prev => ({
+      ...prev,
+      ...(ref   ? { referral_code: ref.toUpperCase() } : {}),
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+    }))
   }, [searchParams])
+
+  // Validate the referral code against the server, debounced — only once it
+  // matches the expected format, to avoid spamming the API while typing.
+  useEffect(() => {
+    const code = form.referral_code.trim()
+    if (!code || !/^[A-Z]{2,10}-[A-Z0-9]{4,12}$/.test(code)) {
+      setReferralCheck({ status: "idle" })
+      return
+    }
+    setReferralCheck({ status: "checking" })
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/customer/public/referral/validate?code=${encodeURIComponent(code)}`)
+        const json = await res.json()
+        if (json.success && json.data?.valid) {
+          setReferralCheck({ status: "valid", referrerName: json.data.referrer_name })
+        } else {
+          setReferralCheck({ status: "invalid", reason: json.data?.reason })
+        }
+      } catch {
+        setReferralCheck({ status: "idle" })
+      }
+    }, 500)
+    return () => clearTimeout(timer)
+  }, [form.referral_code])
 
   // Already logged in — redirect
   useEffect(() => {
@@ -113,7 +169,16 @@ function PageContent() {
     setSubmitting(true)
     try {
       await register(form.full_name.trim(), form.email.trim().toLowerCase(), form.password, form.phone.trim(), form.referral_code.trim() || undefined)
-      // Registration succeeded — navigate to verify page
+      // Save non-sensitive fields so the register form is pre-filled if the
+      // user comes back via "Update it here" on the verify page.
+      try {
+        sessionStorage.setItem("reg_draft", JSON.stringify({
+          full_name:     form.full_name.trim(),
+          email:         form.email.trim().toLowerCase(),
+          phone:         form.phone.trim(),
+          referral_code: form.referral_code.trim(),
+        }))
+      } catch { /* sessionStorage unavailable */ }
       router.push(`/customer/auth/verify?email=${encodeURIComponent(form.email)}&phone=${encodeURIComponent(form.phone)}`)
     } catch (err: any) {
       setServerError(err.message || "Registration failed")
@@ -182,7 +247,7 @@ function PageContent() {
                   <Input id="phone" type="tel" placeholder="+919876543210" autoComplete="tel"
                     className={cn("pl-10", errors.phone && "border-destructive")}
                     value={form.phone}
-                    onChange={e => set("phone", e.target.value)}
+                    onChange={e => set("phone", e.target.value.replace(/[^\d+\s\-]/g, ''))}
                     disabled={submitting} />
                 </div>
                 {errors.phone
@@ -262,17 +327,36 @@ function PageContent() {
                   Referral Code
                   <span className="text-xs font-normal text-muted-foreground">(optional)</span>
                 </Label>
-                <Input id="referral_code" placeholder="LDR-XXXXXXX"
-                  className={cn("font-mono tracking-widest uppercase",
-                    errors.referral_code ? "border-destructive" :
-                    form.referral_code ? "border-primary/50 bg-primary/5" : ""
+                <div className="relative">
+                  <Input id="referral_code" placeholder="LDR-XXXXXXX"
+                    className={cn("font-mono tracking-widest uppercase pr-9",
+                      errors.referral_code || referralCheck.status === "invalid" ? "border-destructive" :
+                      referralCheck.status === "valid" ? "border-emerald-500 bg-emerald-500/5" :
+                      form.referral_code ? "border-primary/50 bg-primary/5" : ""
+                    )}
+                    value={form.referral_code}
+                    onChange={e => set("referral_code", e.target.value)}
+                    maxLength={16}
+                    disabled={submitting} />
+                  {referralCheck.status === "checking" && (
+                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
                   )}
-                  value={form.referral_code}
-                  onChange={e => set("referral_code", e.target.value)}
-                  maxLength={16}
-                  disabled={submitting} />
+                  {referralCheck.status === "valid" && (
+                    <CheckCircle className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-emerald-500" />
+                  )}
+                </div>
                 {errors.referral_code
                   ? <p className="text-xs text-destructive">{errors.referral_code}</p>
+                  : referralCheck.status === "checking"
+                  ? <p className="text-xs text-muted-foreground">Checking referral code…</p>
+                  : referralCheck.status === "valid"
+                  ? <p className="text-xs text-emerald-600">🎉 You&apos;ve been referred by <strong>{referralCheck.referrerName}</strong></p>
+                  : referralCheck.status === "invalid"
+                  ? <p className="text-xs text-destructive">
+                      {referralCheck.reason === "referral_program_inactive"
+                        ? "The referral program is currently inactive."
+                        : "This referral code doesn't exist or is no longer active."}
+                    </p>
                   : form.referral_code
                   ? <p className="text-xs text-primary">🎉 Referral code will be applied after sign up</p>
                   : <p className="text-xs text-muted-foreground">Have a friend&apos;s referral code? Enter it here.</p>
@@ -290,10 +374,10 @@ function PageContent() {
                     errors.agreeTerms ? "text-destructive" : "text-foreground"
                   )}>
                   I agree to the{" "}
-                  <Link href="/terms-of-service" className="text-primary underline underline-offset-2 hover:no-underline">
+                  <Link href="/customer/terms-of-service" className="text-primary underline underline-offset-2 hover:no-underline">
                     Terms of Service
                   </Link>{" "}and{" "}
-                  <Link href="/privacy-policy" className="text-primary underline underline-offset-2 hover:no-underline">
+                  <Link href="/customer/privacy-policy" className="text-primary underline underline-offset-2 hover:no-underline">
                     Privacy Policy
                   </Link>
                 </label>

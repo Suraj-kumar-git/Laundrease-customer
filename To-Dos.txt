@@ -1,67 +1,31 @@
 **** HIGH Priority: ****
-* Merge the step-by-step process of laundry registration to a single form with the form validation and correct file types required and complete the profile submission from laundry, approval from admin with a registration-status check page for laundry. If not approved then they should fall back to status page.
-  -- Like a delivery registration the approval should be shown files-by-files.
-* Complete the Test Payment integeration for Customers using adapter for Razorpay, Cashfree, & PayU.
-* Add functionality for customers to cancel the order till the Laundry has not started processing the order.
-* Upgrade the existing Customer landing page with animation, carousel, & all kinds of dynamic data that can be placed on landing page including the social links & Business details.
-  -- Fetch customer's address and show them the providers within 5 KMs of range. For this do a research on what to get from laundry profiles so that the distance can be calculated and shown to the users.
-* Update the whole platform Code to use msg91 emails and SMS wherever required to send emails/sms.
-* Create all kinds of templates for emails & SMSs(add DLT template ID)
-* The Operating Hours set by laundry profiles during registration is not compatible with how it is read on the customer profile during order creation step 2.
-* For address fields all over the platform, prefill the City & State based on the PIN code filled. Use the dropdown to select the State. Wrongly filled PIN code as per city & state will show an error message to type the correct PIN,City,& State combination.
-* Migrate the whole table to use UUID for all the id fields throughout the DB.
-* Create Category-wise Support Ticket, Status and Response creation page for Customer
-  -- On the order details page on click of the help button redirect user to create support ticket with prefilled category of order issue and the orderId already selected in backend.
-* For delivery profile: While delivering to customer, pre-paid orders are fine to deliver but for COD there has to be one check which asks whether the payment is received then only the send confirmation OTP should be enabled.
-  -- Also, if the delivery person will enter the amount received, if some extra amount is received by the delivery person due to cash unavailability the extra amount should get credited to customer's wallet.
-* For Customer profile: There should be a calculated & estimated delivery date for the orders which should be shown to user once they select the provider. 
-  --After successful delivery, the payment status in order details page need to be updated.
-  --Even when I am ordering today at 12:05 AM I get the option to choose the pickup date from tomorrow only but this should be based on the delivery person availability. If the delivery person has <= 2 orders in queue then the pick_up time should be of next 3 hrs slot. If delivery has 2-5 orders them it should be of next 3 hrs slot, if more than 5 orders then it should be of last 3rd slot, & for more it should show tomorrow any slot available.
-    + the slot for past time should not be visible, if it's 10:00AM the slot for 9:00Am -12:00PM should also be visible based on delivery availability.
-  --Auto assignment of orders to delivery partner is not happening based on availability.
-  --Customers can edit the services on checkoutStep page also. Clicking on edit button should directly jump them on service selection page.
-  --When we navigate back-&-forth in order creation page the scheduled pickup date and slot is not prefilled.
-  
+*Delivery:
+*Laundry:
+1. Put a check on duplicate data feed by customers or laundry or delivery persona in all their write operations like GST number, PAN card number or any unique id can't be same for 2 laundry providers or the bike license plate number can't be same for 2 delivery persons...first let's figure out what all constraints we will have to make in DB so that we can fix this bug....check the whole sql scripts thoroughly...
+*Customer
+2. Public Page content updates - Manual
 
 
-**** MEDIUM Priority: ****
-* The services page: All the services and related info will load on this page from DB. The current UI is OK but I dont like...let's make it more eye-catchy. We will keep the search box on the page to let visitors see the services provided in their queried location with as much designated info to make the UX better.
-  -- For customers looking for providers in their area we will use google maps to open the suggestion to select area and we will show the available providers belonging to that area.
-* The pricing page for public users will fetch the data from DB and will show the products with services mentioned and starting prices, it will show filter options to filter product types & services to see the pricing of products for the service selected and we will keep the functionality of choosing the provider based on the location and showing the prices list based on that ->this all to make the page more interactive and user friendly.
-  -- The pricing page for authentic users will ask to select the address and then the provider to see the pricing of services based on the product types and we will show the filter to them also so that they can filter what services they want on what product types and can directly make the api call to see the price for that. Authenticated users can also see the pricing of any locations like public users.
-* Once the delivery person picks up the order from laundry profile the delivery_schedule(date) and delivery_slot(time) should get updated, also customers should get notified synchronously that their order is out for delivery.
-
-
-
-
-**** Bugs & missing implementation: ****
-* For Customer when I visit the home page I can see I am logged in the header but when I try to navigate I jump back to login page. -> bcoz the userdata in localhost persists.
-* Admin don't find the invoice generated for the order. Also even when the delivery was made the delivery date and delivery slot is not coming in order details page.
-* The emails, payment, AWS S3, SQS and all 3rd party integration fallback for complete flow testing in dev env
-* Get new image for services, providers, & Product types.
-* The file address-form-old.tsx has the form field for 'tags', this we will add in the new AddressForm.tsx
-* Notifications on webpage functionality for Customer, Laundry, Admin, Support, Delivery
-* Build-time exclusion (We want separate builds per role) so the build artifacts contain only one persona -> Create Separate Repo role wise with app folder only containing ${role} & api/$role{} folder
-* Admin OTP verification page input fields correctness
-* Admin is not able to make private comment on support tikcets -> Unauthorized error
-* Restrict Laundry to receive new orders once the subscription is expired or the order limit is reached per subscription.
-* Admin can mark some tickets as closed with some comments or can flag it for breached SLA and can see the whole conversation under the ticket made.
-* Update payouts tab of Admin where he can see the refunds made to customers, what paid to laundry providers, delivery profiles with the total revenue and profit/loss with analysis for operations. Admin should be able to see all the transactions made.
-* Add Payment Integeration for all required roles.
+**** Future implementation: ****
 * Create one emails tab for both support and admin portal where they can see all the emails received and sent and they can also reply back to the emails with all emails functionalities like attachments and forwarding features.
-* In the order details, a delivery profile should also see the business address of the laundry provider where he needs to drop/pick the items from Provider.
-* Physical maching to print out the laundry bag key.
-* Facebook Sign in pending to test
-* Order invoice download button for support & Admin.
-* Physical machine for delivery persons to get the code for the bag with a QR code on it.
+
+** Code review checklist **
+* Get new image for services, providers, & Product types.
+* There's currently zero cron/scheduled-job infrastructure anywhere in this app — nothing runs on a timer today. How should the daily "reschedule to tomorrow if not picked up" sweep actually get triggered in production?
+* Barcode/Bag Creation Logic for all the orders/Customers when they are picked up by delivery partner from customer
+* In Safety Center page we have mentioned that the customer's PII like Address, Phone, Payment details, etc are encrypted.
+* Do code revisit for each persona Repo & remove unnecessary & duplicate code snippets, also check if files can be simplified per role.
+* Review architectural pattern to enhance the app's performance like using queue or serverless architecture
 
 
 
 Operational Change pending: Once the Customer profile is deployed for testing:
 * For Invoice: Get the Place of Supply, Correct supplier details, Service Accounting Code(SAC), Correct CGST & SGST charge, & check against the gov compliance.
-* Register on https://trueconnect.jio.com/#/home/entity-registration to get the DLT template id for msg91 SMS services.
+* Register on https://trueconnect.jio.com/#/home/entity-registration to get the DLT template id for msg91 SMS services. Update the existing SMS template with DLT template ID and add Entity/PE ID.
 * Get Business GST/PAN
-* Complete the account activation step for PayU with Business PAN, business details, Bank Account, Website Details, & KYC Documents.
+* Complete the account activation step for PayU with Business PAN, business details, Bank Account, Website Details, & KYC Documents. Also edit the UI of PayU payment page.
+* Note: Laundry Providers have to operate daily.
+* Physical machine for delivery persons to get the code for the bag with a QR code on it.
 
 Register the business with Gov...
 1. To register as "Principal Entity Registration" on a DLT platform like JIO:

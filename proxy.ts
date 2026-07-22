@@ -10,12 +10,14 @@ const PROTECTED_ROUTES = [
   '/customer/profile',
   '/customer/refer-and-earn',
   '/customer/settings',
+  '/customer/support',
 ]
  
 const PUBLIC_URLs = [
   '/',
   '/customer',
   '/customer/about',
+  '/customer/careers',
   '/customer/careers/*',
   '/customer/community-guidelines',
   '/customer/faq',
@@ -31,12 +33,20 @@ const PUBLIC_URLs = [
   '/customer/auth/register',
   '/customer/auth/reset-password/*',
   '/customer/auth/verify',
+  '/api/customer/laundry-providers/search',
+  '/api/customer/payments/payu/success',
+  '/api/customer/payments/payu/failure',
+  '/api/customer/payments/cashfree/return',
 ]
  
 // API routes that don't require authentication
 const PUBLIC_API_ROUTES = [
   '/api/customer/public/*',
   '/api/customer/auth/*',
+  '/api/customer/laundry-providers/search',
+  '/api/customer/payments/payu/success',
+  '/api/customer/payments/payu/failure',
+  '/api/customer/payments/cashfree/return',
 ]
  
 // Helper to check if a path is public
@@ -71,7 +81,20 @@ function needsVerification(pathname: string): boolean {
   const path = pathname.split(/[?#]/)[0]
   return PROTECTED_ROUTES.some(route => path === route || path.startsWith(`${route}/`))
 }
- 
+
+function getRoleFromPath(pathname: string): string | null {
+  const normalized = pathname.trim()
+  if (
+    normalized === `/customer` ||
+    normalized.startsWith(`/customer/`) ||
+    normalized === `/api/customer` ||
+    normalized.startsWith(`/api/customer/`)
+  ) {
+    return 'customer';
+  }
+  return null;
+}
+
 // Verify JWT token
 async function verifyToken(token: string): Promise<any> {
   try {
@@ -83,9 +106,30 @@ async function verifyToken(token: string): Promise<any> {
     })
     if (payload.type !== 'access') {
       return null
-    }    
+    }
     return payload
   } catch (error) {
+    return null
+  }
+}
+
+// Verify a refresh_token JWT's signature/expiry only (no DB round trip) —
+// used purely as a signal in middleware to avoid a hard logout. The actual
+// token rotation happens client-side (AuthProvider's tryRefresh, a normal
+// browser fetch with credentials) — an earlier version of this tried to
+// rotate the token from inside middleware via a server-to-server self-fetch
+// back into this same app, which proved unreliable (the internal request
+// could fail for reasons unrelated to the session actually being invalid,
+// e.g. token-rotation races), and on failure the page-routes branch below
+// would delete cookies and force a real logout even though the customer's
+// refresh token was still perfectly good.
+async function verifyRefreshTokenSignature(token: string): Promise<Awaited<ReturnType<typeof verifyToken>>> {
+  try {
+    const secret = new TextEncoder().encode(process.env.JWT_SECRET)
+    const { payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] })
+    if (payload.type !== 'refresh') return null
+    return payload
+  } catch {
     return null
   }
 }
@@ -100,6 +144,17 @@ export async function proxy(request: NextRequest) {
   ) {
     return NextResponse.next()
   }
+  const pathRole = getRoleFromPath(pathname)
+
+  if (pathRole && pathRole !== 'customer') {
+    if (pathname.startsWith('/api')) {
+      return NextResponse.json(
+        { success: false, error: 'Not Found' },
+        { status: 404 }
+      )
+    }
+    return NextResponse.rewrite(new URL('/404', request.url))
+  }
  
   // Handle API routes
   if (pathname.startsWith('/api')) {
@@ -109,16 +164,14 @@ export async function proxy(request: NextRequest) {
     }
     // For protected API routes, verify token
     const accessToken = request.cookies.get('access_token')?.value
-    if (!accessToken) {
+    const payload = accessToken ? await verifyToken(accessToken) : null
+
+    if (!payload?.userId) {
+      // Never deletes cookies here — a 401 on a data API just means this one
+      // call needs a fresh access token. The client retries after rotating
+      // it (AuthProvider does this for customer); cookies are left alone.
       return NextResponse.json(
-        { success: false, error: 'Unauthorized - Please login' },
-        { status: 401 }
-      )
-    }
-    const payload = await verifyToken(accessToken)
-    if (!payload || !payload.userId) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid or expired token' },
+        { success: false, error: accessToken ? 'Invalid or expired token' : 'Unauthorized - Please login' },
         { status: 401 }
       )
     }
@@ -136,7 +189,19 @@ export async function proxy(request: NextRequest) {
  
   // Allow public routes
   if (isPublicURL(pathname)) {
-    if (isAuthPage(pathname)) {
+    // Next.js automatically prefetches in-viewport <Link> targets — e.g. a
+    // "Sign Up" link sitting on the public landing page gets silently
+    // prefetched (no click, no real navigation) as soon as it scrolls into
+    // view. That prefetch request hits this same middleware. Without this
+    // check, a logged-in customer would get logged out just from a register/
+    // login link being visible on the page they're already on — never
+    // actually clicking it. Only react to a real navigation.
+    const isPrefetch =
+      request.headers.get('next-router-prefetch') === '1' ||
+      request.headers.get('purpose') === 'prefetch' ||
+      request.headers.get('sec-purpose') === 'prefetch'
+
+    if (isAuthPage(pathname) && !isPrefetch) {
       const token = request.cookies.get('access_token')?.value
       if (token) {
         const payload = await verifyToken(token)
@@ -153,23 +218,35 @@ export async function proxy(request: NextRequest) {
   }
   // Get access token from cookies
   const accessToken = request.cookies.get('access_token')?.value
- 
-  // If no token, redirect to login page
-  if (!accessToken) {
-    const loginUrl = new URL('/customer/auth/login', request.url)
-    loginUrl.searchParams.set('returnTo', pathname)
-    return NextResponse.redirect(loginUrl)
-  }
- 
-  // Verify token
-  const payload = await verifyToken(accessToken)
- 
-  if (!payload || !payload.userId || !payload.role) {
+  // Verify token (if present)
+  const payload = accessToken ? await verifyToken(accessToken) : null
+
+  if (!payload?.userId || !payload?.role) {
+    // Customer-only: an expired/missing access token isn't necessarily a dead
+    // session. If the refresh token's signature is still valid, let the page
+    // load instead of forcing a logout — the client (AuthProvider) rotates
+    // the access token itself via a normal browser fetch right after mount,
+    // which is far more reliable than trying to do it here in middleware.
+    // This one request goes through ungated (no x-user-id headers, so any
+    // data API it calls will 401 once and the page handles that), but the
+    // session itself — and the cookies — are left untouched.
+    if (process.env.ROLE === 'customer') {
+      const refreshToken = request.cookies.get('refresh_token')?.value
+      const refreshPayload = refreshToken ? await verifyRefreshTokenSignature(refreshToken) : null
+      if (refreshPayload?.userId) {
+        return NextResponse.next()
+      }
+    }
+    // No usable session at all — genuinely logged out. Clear cookies only if
+    // there was actually an access token to invalidate; otherwise there's
+    // nothing to clear.
     const loginUrl = new URL('/customer/auth/login', request.url)
     loginUrl.searchParams.set('returnTo', pathname)
     const response = NextResponse.redirect(loginUrl)
-    response.cookies.delete('access_token')
-    response.cookies.delete('refresh_token')
+    if (accessToken) {
+      response.cookies.delete('access_token')
+      response.cookies.delete('refresh_token')
+    }
     return response
   }
 

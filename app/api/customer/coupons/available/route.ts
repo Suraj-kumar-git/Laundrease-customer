@@ -9,29 +9,35 @@ export async function GET(req: NextRequest) {
   const orderAmount = parseFloat(req.nextUrl.searchParams.get('order_amount') ?? '0')
 
   try {
-    // Count user's completed non-cancelled orders (for first_order_only check)
+    // Count user's completed non-cancelled orders (for first_order_only check).
+    // 'rejected' (laundry provider declined before confirming) is terminal
+    // but must not count as a placed order any more than cancelled/failed do.
     const orderCountRes = await query(
       `SELECT COUNT(*)::int AS completed_count
        FROM orders o
        JOIN order_statuses s ON s.code = o.status
        WHERE o.customer_id = $1
          AND s.is_terminal = TRUE
-         AND s.code <> 'cancelled'`,
+         AND s.code NOT IN ('cancelled', 'failed', 'rejected')`,
       [userId]
     )
     const completedOrderCount: number = orderCountRes.rows[0].completed_count
 
-    // Also count active (non-terminal, non-cancelled) orders — FIRST50 locked while any order is in progress
+    // Also count active (non-terminal, non-cancelled) orders — FIRST50 locked while any order is in progress.
+    // Excludes orders still awaiting online-payment confirmation (status
+    // 'pending' with payment_status not yet 'paid') — those aren't "placed"
+    // yet, same definition used by the dashboard and orders-list routes.
     const activeOrderCountRes = await query(
       `SELECT COUNT(*)::int AS active_count
        FROM orders o
        WHERE o.customer_id = $1
-         AND o.status NOT IN ('cancelled', 'completed', 'delivered', 'returned')`,
+         AND o.status NOT IN ('cancelled', 'failed', 'rejected', 'completed', 'delivered', 'returned')
+         AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')`,
       [userId]
     )
     const activeOrderCount: number = activeOrderCountRes.rows[0].active_count
 
-    // Total orders ever placed (completed + active, excludes cancelled)
+    // Total orders ever placed (completed + active, excludes cancelled/rejected)
     const anyNonCancelledOrders = completedOrderCount > 0 || activeOrderCount > 0
 
     // Fetch all active coupons not yet expired
@@ -42,7 +48,9 @@ export async function GET(req: NextRequest) {
          c.min_order_amount, c.usage_limit_per_user, c.first_order_only,
          COALESCE((
            SELECT COUNT(*) FROM coupon_redemptions cr
+           LEFT JOIN orders o ON o.id = cr.order_id
            WHERE cr.coupon_code = c.code AND cr.user_id = $1
+             AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))
          ), 0)::int AS times_used
        FROM coupons c
        WHERE c.is_active = TRUE

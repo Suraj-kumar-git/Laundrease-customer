@@ -38,7 +38,9 @@ export async function GET(req: NextRequest) {
     const addressesResult = await query(`
       SELECT
         id,
+        public_id,
         label,
+        tags,
         address_line1,
         address_line2,
         landmark,

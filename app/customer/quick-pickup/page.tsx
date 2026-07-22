@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import {
   Phone, Mail, MapPin, Zap, Clock, CheckCircle2,
@@ -10,17 +10,8 @@ import {
 } from 'lucide-react'
 import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
 import { cn } from '@/lib/utils'
+import { useAuth } from '@/components/auth-provider'
 import type { NearbyProvider, ServiceType } from '@/types/pricing'
-
-// ---- Constants ----------------------------------------------
-const SERVICES_LIST = [
-  'Wash & Fold',
-  'Dry Cleaning',
-  'Steam Ironing',
-  'Wash & Iron',
-  'Stain Removal',
-  'Shoe Cleaning',
-]
 
 // ---- Callback request form ----------------------------------
 function CallbackForm() {
@@ -36,6 +27,14 @@ function CallbackForm() {
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [servicesList, setServicesList] = useState<string[]>([])
+
+  useEffect(() => {
+    fetch('/api/customer/public/services?active=true')
+      .then(res => res.json())
+      .then(json => { if (json.success) setServicesList(json.data.services.map((s: { name: string }) => s.name)) })
+      .catch(() => {})
+  }, [])
 
   const set = (field: string, value: any) => {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -233,7 +232,7 @@ function CallbackForm() {
           Services Needed <span className="text-muted-foreground text-xs">(select all that apply)</span>
         </label>
         <div className="flex flex-wrap gap-2">
-          {SERVICES_LIST.map((svc) => (
+          {servicesList.map((svc) => (
             <button
               key={svc}
               type="button"
@@ -290,19 +289,23 @@ function CallbackForm() {
 
 // ---- Find provider tab --------------------------------------
 function FindProviderTab() {
-  const [pincode, setPincode] = useState('')
+  const { user } = useAuth()
+  const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [providers, setProviders] = useState<NearbyProvider[] | null>(null)
   const [covered, setCovered] = useState<boolean | null>(null)
 
   const handleSearch = async () => {
-    const val = pincode.trim()
-    if (!/^\d{6}$/.test(val)) { setError('Enter a valid 6-digit pincode'); return }
+    const val = query.trim()
+    if (!val) { setError('Enter a pincode or area/city name'); return }
     setError(null)
     setLoading(true)
     try {
-      const res = await fetch(`/api/customer/public/pricing/providers-by-area?pincode=${val}`)
+      // A 6-digit value is treated as a pincode; anything else is searched as a city/area name.
+      const isPincode = /^\d{6}$/.test(val)
+      const param = isPincode ? `pincode=${val}` : `city=${encodeURIComponent(val)}`
+      const res = await fetch(`/api/customer/public/pricing/providers-by-area?${param}`)
       if (!res.ok) throw new Error('Failed')
       const json = await res.json()
       if (!json.success) throw new Error(json.error)
@@ -322,11 +325,10 @@ function FindProviderTab() {
           <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
-            value={pincode}
-            onChange={(e) => { setPincode(e.target.value); setError(null) }}
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setError(null) }}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-            placeholder="Enter your 6-digit pincode"
-            maxLength={6}
+            placeholder="Enter pincode or area/city name"
             className={cn(
               'w-full rounded-xl border bg-background py-3 pl-10 pr-4 text-sm outline-none transition-all focus:ring-2 focus:ring-primary/20',
               error ? 'border-destructive' : 'border-input focus:border-primary'
@@ -355,19 +357,23 @@ function FindProviderTab() {
           {!covered || providers.length === 0 ? (
             <div className="rounded-2xl border border-border/50 bg-muted/30 p-8 text-center">
               <MapPin className="mx-auto h-10 w-10 text-muted-foreground/30" />
-              <p className="mt-3 font-medium text-foreground">No providers in {pincode} yet</p>
+              <p className="mt-3 font-medium text-foreground">No providers in {query} yet</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                We&apos;re expanding. Try a nearby pincode or{' '}
-                <Link href="/customer/auth/register" className="text-primary hover:underline">
-                  sign up
-                </Link>{' '}
-                for updates.
+                We&apos;re expanding. Try a nearby pincode or area{user ? '.' : (
+                  <>
+                    {' '}or{' '}
+                    <Link href="/customer/auth/register" className="text-primary hover:underline">
+                      sign up
+                    </Link>{' '}
+                    for updates.
+                  </>
+                )}
               </p>
             </div>
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                {providers.length} provider{providers.length !== 1 ? 's' : ''} found in {pincode}
+                {providers.length} provider{providers.length !== 1 ? 's' : ''} found in {query}
               </p>
               {providers.map((provider) => (
                 <div
@@ -438,30 +444,19 @@ function FindProviderTab() {
 // ---- Page ---------------------------------------------------
 export default function QuickPickupPage() {
   const [activeTab, setActiveTab] = useState<'callback' | 'find'>('callback')
+  const { user } = useAuth()
 
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'Quick Pickup' }]}>
-      {/* Hero */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
-        <div className="pointer-events-none absolute -top-40 -right-40 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-        <PageSection className="relative py-20 md:py-28">
-          <div className="max-w-3xl">
-            <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
-              <Zap className="h-3 w-3" />
-              Quick Pickup
-            </span>
-            <h1 className="mt-2 text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl">
-              Get Your Laundry Picked Up Fast
-            </h1>
-            <p className="mt-4 text-lg text-muted-foreground leading-relaxed">
-              No account needed. Tell us where you are — we&apos;ll call you back to arrange pickup, or connect you directly with a provider in your area.
-            </p>
-          </div>
-        </PageSection>
-      </div>
-
       {/* Main section: tabs */}
-      <PageSection>
+      <PageSection className="pt-10">
+        <div className="mb-8 flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-primary">
+            <Zap className="h-3 w-3" />
+            Quick Pickup
+          </span>
+          <p className="text-sm text-muted-foreground">No account needed — we&apos;ll call you back, or connect you directly with a provider.</p>
+        </div>
         <div className="grid gap-10 lg:grid-cols-5">
           {/* Form */}
           <div className="lg:col-span-3">
@@ -541,23 +536,25 @@ export default function QuickPickupPage() {
               </div>
             </div>
 
-            {/* Platform CTA */}
-            <div className="rounded-2xl border border-primary/20 bg-primary/5 p-6">
-              <Sparkles className="mb-3 h-6 w-6 text-primary" />
-              <h3 className="font-semibold text-foreground">
-                Want more control over your order?
-              </h3>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Sign up for free to choose your provider, track your order in real-time, apply coupons, and save addresses.
-              </p>
-              <Link
-                href="/customer/auth/register"
-                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
-              >
-                Create Free Account
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
+            {/* Platform CTA — guests only; signed-in users already have an account */}
+            {!user && (
+              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-6">
+                <Sparkles className="mb-3 h-6 w-6 text-primary" />
+                <h3 className="font-semibold text-foreground">
+                  Want more control over your order?
+                </h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Sign up for free to choose your provider, track your order in real-time, apply coupons, and save addresses.
+                </p>
+                <Link
+                  href="/customer/auth/register"
+                  className="mt-4 inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90"
+                >
+                  Create Free Account
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </PageSection>

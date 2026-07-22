@@ -257,7 +257,7 @@ export default function CheckoutPage({ params }: Readonly<PageProps>) {
                   </p>
                 </div>
 
-                <Button type="submit" className="w-full bg-violet-600 hover:bg-violet-700" disabled={isLoading}>
+                <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={isLoading}>
                   {isLoading ? "Processing..." : `Pay $${product.price.toFixed(2)}`}
                 </Button>
               </form>

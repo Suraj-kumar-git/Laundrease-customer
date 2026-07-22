@@ -57,7 +57,7 @@ export default function CheckoutSuccessPage({ params }: Readonly<PageProps>) {
         </Card>
 
         <div className="mt-6 space-y-4">
-          <Button className="w-full bg-violet-600 hover:bg-violet-700">
+          <Button className="w-full bg-blue-600 hover:bg-blue-700">
             <Download className="mr-2 h-4 w-4" />
             Download Receipt
           </Button>
@@ -68,7 +68,7 @@ export default function CheckoutSuccessPage({ params }: Readonly<PageProps>) {
           </Button>
 
           <div className="pt-2">
-            <Link href="/customer/dashboard" className="text-sm text-violet-600 hover:underline">
+            <Link href="/customer/dashboard" className="text-sm text-blue-600 hover:underline">
               Go to Dashboard
             </Link>
           </div>

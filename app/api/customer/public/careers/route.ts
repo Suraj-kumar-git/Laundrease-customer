@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
   try {
     const result = await query(
       `SELECT
-         id, title, department, location, employment_type,
+         public_id AS id, title, department, location, employment_type,
          experience_range, about_role,
          responsibilities, requirements, nice_to_have, benefits,
          -- Only expose whether a JD exists, not the raw S3 key

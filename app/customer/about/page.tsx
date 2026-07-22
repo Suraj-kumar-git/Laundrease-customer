@@ -6,12 +6,22 @@ import {
   ArrowRight, Sparkles,
 } from 'lucide-react'
 import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
+import { GuestOnlyCta } from '@/components/common/guest-only-cta'
 import { ABOUT_US_FALLBACK } from '@/lib/footer-page-fallbacks'
+import { formatStat } from '@/lib/format-stat'
 import type { PageContentBlock, CardItem, StatItem, HeroBody, TextBlockBody } from '@/types/footer-pages'
+import { AboutPageLiveStats, getAboutPageLiveStats } from '@/lib/about-stats'
 
 export const metadata: Metadata = {
   title: 'About Us | Laundrease',
   description: 'Learn about Laundrease — our story, mission, and the values that drive everything we do.',
+  keywords: ['about Laundrease', 'laundry startup Pune', 'on-demand laundry company'],
+  alternates: { canonical: '/customer/about' },
+  openGraph: {
+    title: 'About Us | Laundrease', type: 'website', url: '/customer/about',
+    description: 'Learn about Laundrease — our story, mission, and the values that drive everything we do.',
+  },
+  twitter: { card: 'summary_large_image', title: 'About Us | Laundrease' },
 }
 
 // Revalidate every 6 hours — content changes rarely
@@ -100,22 +110,26 @@ function HeroSection({ block }: { block: PageContentBlock }) {
   )
 }
 
-function StatsSection({ block }: { block: PageContentBlock }) {
+function StatsSection({ block, liveStats }: { block: PageContentBlock; liveStats: AboutPageLiveStats | null }) {
   const stats = block.body as StatItem[]
   return (
     <div className="border-y border-border/50 bg-muted/30">
       <PageSection tight>
         <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
-          {stats.map((stat, i) => (
-            <div key={i} className="text-center">
-              <div className="text-4xl font-bold text-primary sm:text-5xl">
-                {stat.value}
+          {stats.map((stat, i) => {
+            const live = liveStats?.[stat.icon as keyof AboutPageLiveStats]
+            const value = live !== undefined ? formatStat(live) : stat.value
+            return (
+              <div key={i} className="text-center">
+                <div className="text-4xl font-bold text-primary sm:text-5xl">
+                  {value}
+                </div>
+                <div className="mt-2 text-sm font-medium text-muted-foreground">
+                  {stat.label}
+                </div>
               </div>
-              <div className="mt-2 text-sm font-medium text-muted-foreground">
-                {stat.label}
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </PageSection>
     </div>
@@ -217,9 +231,12 @@ function StorySection({ block }: { block: PageContentBlock }) {
 
 // ---- Page ---------------------------------------------------
 export default async function AboutUsPage() {
-  const blocks = await getAboutContent()
+  const [blocks, liveStats] = await Promise.all([
+    getAboutContent(),
+    getAboutPageLiveStats(),
+  ])
 
-  const getBlock = (key: string) => blocks.find((b) => b.section_key === key)
+  const getBlock = (key: string) => blocks.find((b:any) => b.section_key === key)
 
   const hero = getBlock('hero')
   const stats = getBlock('stats')
@@ -230,7 +247,7 @@ export default async function AboutUsPage() {
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'About Us' }]}>
       {hero && <HeroSection block={hero} />}
-      {stats && <StatsSection block={stats} />}
+      {stats && <StatsSection block={stats} liveStats={liveStats} />}
       {mission && <MissionSection block={mission} />}
       {values && <ValuesSection block={values} />}
       {story && <StorySection block={story} />}
@@ -247,13 +264,7 @@ export default async function AboutUsPage() {
                 Join thousands of happy customers across Pune.
               </p>
             </div>
-            <Link
-              href="/customer/auth/register"
-              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-primary shadow-lg transition-all hover:-translate-y-0.5 hover:bg-white/90 hover:shadow-xl"
-            >
-              Get Started Free
-              <ArrowRight className="h-4 w-4" />
-            </Link>
+            <GuestOnlyCta className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-primary shadow-lg transition-all hover:-translate-y-0.5 hover:bg-white/90 hover:shadow-xl" />
           </div>
         </PageSection>
       </div>

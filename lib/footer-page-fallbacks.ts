@@ -99,9 +99,9 @@ export const HELP_CENTER_FALLBACK: PageContentBlock[] = [
     title: 'Still Need Help?',
     subtitle: 'Our support team is here for you.',
     body: [
-      { icon: 'message-circle', title: 'Live Chat', body: 'Chat with us in the app. Average response time is under 5 minutes.', action_label: 'Start Chat', action_href: '#chat' },
+      // { icon: 'message-circle', title: 'Live Chat', body: 'Chat with us in the app. Average response time is under 5 minutes.', action_label: 'Start Chat', action_href: '#chat' },
       { icon: 'mail', title: 'Email Support', body: 'Email us at support@laundrease.in. We respond within 4 hours on business days.', action_label: 'Send Email', action_href: 'mailto:support@laundrease.in' },
-      { icon: 'phone', title: 'Call Us', body: 'Call our helpline at +91 98765-43210, available Monday–Saturday, 9AM–8PM.', action_label: 'Call Now', action_href: 'tel:+919876543210' },
+      { icon: 'phone', title: 'Call Us', body: 'Call our helpline at +91 7352442612, available Monday–Saturday, 9AM–8PM.', action_label: 'Call Now', action_href: 'tel:+917352442612' },
     ],
     sort_order: 70,
   },

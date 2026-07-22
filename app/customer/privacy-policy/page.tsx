@@ -6,6 +6,12 @@ import type { LegalDocument } from '@/types/footer-pages'
 export const metadata: Metadata = {
   title: 'Privacy Policy | Laundrease',
   description: 'Read the Laundrease Privacy Policy — how we collect, use, and protect your personal information.',
+  keywords: ['Laundrease privacy policy'],
+  alternates: { canonical: '/customer/privacy-policy' },
+  openGraph: {
+    title: 'Privacy Policy | Laundrease', type: 'website', url: '/customer/privacy-policy',
+    description: 'How Laundrease collects, uses, and protects your personal information.',
+  },
 }
 
 export const revalidate = 86400
