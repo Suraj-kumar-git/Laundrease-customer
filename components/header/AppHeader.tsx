@@ -17,7 +17,7 @@ import {
 import { useAuth } from '@/components/auth-provider'
 import { useCart } from '@/components/cart-provider'
 import { cn } from '@/lib/utils'
-import Image from "next/image"
+import { BrandLogo } from '@/components/brand-logo'
 import { ThemeToggle } from "@/components/theme-toggle"
 
 // ---- Types --------------------------------------------------
@@ -44,20 +44,6 @@ const NAV_ITEMS_NOT_AUTH: NavItem[] = [
   { href: '/customer/quick-pickup', label: 'Quick Pickup', icon: Truck, authRequired: false  },
   { href: '/customer/faq', label: 'FAQ', icon: HelpCircle, authRequired: false  },
 ]
-const Logo = ({ logoUrl, className = "" }: { logoUrl?: string; className?: string }) => {
-    // Default to local logo, but can be replaced with API URL
-    const finalLogoUrl = logoUrl || "/laundrease-logo.PNG"
-    return (
-        <Image
-        src={finalLogoUrl}
-        alt="Laundrease Logo"
-        width={180}
-        height={60}
-        className={`h-auto w-auto max-h-10 ${className}`}
-        priority
-        />
-    )
-}
 
 // ---- Remove import of Theme toggle to use the below one only for light or dark-------------------------------------------
 // function ThemeToggle() {
@@ -123,7 +109,6 @@ function DesktopUserMenu({ user, onLogout }: { user: any; onLogout: () => void }
   const menuItems = [
     { icon: User,      label: 'My Profile',    href: `/customer/profile/${user?.id}` },
     { icon: Package,   label: 'My Orders',     href: '/customer/orders' },
-    { icon: Wallet,    label: 'Wallet',        href: '/customer/wallet' },
     { icon: Gift,      label: 'Refer & Earn',  href: '/customer/refer-and-earn' },
     { icon: MapPin,    label: 'Addresses',     href: '/customer/addresses' },
     { icon: Settings,  label: 'Settings',      href: '/customer/settings' },
@@ -225,10 +210,11 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
     router.push('/')
   }
 
-  const isActive = (href: string) =>
-    href === '/customer/dashboard'
-      ? pathname === href
-      : pathname.startsWith(href)
+  const isActive = (href: string) => {
+    if (href === '/customer/orders') return pathname === '/customer/orders' || (pathname.startsWith('/customer/orders/') && !pathname.startsWith('/customer/orders/create'))
+    if (href === '/customer/dashboard') return pathname === href
+    return pathname.startsWith(href)
+  }
 
   // Logged-in mobile menu items (nav + account merged)
   const mobileLoggedInItems = [
@@ -238,7 +224,6 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
     // divider placeholder â€” handled by index
     { href: '/customer/addresses',    label: 'Addresses',   icon: MapPin },
     { href: `/customer/profile/${user?.id}`, label: 'My Profile', icon: User },
-    { href: '/customer/wallet',       label: 'Wallet',      icon: Wallet },
     { href: '/customer/refer-and-earn', label: 'Refer & Earn', icon: Gift },
     { href: '/customer/settings',     label: 'Settings',    icon: Settings },
     { href: '/customer/feedback',     label: 'Feedback', icon: MessagesSquare },
@@ -262,7 +247,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
         <div className="container mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">
           {/* Logo */}
           <Link href={user ? '/customer/dashboard' : '/customer'} className="flex shrink-0 items-center gap-2">
-            <Logo />
+            <BrandLogo width={180} height={60} className="h-auto w-auto max-h-10" priority />
           </Link>
 
           {/* Desktop nav-items only when logged in */}

@@ -5,13 +5,14 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Bell, Shield, Link2, Monitor, Trash2, Loader2,
   Check, Mail, MessageSquare, Smartphone, Save,
   AlertCircle, CheckCircle2, Construction, LogOut,
   Eye, BarChart3, Megaphone, RefreshCw, Chrome,
-  Facebook, ChevronRight,
+  Facebook, ChevronRight, ArrowLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
@@ -291,7 +292,7 @@ function PrivacySection() {
       })}
       <p className="text-xs text-muted-foreground">
         Granular privacy controls coming soon. Current defaults follow our{' '}
-        <a href="/privacy-policy" className="text-primary hover:underline">Privacy Policy</a>.
+        <a href="/customer/privacy-policy" className="text-primary hover:underline">Privacy Policy</a>.
       </p>
     </div>
   )
@@ -343,7 +344,7 @@ function SaveBar({ visible, saving, saved, onSave }: {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 80, opacity: 0 }}
           transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-          className="fixed bottom-0 left-0 right-0 z-40 border-t border-border/50 bg-background/95 px-4 py-3 backdrop-blur"
+          className="fixed inset-x-0 bottom-16 z-40 border-t border-border/50 bg-background/95 px-4 py-3 backdrop-blur lg:bottom-0"
         >
           <div className="container mx-auto flex max-w-3xl items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground">You have unsaved changes</p>
@@ -503,6 +504,9 @@ export default function SettingsPage() {
     <>
       <div className="container mx-auto max-w-3xl px-4 py-8 pb-24">
         {/* Header */}
+        <Link href="/customer/dashboard" className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="h-3.5 w-3.5" /> Dashboard
+        </Link>
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-foreground">Settings</h1>
           <p className="mt-1 text-sm text-muted-foreground">

@@ -48,7 +48,7 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
   // Load Google Maps (places) only if a publishable key is configured.
   useEffect(() => {
     if (!MAPS_KEY) return
-    loadScript(`https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places`)
+    loadScript(`https://maps.googleapis.com/maps/api/js?key=${MAPS_KEY}&libraries=places&loading=async`)
       .then(() => {
         if (!window.google?.maps?.places) return
         autocompleteService.current = new window.google.maps.places.AutocompleteService()
@@ -149,7 +149,7 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
             onFocus={() => predictions.length > 0 && setShowDropdown(true)}
             onKeyDown={e => e.key === 'Enter' && handleSubmit()}
             placeholder="Search your area or pincode"
-            className="w-full rounded-lg border-2 border-transparent bg-gray-50 py-2.5 pl-9 pr-2 text-sm transition-all focus:border-violet-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+            className="w-full rounded-lg border-2 border-transparent bg-gray-50 py-2.5 pl-9 pr-2 text-sm transition-all focus:border-blue-500 focus:outline-none dark:bg-gray-700 dark:text-white"
           />
         </div>
         <button
@@ -157,7 +157,7 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
           onClick={handleSubmit}
           disabled={busy}
           aria-label="Search"
-          className="flex shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-violet-600 to-purple-600 px-4 py-2.5 text-white transition-all hover:shadow-md disabled:opacity-50"
+          className="flex shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-blue-600 px-4 py-2.5 text-white transition-all hover:shadow-md disabled:opacity-50"
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
         </button>
@@ -183,10 +183,10 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
               onClick={() => selectPrediction(p)}
               className={cn(
                 'flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors',
-                'hover:bg-violet-50 dark:hover:bg-gray-700'
+                'hover:bg-blue-50 dark:hover:bg-gray-700'
               )}
             >
-              <MapPin className="h-3.5 w-3.5 shrink-0 text-violet-500" />
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-blue-500" />
               <span className="truncate text-gray-800 dark:text-gray-100">{p.description}</span>
             </button>
           ))}

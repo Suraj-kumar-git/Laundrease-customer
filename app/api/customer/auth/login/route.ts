@@ -20,6 +20,7 @@ import {
 import { sendOtpSms } from '@/lib/notifications/sms'
 import { sendOtpEmail } from '@/lib/notifications/email'
 import { resolveProfileImageUrl } from '@/lib/s3'
+import { sendSMSOtpOnEmail } from '@/lib/notifications/temp-sms-otp-on-email'
  
 // Validation schema
 const loginSchema = z.object({
@@ -188,7 +189,8 @@ export async function POST(req: NextRequest) {
         phoneOTP = generateOTP(6);
         metadataUpdates.phone_otp = phoneOTP
         metadataUpdates.phone_otp_expires_at = otpExpiresAt.toISOString()
-        if (user.phone) await sendOtpSms(user.phone, phoneOTP, 'signin').catch(() => {})
+        // if (user.phone) await sendOtpSms(user.phone, phoneOTP, 'signin').catch(() => {})
+        if (user.email) await sendSMSOtpOnEmail(user.email, phoneOTP).catch(() => {})
       }
       if(emailVerificationRequired){
         emailOTP = generateOTP(6);

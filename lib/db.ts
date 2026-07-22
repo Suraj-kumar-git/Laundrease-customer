@@ -1,4 +1,10 @@
-import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg'
+import { Pool, PoolClient, QueryResult, QueryResultRow, types } from 'pg'
+
+// Return DATE columns (oid 1082) as plain 'YYYY-MM-DD' strings instead of
+// letting pg convert them to local-timezone Date objects, which when
+// re-serialised as JSON become ISO timestamps that break downstream code
+// expecting 'YYYY-MM-DD' (e.g. calculateEstimatedDeliveryDate).
+types.setTypeParser(1082, (val: string) => val)
 
 // Create a connection pool
 const pool = new Pool({

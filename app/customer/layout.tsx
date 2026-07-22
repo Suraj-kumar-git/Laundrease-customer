@@ -1,9 +1,10 @@
 import type React from "react"
+import type { Metadata } from "next"
 import { Inter } from "next/font/google"
 import Link from "next/link"
-import Image from "next/image"
 import { Bell, Menu, Search, ShoppingCart, MapPin } from "lucide-react"
 import { query } from "@/lib/db"
+import { BrandLogo } from "@/components/brand-logo"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -17,37 +18,38 @@ import '@/styles/globals.css'
 import { NewsletterForm } from "@/components/forms/newsletter-form"
 import { UserMenuDropdown } from "@/components/header/user-menu-dropdown"
 import { HeaderWithCart } from "@/components/header/HeaderWithCart"
+import { MobileBottomNav } from "@/components/customer/MobileBottomNav"
 import Script from "next/script"
 
 const inter = Inter({ subsets: ["latin"] })
 
-export const metadata = {
-  title: "Laundrease - Laundry Made Effortless Online",
-  description: "Laundrease is an online platform that connects users with local laundry services for convenient pickup and delivery.",
-}
+const TITLE = "Laundrease - Laundry Pickup & Delivery Made Effortless"
+const DESCRIPTION = "Laundrease connects you with trusted local laundry providers in Pune for convenient online laundry, wash & fold, and dry cleaning pickup and delivery."
 
-// Logo component that can accept dynamic logo URL from API
-const Logo = ({ logoUrl, className = "" }: { logoUrl?: string; className?: string }) => {
-  // Default to local logo, but can be replaced with API URL
-  const finalLogoUrl = logoUrl || "/laundrease-logo.PNG" // or "/images/logo.png" depending on your structure
-  
-  return (
-    <Image
-      src={finalLogoUrl}
-      alt="Laundrease Logo"
-      width={180}
-      height={60}
-      className={`h-auto w-auto max-h-10 ${className}`}
-      priority
-    />
-  )
+// Fallback for every /customer page that doesn't define its own metadata —
+// most now do (see their individual page/layout files), so in practice this
+// mainly governs the home page, which is a client component and can't
+// export metadata itself.
+export const metadata: Metadata = {
+  title: TITLE,
+  description: DESCRIPTION,
+  keywords: [
+    'laundry pickup and delivery Pune', 'online laundry service', 'dry cleaning pickup and delivery',
+    'wash and fold service near me', 'same day laundry Pune', 'Laundrease',
+  ],
+  alternates: { canonical: '/customer' },
+  openGraph: {
+    title: TITLE, description: DESCRIPTION, url: '/customer',
+    siteName: 'Laundrease', type: 'website', locale: 'en_IN',
+  },
+  twitter: { card: 'summary_large_image', title: TITLE, description: DESCRIPTION },
 }
 
 async function getFooterConfig() {
   try {
     const { rows } = await query(
       `SELECT key, value FROM platform_config
-       WHERE key IN ('social_instagram', 'social_facebook', 'social_twitter', 'business_address', 'app_store_url', 'play_store_url')`
+       WHERE key IN ('social_instagram', 'social_facebook', 'social_twitter', 'business_address', 'app_store_url', 'play_store_url', 'support_phone', 'support_email')`
     )
     const config: Record<string, string | null> = {}
     for (const row of rows) config[row.key] = row.value
@@ -63,6 +65,8 @@ async function getFooterConfig() {
       // has actually set a real store listing URL.
       appStoreUrl:  config.app_store_url  || null,
       playStoreUrl: config.play_store_url || null,
+      supportPhone: config.support_phone || null,
+      supportEmail: config.support_email || null,
     }
   } catch (error) {
     console.error('[customer/layout] Failed to load footer config:', error)
@@ -75,6 +79,8 @@ async function getFooterConfig() {
       address: null,
       appStoreUrl:  null,
       playStoreUrl: null,
+      supportPhone: null,
+      supportEmail: null,
     }
   }
 }
@@ -120,11 +126,28 @@ export default async function RootLayout({
 }>) {
   // In the future, you can fetch logoUrl from an API here
   // const logoUrl = await fetchLogoFromApi()
-  const { social, address, appStoreUrl, playStoreUrl } = await getFooterConfig()
+  const { social, address, appStoreUrl, playStoreUrl, supportPhone, supportEmail } = await getFooterConfig()
+
+  const organizationJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'LocalBusiness',
+    name: 'Laundrease',
+    url: 'https://laundrease.in/customer',
+    logo: 'https://laundrease.in/laundrease-logo.PNG',
+    image: 'https://laundrease.in/laundrease-logo.PNG',
+    description: DESCRIPTION,
+    ...(address ? { address: { '@type': 'PostalAddress', addressLocality: 'Pune', addressRegion: 'Maharashtra', addressCountry: 'IN' } } : {}),
+    ...(supportPhone ? { telephone: supportPhone } : {}),
+    ...(supportEmail ? { email: supportEmail } : {}),
+    sameAs: [social.instagram, social.facebook, social.x].filter(Boolean),
+  }
 
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+    <div className={inter.className}>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+        />
         {/* If using the below script then the loadScript is not required in checkoutStep.tsx file */}
         {/* <Script
           src="https://checkout.razorpay.com/v1/checkout.js"
@@ -145,79 +168,62 @@ export default async function RootLayout({
                 <div className="container mx-auto px-4">
                   <div className="mb-8 flex flex-col items-center justify-between gap-4 md:flex-row">
                     <Link href="/customer" className="flex items-center gap-2">
-                      <Logo />
+                      <BrandLogo width={180} height={60} className="h-auto w-auto max-h-10" priority />
                     </Link>
-                    <div className="flex flex-wrap items-center gap-4">
-                      <Link
-                        href={social.x}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label="X (formerly Twitter)"
-                        className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
+                    {/* Mobile: social icons row, then app badge row. Desktop: one row. */}
+                    <div className="flex flex-col items-center gap-3 md:flex-row md:gap-4">
+                      {/* Social icons */}
+                      <div className="flex items-center gap-3">
+                        <Link
+                          href={social.x}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="X (formerly Twitter)"
+                          className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
                         >
-                          <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
-                        </svg>
-                      </Link>
-                      <Link
-                        href={social.facebook}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label="Facebook"
-                        className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path>
-                        </svg>
-                      </Link>
-                      <Link
-                        href={social.instagram}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label="Instagram"
-                        className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="20"
-                          height="20"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
-                          <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
-                          <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
-                          <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
-                        </svg>
-                      </Link>
-                      {appStoreUrl && (
-                        <Link href={appStoreUrl} target="_blank" rel="noopener noreferrer" aria-label="Download on the App Store">
-                          <AppStoreBadge />
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+                          </svg>
                         </Link>
-                      )}
-                      {playStoreUrl && (
-                        <Link href={playStoreUrl} target="_blank" rel="noopener noreferrer" aria-label="Get it on Google Play">
-                          <GooglePlayBadge />
+                        <Link
+                          href={social.facebook}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="Facebook"
+                          className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path>
+                          </svg>
                         </Link>
+                        <Link
+                          href={social.instagram}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label="Instagram"
+                          className="rounded-full bg-muted p-2 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+                            <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+                            <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+                          </svg>
+                        </Link>
+                      </div>
+                      {/* App store badges — their own row on mobile */}
+                      {(appStoreUrl || playStoreUrl) && (
+                        <div className="flex items-center gap-3">
+                          {appStoreUrl && (
+                            <Link href={appStoreUrl} target="_blank" rel="noopener noreferrer" aria-label="Download on the App Store">
+                              <AppStoreBadge />
+                            </Link>
+                          )}
+                          {playStoreUrl && (
+                            <Link href={playStoreUrl} target="_blank" rel="noopener noreferrer" aria-label="Get it on Google Play">
+                              <GooglePlayBadge />
+                            </Link>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
@@ -304,12 +310,12 @@ export default async function RootLayout({
                   </div>
                 </div>
               </footer>
+              <MobileBottomNav />
             </div>
             <Toaster />
             </CartProvider>
           </AuthProvider>
         </ThemeProvider>
-      </body>
-    </html>
+    </div>
   )
 }

@@ -17,6 +17,7 @@ const PUBLIC_URLs = [
   '/',
   '/customer',
   '/customer/about',
+  '/customer/careers',
   '/customer/careers/*',
   '/customer/community-guidelines',
   '/customer/faq',
@@ -85,7 +86,9 @@ function getRoleFromPath(pathname: string): string | null {
   const normalized = pathname.trim()
   if (
     normalized === `/customer` ||
-    normalized.startsWith(`/customer/`)
+    normalized.startsWith(`/customer/`) ||
+    normalized === `/api/customer` ||
+    normalized.startsWith(`/api/customer/`)
   ) {
     return 'customer';
   }
@@ -143,7 +146,7 @@ export async function proxy(request: NextRequest) {
   }
   const pathRole = getRoleFromPath(pathname)
 
-  if (pathRole !== 'customer') {
+  if (pathRole && pathRole !== 'customer') {
     if (pathname.startsWith('/api')) {
       return NextResponse.json(
         { success: false, error: 'Not Found' },

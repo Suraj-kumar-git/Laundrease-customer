@@ -36,7 +36,7 @@ function formatINR(n: number) {
   return `₹${n.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 }
 function formatDate(d: string) {
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-IN', {
+  return new Date(d.slice(0, 10) + 'T00:00:00').toLocaleDateString('en-IN', {
     weekday: 'short', day: 'numeric', month: 'short',
   })
 }
@@ -92,12 +92,16 @@ export function CheckoutStep({
     services: SelectedService[]
     feeBreakdown: FeeBreakdown
   }>>(new Map())
-  // ---- Fees (re-fetch on subtotal or express change) -----------
+  // ---- Estimated delivery date preview --------------------------
+  const providerId = orderState.selected_provider?.id
+
+  // ---- Fees (re-fetch on subtotal, express, or provider change) -----------
   useEffect(() => {
     // if (initialFeesLoaded.current) return  // Only load once on mount
     // initialFeesLoaded.current = true
     setFeesLoading(true)
-    fetch(`/api/customer/orders/fees?subtotal=${subtotal}&is_express=${currentIsExpress}`)
+    const providerParam = providerId ? `&provider_id=${providerId}` : ''
+    fetch(`/api/customer/orders/fees?subtotal=${subtotal}&is_express=${currentIsExpress}${providerParam}`)
       .then(r => r.json())
             .then(json => {
         if (json.success) {
@@ -110,10 +114,8 @@ export function CheckoutStep({
       })
       .catch(() => {})
       .finally(() => setFeesLoading(false))
-  }, [subtotal, currentIsExpress])
+  }, [subtotal, currentIsExpress, providerId])
 
-  // ---- Estimated delivery date preview --------------------------
-  const providerId = orderState.selected_provider?.id
   const servicesKey = useMemo(
     () => JSON.stringify(orderState.selected_services.map(s => ({ id: s.service_id, x: s.is_express }))),
     [orderState.selected_services]
@@ -150,6 +152,20 @@ export function CheckoutStep({
       .then(r => r.json()).then(j => { if (j.success) setGatewayInfo(j.data) }).catch(() => {})
       .finally(() => setGatewayLoading(false))
   }, [])
+
+  // ---- Provider availability (re-check on checkout mount) -------
+  // A resumed cart can carry a provider selected days ago — re-verify here
+  // rather than trusting the stale snapshot, so a provider that's since
+  // paused/been suspended is caught with a clear message instead of only
+  // surfacing as a generic "Order failed" toast after the final submit.
+  const [providerAvailable, setProviderAvailable] = useState(true)
+  useEffect(() => {
+    if (!providerId) return
+    fetch(`/api/customer/laundry-providers/${providerId}`)
+      .then(r => r.json())
+      .then(json => { if (json.success) setProviderAvailable(json.data.is_available) })
+      .catch(() => {})
+  }, [providerId])
 
   // ---- Available coupons: re-fetch on subtotal change ----------
   // This ensures the ineligible_reason ("Add ₹X more") stays accurate
@@ -306,7 +322,8 @@ export function CheckoutStep({
     gatewayInfo?.cod_enabled &&
     codCheckAmount <= (gatewayInfo?.cod_max_amount ?? 5000)
   )
-  const canPlace = walletCoversAll || selectedMethod === 'cod' || (selectedMethod === 'online' && onlinePaymentAvailable)
+  const canPlace = providerAvailable &&
+    (walletCoversAll || selectedMethod === 'cod' || (selectedMethod === 'online' && onlinePaymentAvailable))
 
   // The order is always created first via onSubmit (cod/wallet/online alike).
   // For 'online', the parent (page.tsx) creates the order, then calls the
@@ -341,6 +358,16 @@ export function CheckoutStep({
       {/* ---- Left: Summary ---- */}
       <div className="space-y-3 lg:col-span-3">
         <h2 className="text-base font-semibold text-foreground">Order Review</h2>
+
+        {!providerAvailable && (
+          <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <p className="text-sm text-destructive">
+              {orderState.selected_provider?.business_name ?? 'This provider'} is not accepting orders right now.
+              Please go back and choose a different provider.
+            </p>
+          </div>
+        )}
 
         {/* BUG 1: Coupon warning banner */}
         {couponWarning && (
@@ -411,15 +438,6 @@ export function CheckoutStep({
             {orderState.selected_services.map((svc, i) => (
               <div key={i} className="flex items-center justify-between gap-3 text-sm">
                 <div className="flex min-w-0 items-center gap-2">
-                  {svc.type === 'per_unit' && (
-                    <ProductIcon
-                      src={resolveProductIconSrc(svc.product_type_name)}
-                      fallbackEmoji={(svc as any).icon}
-                      alt={svc.product_type_name}
-                      size={24}
-                      className="shrink-0 rounded-md"
-                    />
-                  )}
                   <span className="truncate text-foreground">
                     {svc.type === 'per_unit' ? (svc as any).product_type_name : svc.service_name}
                   </span>
@@ -427,8 +445,8 @@ export function CheckoutStep({
                     <span className="shrink-0 text-xs text-muted-foreground">({svc.service_name})</span>
                   )}
                   {svc.is_express && (
-                    <span className="shrink-0 flex items-center gap-0.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
-                      <Zap className="h-2.5 w-2.5" /> Express
+                    <span className="shrink-0 inline-flex items-center justify-center w-4 h-4 rounded-full bg-amber-400 dark:bg-amber-500" title="Express">
+                      <Zap className="h-2.5 w-2.5 text-white fill-white" />
                     </span>
                   )}
                 </div>
@@ -436,11 +454,6 @@ export function CheckoutStep({
                   <span className="text-muted-foreground mr-2">
                     {svc.type === 'per_kg' ? `${(svc as any).weight_kg}kg` : `×${(svc as any).quantity}`}
                   </span>
-                  {svc.mrp && svc.mrp > svc.unit_price && (
-                    <span className="text-muted-foreground line-through mr-1">
-                      {formatINR(svc.mrp * (svc.type === 'per_kg' ? (svc as any).weight_kg : (svc as any).quantity))}
-                    </span>
-                  )}
                   <span className="font-semibold text-foreground">{formatINR(svc.line_total)}</span>
                 </div>
               </div>
@@ -485,14 +498,15 @@ export function CheckoutStep({
             <div className="space-y-1.5 text-sm">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Services subtotal</span>
-                <span className="font-medium text-foreground">{formatINR(subtotal)}</span>
+                <span className="flex items-center gap-1.5">
+                  {totalMrpSavings > 0 && (
+                    <span className="text-xs text-muted-foreground line-through">
+                      {formatINR(subtotal + totalMrpSavings)}
+                    </span>
+                  )}
+                  <span className="font-medium text-foreground">{formatINR(subtotal)}</span>
+                </span>
               </div>
-              {totalMrpSavings > 0 && (
-                <div className="flex justify-between">
-                  <span className="text-emerald-600">You saved</span>
-                  <span className="font-medium text-emerald-600">{formatINR(totalMrpSavings)}</span>
-                </div>
-              )}
               {feeBreakdown?.fees.map(fee => (
                 <div key={fee.code} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -545,7 +559,7 @@ export function CheckoutStep({
                 </div>
               )}
               {walletContributionRounded > 0 && (
-                <div className="flex justify-between text-violet-600 dark:text-violet-400">
+                <div className="flex justify-between text-blue-600 dark:text-blue-400">
                   <span className="flex items-center gap-1"><Wallet className="h-3.5 w-3.5" /> Wallet</span>
                   <span className="font-semibold">-{formatINR(walletContributionRounded)}</span>
                 </div>
@@ -570,30 +584,30 @@ export function CheckoutStep({
         {!walletLoading && walletInfo?.has_wallet && walletInfo.balance > 0 && (
           <div className={cn(
             'rounded-xl border p-3 transition-all',
-            useWallet ? 'border-violet-300 bg-violet-50 dark:border-violet-700 dark:bg-violet-950/30' : 'border-border/50 bg-card'
+            useWallet ? 'border-blue-300 bg-blue-50 dark:border-blue-700 dark:bg-blue-950/30' : 'border-border/50 bg-card'
           )}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <div className={cn('flex h-9 w-9 items-center justify-center rounded-xl transition-colors',
-                  useWallet ? 'bg-violet-600 text-white' : 'bg-muted text-muted-foreground')}>
+                  useWallet ? 'bg-blue-600 text-white' : 'bg-muted text-muted-foreground')}>
                   <Wallet className="h-4 w-4" />
                 </div>
                 <div>
                   <p className="text-sm font-semibold text-foreground">Laundrease Wallet</p>
                   <p className="text-xs text-muted-foreground">
-                    Available: <span className="font-semibold text-violet-600">{formatINR(walletInfo.balance)}</span>
+                    Available: <span className="font-semibold text-blue-600">{formatINR(walletInfo.balance)}</span>
                   </p>
                 </div>
               </div>
               <button type="button" onClick={() => setUseWallet(v => !v)}
                 className={cn('relative h-5 w-9 rounded-full transition-colors duration-200',
-                  useWallet ? 'bg-violet-600' : 'bg-muted-foreground/30')}>
+                  useWallet ? 'bg-blue-600' : 'bg-muted-foreground/30')}>
                 <div className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200',
                   useWallet ? 'translate-x-[18px]' : 'translate-x-0.5')} />
               </button>
             </div>
             {useWallet && (
-              <div className="mt-2 rounded-lg bg-violet-100/50 px-3 py-1.5 text-xs text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+              <div className="mt-2 rounded-lg bg-blue-100/50 px-3 py-1.5 text-xs text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
                 {walletCoversAll
                   ? `✓ Wallet covers the full amount of ${formatINR(grossTotal)}`
                   : `${formatINR(walletContributionRounded)} from wallet · ${formatINR(amountAfterWallet)} remaining via another method`}
@@ -658,34 +672,21 @@ export function CheckoutStep({
                     </p>
                   )}
 
-                  {/* Available coupons — eligible and ineligible shown separately */}
-                  {availableCoupons.length > 0 && (
+                  {/* Available coupons — only show eligible ones */}
+                  {availableCoupons.some(c => c.eligible) && (
                     <div className="space-y-2">
                       <p className="text-xs font-semibold text-muted-foreground">Available for you</p>
-                      {availableCoupons.map(c => (
+                      {availableCoupons.filter(c => c.eligible).map(c => (
                         <div
                           key={c.code}
-                          onClick={() => c.eligible && handleApplyCoupon(c.code)}
-                          className={cn(
-                            'flex items-center justify-between rounded-xl border px-3 py-2.5 transition-colors',
-                            c.eligible
-                              ? 'cursor-pointer border-border/40 bg-muted/30 hover:border-primary/30'
-                              : 'cursor-not-allowed border-border/20 bg-muted/10 opacity-60'
-                          )}
+                          onClick={() => handleApplyCoupon(c.code)}
+                          className="flex cursor-pointer items-center justify-between rounded-xl border border-border/40 bg-muted/30 px-3 py-2.5 transition-colors hover:border-primary/30"
                         >
                           <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className={cn('text-xs font-bold font-mono', c.eligible ? 'text-foreground' : 'text-muted-foreground')}>
-                                {c.code}
-                              </p>
-                              {!c.eligible && <Lock className="h-3 w-3 text-muted-foreground" />}
-                            </div>
+                            <p className="text-xs font-bold font-mono text-foreground">{c.code}</p>
                             <p className="text-[11px] text-muted-foreground">{c.name}</p>
-                            {!c.eligible && c.ineligible_reason && (
-                              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">{c.ineligible_reason}</p>
-                            )}
                           </div>
-                          <span className={cn('shrink-0 ml-2 text-xs font-semibold', c.eligible ? 'text-primary' : 'text-muted-foreground')}>
+                          <span className="shrink-0 ml-2 text-xs font-semibold text-primary">
                             {c.discount_display}
                           </span>
                         </div>
@@ -819,7 +820,7 @@ export function CheckoutStep({
         {(walletCoversAll || selectedMethod === 'cod' || selectedMethod === 'online') && (
         <button type="button" onClick={handlePlace}
           disabled={!canPlace || isSubmitting || feesLoading}
-          className="w-full rounded-2xl bg-gradient-to-r from-primary to-violet-700 py-3.5 text-base font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-50">
+          className="w-full rounded-2xl bg-gradient-to-r from-primary to-blue-700 py-3.5 text-base font-bold text-white shadow-lg shadow-primary/25 transition-all hover:shadow-xl hover:shadow-primary/30 disabled:cursor-not-allowed disabled:opacity-50">
           {isSubmitting ? (
             <span className="flex items-center justify-center gap-2">
               <Loader2 className="h-5 w-5 animate-spin" /> Processing...

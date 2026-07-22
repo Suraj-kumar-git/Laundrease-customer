@@ -89,28 +89,34 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!user || !hydratedFromStorage.current) return
     if (syncedForUser.current === user.id) return
     syncedForUser.current = user.id
-    // Persisted check — a plain in-memory ref resets on every full page
-    // reload, which would otherwise look identical to a genuine guest→login
-    // transition and re-push stale local items onto the server cart.
-    if (getSyncedUserId() === user.id) return
-    setSyncedUserId(user.id)
 
     setSyncing(true)
     const sync = async () => {
       try {
-        if (items.length > 0) {
-          await fetch('/api/customer/cart', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({
-              selected_services: cartItemsToSelectedServices(items),
-              is_express: isExpress,
-              current_step: 1,
-              reset_provider: true,
-            }),
-          })
+        // Only push local items to server once per user+device session — prevents
+        // re-pushing stale localStorage items on every page reload which would
+        // overwrite a server cart that's already advanced to a later step.
+        const alreadySynced = getSyncedUserId() === user.id
+        if (!alreadySynced) {
+          setSyncedUserId(user.id)
+          if (items.length > 0) {
+            await fetch('/api/customer/cart', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                selected_services: cartItemsToSelectedServices(items),
+                is_express: isExpress,
+                current_step: 1,
+                reset_provider: true,
+              }),
+            })
+          }
         }
+        // Always GET to hydrate the header badge — covers new devices, incognito
+        // windows, same-browser new tabs, and any case where the local mirror
+        // is stale or missing. The in-memory syncedForUser ref prevents this
+        // from running more than once per mounted CartProvider session.
         const res = await fetch('/api/customer/cart', { credentials: 'include' })
         const j = await res.json()
         if (j.success && j.data?.has_items) {
