@@ -197,7 +197,7 @@ export async function POST(req: NextRequest) {
       if (body.coupon_code) {
         const couponRes = await client.query(
           `SELECT code, discount_type, discount_value, max_discount,
-                  min_order_amount, usage_limit_per_user
+                  min_order_amount, usage_limit_global, usage_limit_per_user, first_order_only
            FROM coupons
            WHERE code = $1 AND is_active = TRUE
              AND (starts_at IS NULL OR starts_at <= NOW())
@@ -207,15 +207,57 @@ export async function POST(req: NextRequest) {
         if (couponRes.rowCount! > 0) {
           const c = couponRes.rows[0]
           const meetsMin = !c.min_order_amount || subtotal >= parseFloat(c.min_order_amount)
+
+          // Usage-limit checks mirror /api/customer/coupons/validate exactly —
+          // a redemption tied to a failed/cancelled order never actually
+          // consumed the coupon, so it must not count against either limit.
           let perUserOk = true
           if (c.usage_limit_per_user) {
             const usage = await client.query(
-              `SELECT COUNT(*) AS n FROM coupon_redemptions WHERE coupon_code=$1 AND user_id=$2`,
+              `SELECT COUNT(*)::int AS n FROM coupon_redemptions cr
+               LEFT JOIN orders o ON o.id = cr.order_id
+               WHERE cr.coupon_code = $1 AND cr.user_id = $2
+                 AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))`,
               [c.code, userId]
             )
-            perUserOk = parseInt(usage.rows[0].n) < parseInt(c.usage_limit_per_user)
+            perUserOk = usage.rows[0].n < parseInt(c.usage_limit_per_user)
           }
-          if (meetsMin && perUserOk) {
+
+          // Global cap on TOTAL redemptions across every customer — distinct
+          // from usage_limit_per_user. A shared coupon like a first-order
+          // discount has no global cap (usage_limit_global is NULL) and stays
+          // available to every new customer; is_active is a separate,
+          // admin-only on/off switch that a redemption must never touch.
+          let globalOk = true
+          if (c.usage_limit_global) {
+            const globalUsage = await client.query(
+              `SELECT COUNT(*)::int AS n FROM coupon_redemptions cr
+               LEFT JOIN orders o ON o.id = cr.order_id
+               WHERE cr.coupon_code = $1
+                 AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))`,
+              [c.code]
+            )
+            globalOk = globalUsage.rows[0].n < parseInt(c.usage_limit_global)
+          }
+
+          // first_order_only — same "actually placed" definition used by
+          // /api/customer/coupons/validate and the dashboard/orders-list
+          // routes: a pending online-payment order that hasn't paid yet
+          // doesn't count as placed.
+          let firstOrderOk = true
+          if (c.first_order_only) {
+            const historyRes = await client.query(
+              `SELECT COUNT(*)::int AS n
+               FROM orders
+               WHERE customer_id = $1
+                 AND status NOT IN ('cancelled', 'failed', 'rejected')
+                 AND (payment_method LIKE '%cod%' OR payment_status = 'paid')`,
+              [userId]
+            )
+            firstOrderOk = historyRes.rows[0].n === 0
+          }
+
+          if (meetsMin && perUserOk && globalOk && firstOrderOk) {
             discountAmount = c.discount_type === 'percent'
               ? (subtotal * parseFloat(c.discount_value)) / 100
               : parseFloat(c.discount_value)
@@ -391,11 +433,9 @@ export async function POST(req: NextRequest) {
            VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
           [appliedCouponCode, userId, orderId, discountAmount]
         )
-        await client.query(
-          `UPDATE coupons SET is_active = FALSE
-          WHERE code = $1`,
-          [appliedCouponCode]
-        )
+        // is_active is an admin-only on/off switch and must never be flipped
+        // by a redemption — usage_limit_global/usage_limit_per_user (checked
+        // above) are what actually cap how many times a coupon can be used.
       }
 
       // ---- Wallet debit (atomic inside transaction) -------------------------

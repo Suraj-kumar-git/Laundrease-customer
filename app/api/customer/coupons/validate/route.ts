@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
         `SELECT COUNT(*)::int AS n
          FROM orders
          WHERE customer_id = $1
-           AND status NOT IN ('cancelled', 'failed')
+           AND status NOT IN ('cancelled', 'failed', 'rejected')
            AND (payment_method LIKE '%cod%' OR payment_status = 'paid')`,
         [userId]
       )
