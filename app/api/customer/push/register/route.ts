@@ -1,28 +1,35 @@
+// app/api/customer/push/register/route.ts
+// POST — register (or re-register) this device's FCM token against the
+// authenticated customer. Upserts on the token itself, not the user — a
+// token can move between accounts (logout + a different login on the same
+// device), so ON CONFLICT (token) re-points it rather than inserting a
+// duplicate row.
+
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
-import { successResponse, errorResponse, unauthorizedResponse } from '@/lib/api-response'
+import { successResponse, errorResponse, unauthorizedResponse, serverErrorResponse } from '@/lib/api-response'
 
 export async function POST(req: NextRequest) {
   const userId = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  const body = await req.json().catch(() => null)
-  const token = body?.token
-  const platform = body?.platform === 'ios' ? 'ios' : 'android'
+  let body: { token?: string; platform?: string }
+  try { body = await req.json() } catch { return errorResponse('Invalid body', 400) }
 
-  if (!token || typeof token !== 'string') {
-    return errorResponse('Device token is required')
+  if (!body.token?.trim()) return errorResponse('token is required', 400)
+  const platform = body.platform?.trim() || 'android'
+
+  try {
+    await query(
+      `INSERT INTO device_tokens (user_id, token, platform, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (token)
+       DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = NOW()`,
+      [userId, body.token.trim(), platform]
+    )
+    return successResponse({ registered: true })
+  } catch (err) {
+    console.error('[POST /api/customer/push/register]', err)
+    return serverErrorResponse('Failed to register device')
   }
-
-  // A token can move between accounts (logout + different login on the same
-  // device) — ON CONFLICT reassigns ownership rather than erroring.
-  await query(
-    `INSERT INTO device_tokens (user_id, token, platform, updated_at)
-     VALUES ($1, $2, $3, NOW())
-     ON CONFLICT (token)
-     DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = NOW()`,
-    [userId, token, platform]
-  )
-
-  return successResponse({ registered: true })
 }
