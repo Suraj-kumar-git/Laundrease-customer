@@ -146,7 +146,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const data = await res.json()
         if (data.success && data.data?.user) {
           const serverUser = buildUser(data.data.user)
-          setUser(serverUser)
+          // checkAuth reruns on every client-side navigation (see the
+          // pathname effect below). Re-using the previous object when
+          // nothing actually changed keeps `user`'s reference stable across
+          // page transitions — otherwise every nav creates a "new" user
+          // object, which retriggers any effect keyed on `user` elsewhere in
+          // the app (e.g. the order-create page's cart check), causing a
+          // visible flash of re-fetched/re-rendered content on every page.
+          setUser(prev => (prev && JSON.stringify(prev) === JSON.stringify(serverUser)) ? prev : serverUser)
           localStorage.setItem("user", JSON.stringify(serverUser))
         }
       } else if (res.status === 401 || res.status === 403) {

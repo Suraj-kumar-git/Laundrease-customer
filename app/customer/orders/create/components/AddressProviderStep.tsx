@@ -69,6 +69,11 @@ export function AddressProviderStep({
   const [selectedProvider, setSelectedProvider] = useState<LaundryProvider | null>(initialProvider ?? null)
   const [showDropdown, setShowDropdown]         = useState(false)
   const [providerError, setProviderError]       = useState<string | null>(null)
+  // When arriving via a provider deep-link (dashboard's "Create order" card),
+  // skip straight to Services once the default address + that provider are
+  // resolved — don't make the customer see/click through this step at all.
+  // Falls back to the normal picker UI if the provider turns out unavailable.
+  const [autoAdvancing, setAutoAdvancing]       = useState(!!preferredProviderId && !initialProvider)
   // Prefetched services cache: keyed by provider id
   const servicesCache = useRef<Map<number, { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }>>(new Map())
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -95,11 +100,15 @@ export function AddressProviderStep({
           if (!selectedAddress) {
             const def = addrs.find(a => a.is_default) ?? addrs[0]
             if (def) setSelectedAddress(def)
+            else if (preferredProviderId) setAutoAdvancing(false)
           }
+        } else if (preferredProviderId) {
+          setAutoAdvancing(false)
         }
       })
-      .catch(() => {})
+      .catch(() => { if (preferredProviderId) setAutoAdvancing(false) })
       .finally(() => setLoadingAddresses(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // One-shot flag: the dashboard's preferred provider is applied only to the
@@ -123,13 +132,25 @@ export function AddressProviderStep({
           const match = list.find(p => p.id === preferredProviderId)
           if (match) {
             setSelectedProvider(match)
-            prefetchServices(match.id)
+            prefetchServices(match.id).then(() => {
+              const cached = servicesCache.current.get(match.id) ?? {
+                per_kg_services: [], per_unit_products: [],
+              }
+              onComplete(selectedAddress, selectedAddress, match, cached)
+            })
+          } else {
+            // Deep-linked provider isn't available for this address — fall
+            // back to letting the customer pick manually.
+            setAutoAdvancing(false)
           }
         }
         if (list.length === 0)
           setProviderError(`No providers found for pincode ${selectedAddress.postal_code}`)
       })
-      .catch(() => setProviderError('Failed to load providers'))
+      .catch(() => {
+        setProviderError('Failed to load providers')
+        if (preferredProviderId) setAutoAdvancing(false)
+      })
       .finally(() => setLoadingProviders(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAddress?.postal_code])
@@ -461,6 +482,15 @@ export function AddressProviderStep({
             </motion.div>
           )
         })}
+      </div>
+    )
+  }
+
+  if (autoAdvancing) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Loading your order…</p>
       </div>
     )
   }
