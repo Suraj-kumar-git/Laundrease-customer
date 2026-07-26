@@ -1,10 +1,10 @@
 // app/api/customer/orders/fees/route.ts
-// GET /api/customer/orders/fees?subtotal=500&is_express=false&provider_id=123
+// GET /api/customer/orders/fees?subtotal=500&is_express=false&provider_id=123&address_id=456
 // Returns all active fee rows calculated for the given subtotal.
 // Called by the checkout page to show a live breakdown before placing the order.
 
 import { NextRequest } from 'next/server'
-import { query } from '@/lib/db'
+import { query, queryOne } from '@/lib/db'
 import { successResponse, errorResponse, serverErrorResponse } from '@/lib/api-response'
 
 export async function GET(req: NextRequest) {
@@ -12,6 +12,7 @@ export async function GET(req: NextRequest) {
   const subtotalStr  = searchParams.get('subtotal')
   const isExpressStr = searchParams.get('is_express')
   const providerIdStr = searchParams.get('provider_id')
+  const addressIdStr  = searchParams.get('address_id')
 
   if (!subtotalStr) return errorResponse('subtotal is required', 400)
 
@@ -19,13 +20,34 @@ export async function GET(req: NextRequest) {
   const isExpress       = isExpressStr === 'true'
   const parsedProviderId = providerIdStr ? parseInt(providerIdStr) : NaN
   const providerId       = isNaN(parsedProviderId) ? null : parsedProviderId
+  const parsedAddressId  = addressIdStr ? parseInt(addressIdStr) : NaN
+  const addressId        = isNaN(parsedAddressId) ? null : parsedAddressId
 
   if (isNaN(subtotal) || subtotal < 0) return errorResponse('Invalid subtotal', 400)
 
   try {
+    // Best-effort distance — this route has no hard auth requirement (it's a
+    // pre-checkout preview), so ownership is only checked when a userId is
+    // present; missing/ungeocoded data just means no distance-based fee
+    // adjustment shows in the preview, same as today's behavior.
+    let distanceKm: number | null = null
+    if (addressId && providerId) {
+      const userId = req.headers.get('x-user-id')
+      const row = await queryOne<{ distance_km: string | null }>(
+        `SELECT haversine_km(ca.latitude, ca.longitude, lp.latitude, lp.longitude)::TEXT AS distance_km
+         FROM customer_addresses ca, laundry_profiles lp
+         WHERE ca.id = $1 AND lp.id = $2
+           AND ($3::BIGINT IS NULL OR ca.customer_profile_id = (
+             SELECT id FROM customer_profiles WHERE user_id = $3
+           ))`,
+        [addressId, providerId, userId]
+      )
+      distanceKm = row?.distance_km != null ? parseFloat(row.distance_km) : null
+    }
+
     const result = await query(
-      `SELECT calculate_order_fees($1, $2, NULL, $3) AS fees`,
-      [subtotal, isExpress, providerId]
+      `SELECT calculate_order_fees($1, $2, $3, $4) AS fees`,
+      [subtotal, isExpress, distanceKm, providerId]
     )
 
     const fees: Array<{

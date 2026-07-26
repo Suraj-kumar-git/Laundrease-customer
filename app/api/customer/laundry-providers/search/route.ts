@@ -3,6 +3,7 @@ import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
 import { successResponse, errorResponse, serverErrorResponse } from '@/lib/api-response'
 import { PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL } from '@/lib/subscription'
+import { resolveProfileImageUrl } from '@/lib/s3'
 
 // GET /api/customer/laundry-providers/search
 // Query params: ?location=411045 (pincode or city)
@@ -85,6 +86,7 @@ export async function GET(req: NextRequest) {
              lp.services_offered,
              lp.operating_hours,
              lp.is_verified,
+             lp.logo_url,
              ${minPriceKgExpr} AS min_price_kg,
              ${NORMALIZED_HOURS_SUBQUERY}
            FROM laundry_profiles lp
@@ -102,6 +104,7 @@ export async function GET(req: NextRequest) {
              lp.id, lp.business_name, lp.business_address, lp.city, lp.postal_code,
              lp.service_area, lp.rating, lp.rating_count, lp.capacity,
              lp.certifications, lp.services_offered, lp.operating_hours, lp.is_verified,
+             lp.logo_url,
              ${minPriceKgExpr} AS min_price_kg,
              ${NORMALIZED_HOURS_SUBQUERY}
            FROM laundry_profiles lp
@@ -113,24 +116,25 @@ export async function GET(req: NextRequest) {
       [isPincode ? location : `%${location}%`]
     )
 
-    return successResponse({
-      providers: result.rows.map(r => ({
-        id: r.id,
-        business_name: r.business_name,
-        business_address: r.business_address,
-        city: r.city,
-        postal_code: r.postal_code,
-        service_area: r.service_area,
-        rating: parseFloat(r.rating),
-        rating_count: parseInt(r.rating_count) || 0,
-        capacity: r.capacity,
-        certifications: r.certifications ?? [],
-        services_offered: r.services_offered ?? [],
-        operating_hours: normalizeOperatingHours(r.normalized_hours ?? r.operating_hours),
-        is_verified: r.is_verified,
-        min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
-      })),
-    })
+    const providers = await Promise.all(result.rows.map(async r => ({
+      id: r.id,
+      business_name: r.business_name,
+      business_address: r.business_address,
+      city: r.city,
+      postal_code: r.postal_code,
+      service_area: r.service_area,
+      rating: parseFloat(r.rating),
+      rating_count: parseInt(r.rating_count) || 0,
+      capacity: r.capacity,
+      certifications: r.certifications ?? [],
+      services_offered: r.services_offered ?? [],
+      operating_hours: normalizeOperatingHours(r.normalized_hours ?? r.operating_hours),
+      is_verified: r.is_verified,
+      min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
+      logo_url: await resolveProfileImageUrl(r.logo_url),
+    })))
+
+    return successResponse({ providers })
   } catch (error) {
     console.error('[GET /api/customer/laundry-providers/search]', error)
     return serverErrorResponse('Failed to fetch providers')

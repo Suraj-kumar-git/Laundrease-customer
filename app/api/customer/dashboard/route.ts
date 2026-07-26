@@ -119,22 +119,18 @@ export async function GET(req: NextRequest) {
       ? walletResult.rows[0]
       : { balance: 0, currency: 'INR' }
 
-    // ---- 6. Coupons (global active + user-specific) -----------------
+    // ---- 6. Coupons (global active + user-specific + provider-scoped) ----
     // Only returns coupons that are currently usable by this customer:
     //   - Active and within date range
-    //   - first_order_only: only when user has no non-cancelled paid/COD orders
+    //   - first_order_only (platform-wide): hidden once user has any non-
+    //     cancelled paid/COD order — dashboard has no per-reason UI for these
+    //   - first_order_only (provider-scoped): always shown — a returning
+    //     platform customer who's never ordered from THAT provider still
+    //     qualifies, so eligibility is surfaced via has_placed_order_scoped
+    //     + ineligibleReason rather than hidden
     //   - usage_limit_per_user: user has not yet reached the per-user cap
     //     (cancelled-order redemptions don't count against the limit)
     const couponsResult = await query(`
-      WITH user_order_status AS (
-        SELECT EXISTS (
-          SELECT 1
-          FROM orders o
-          WHERE o.customer_id = $1
-            AND o.status NOT IN ('cancelled', 'failed', 'rejected')
-            AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')
-        ) AS has_placed_order
-      )
       SELECT
         c.code,
         c.name,
@@ -145,17 +141,31 @@ export async function GET(req: NextRequest) {
         c.min_order_amount,
         c.usage_limit_per_user,
         c.first_order_only,
-        c.ends_at
+        c.ends_at,
+        c.laundry_profile_id,
+        lp.business_name AS provider_name,
+        EXISTS (
+          SELECT 1 FROM orders o
+          WHERE o.customer_id = $1
+            AND o.status NOT IN ('cancelled', 'failed', 'rejected')
+            AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')
+            AND (c.laundry_profile_id IS NULL OR o.laundry_profile_id = c.laundry_profile_id)
+        ) AS has_placed_order_scoped
       FROM coupons c
-      CROSS JOIN user_order_status uos
+      LEFT JOIN laundry_profiles lp ON lp.id = c.laundry_profile_id
       WHERE c.is_active = TRUE
         AND (c.applicable_to_user IS NULL OR c.applicable_to_user = $1)
         AND (c.starts_at IS NULL OR c.starts_at <= NOW())
         AND (c.ends_at   IS NULL OR c.ends_at   >= NOW())
-        -- first_order_only coupons are hidden once the user has a real order in progress
         AND (
           COALESCE(c.first_order_only, FALSE) = FALSE
-          OR uos.has_placed_order = FALSE
+          OR c.laundry_profile_id IS NOT NULL
+          OR NOT EXISTS (
+            SELECT 1 FROM orders o2
+            WHERE o2.customer_id = $1
+              AND o2.status NOT IN ('cancelled', 'failed', 'rejected')
+              AND (o2.payment_method LIKE '%cod%' OR o2.payment_status = 'paid')
+          )
         )
         -- Per-user usage cap: hide coupon if the user has already redeemed it
         -- (on a non-cancelled order). Cancelled-order redemptions don't count.
@@ -247,17 +257,26 @@ export async function GET(req: NextRequest) {
         currency: wallet.currency,
       },
 
-      coupons: couponsResult.rows.map(c => ({
-        code:           c.code,
-        name:           c.name,
-        description:    c.description ?? null,
-        discountType:   c.discount_type,
-        discountValue:  parseFloat(c.discount_value),
-        maxDiscount:    c.max_discount ? parseFloat(c.max_discount) : null,
-        minOrderAmount: c.min_order_amount ? parseFloat(c.min_order_amount) : null,
-        expiresAt:      c.ends_at ?? null,
-        isPersonal:     c.applicable_to_user != null,  // personal = targeted to this user specifically
-      })),
+      coupons: couponsResult.rows.map(c => {
+        const ineligible = Boolean(c.first_order_only) && c.has_placed_order_scoped
+        return {
+          code:           c.code,
+          name:           c.name,
+          description:    c.description ?? null,
+          discountType:   c.discount_type,
+          discountValue:  parseFloat(c.discount_value),
+          maxDiscount:    c.max_discount ? parseFloat(c.max_discount) : null,
+          minOrderAmount: c.min_order_amount ? parseFloat(c.min_order_amount) : null,
+          expiresAt:      c.ends_at ?? null,
+          isPersonal:     c.applicable_to_user != null,  // personal = targeted to this user specifically
+          providerId:     c.laundry_profile_id ?? null,
+          providerName:   c.provider_name ?? null,
+          eligible:       !ineligible,
+          ineligibleReason: ineligible
+            ? `First order with ${c.provider_name ?? 'this provider'} only`
+            : null,
+        }
+      }),
 
       statistics: {
         completedOrders: stats.completed_orders || 0,

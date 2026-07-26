@@ -15,6 +15,16 @@ import { useAuth } from "@/components/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { SearchParamProvider } from "@/components/common/searchParamProvider"
+import { isValidIndianMobile, isValidPersonName, isValidEmail } from "@/lib/validation/india"
+
+// Accepts "+91 98765 43210", "919876543210", "09876543210", or a bare 10-digit
+// number → keeps just the bare 10 digits, which is all the field ever stores.
+function toTenDigits(raw: string): string {
+  const digits = raw.replace(/\D/g, "")
+  if (digits.length > 10 && digits.startsWith("91")) return digits.slice(2, 12)
+  if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1)
+  return digits.slice(0, 10)
+}
 
 // ---- Password strength ---------------------------------------------------
 function passwordStrength(p: string): { score: 0 | 1 | 2 | 3 | 4; label: string; color: string } {
@@ -31,15 +41,19 @@ function passwordStrength(p: string): { score: 0 | 1 | 2 | 3 | 4; label: string;
 // ---- Validation ----------------------------------------------------------
 function validate(f: typeof INITIAL_FORM): Record<string, string> {
   const e: Record<string, string> = {}
-  if (!f.full_name.trim())          e.full_name = "Full name is required"
-  else if (f.full_name.trim().length < 2) e.full_name = "Full name must be at least 2 characters"
+  const name = f.full_name.trim()
+  if (!name)                        e.full_name = "Full name is required"
+  else if (!isValidPersonName(name)) e.full_name = "Enter a valid name — letters only, 2–60 characters"
 
-  if (!f.email)                     e.email = "Email is required"
-  else if (!/\S+@\S+\.\S+/.test(f.email)) e.email = "Enter a valid email address"
+  const email = f.email.trim()
+  if (!email)                       e.email = "Email is required"
+  else if (email.length < 5)        e.email = "Email must be at least 5 characters"
+  else if (email.length > 254)      e.email = "Email must be 254 characters or fewer"
+  else if (!isValidEmail(email))    e.email = "Enter a valid email address"
 
   if (!f.phone)                     e.phone = "Phone number is required"
-  else if (!/^\+?[1-9]\d{9,14}$/.test(f.phone.replace(/\s/g, "")))
-    e.phone = "Enter a valid phone number (e.g. +919876543210)"
+  else if (!isValidIndianMobile(f.phone))
+    e.phone = "Enter a valid 10-digit mobile number starting with 6-9"
 
   if (!f.password)                  e.password = "Password is required"
   else if (f.password.length < 8)  e.password = "Minimum 8 characters"
@@ -100,13 +114,16 @@ function PageContent() {
           ...prev,
           full_name:     draft.full_name     || prev.full_name,
           email:         draft.email         || prev.email,
-          phone:         draft.phone         || prev.phone,
+          phone:         draft.phone ? toTenDigits(draft.phone) : prev.phone,
           referral_code: draft.referral_code || prev.referral_code,
         }))
       }
     } catch { /* sessionStorage unavailable */ }
 
-    // URL params override the draft (verify page passes email/phone back)
+    // URL params override the draft (verify page passes email/phone back).
+    // phone arrives in full +91XXXXXXXXXX form (that's what's submitted to
+    // the backend and shown to the verify page) — normalize back to the
+    // bare 10 digits this field stores.
     const ref   = searchParams.get("ref")
     const email = searchParams.get("email")
     const phone = searchParams.get("phone")
@@ -114,7 +131,7 @@ function PageContent() {
       ...prev,
       ...(ref   ? { referral_code: ref.toUpperCase() } : {}),
       ...(email ? { email } : {}),
-      ...(phone ? { phone } : {}),
+      ...(phone ? { phone: toTenDigits(phone) } : {}),
     }))
   }, [searchParams])
 
@@ -166,20 +183,22 @@ function PageContent() {
     const errs = validate(form)
     if (Object.keys(errs).length > 0) { setErrors(errs); return }
 
+    const fullPhone = `+91${form.phone}`
+
     setSubmitting(true)
     try {
-      await register(form.full_name.trim(), form.email.trim().toLowerCase(), form.password, form.phone.trim(), form.referral_code.trim() || undefined)
+      await register(form.full_name.trim(), form.email.trim().toLowerCase(), form.password, fullPhone, form.referral_code.trim() || undefined)
       // Save non-sensitive fields so the register form is pre-filled if the
       // user comes back via "Update it here" on the verify page.
       try {
         sessionStorage.setItem("reg_draft", JSON.stringify({
           full_name:     form.full_name.trim(),
           email:         form.email.trim().toLowerCase(),
-          phone:         form.phone.trim(),
+          phone:         fullPhone,
           referral_code: form.referral_code.trim(),
         }))
       } catch { /* sessionStorage unavailable */ }
-      router.push(`/customer/auth/verify?email=${encodeURIComponent(form.email)}&phone=${encodeURIComponent(form.phone)}`)
+      router.push(`/customer/auth/verify?email=${encodeURIComponent(form.email)}&phone=${encodeURIComponent(fullPhone)}`)
     } catch (err: any) {
       setServerError(err.message || "Registration failed")
     } finally {
@@ -189,6 +208,7 @@ function PageContent() {
 
   const pwd      = form.password
   const strength = pwd ? passwordStrength(pwd) : null
+  const canSubmit = Object.keys(validate(form)).length === 0
 
   return (
     // Full-screen two-column layout; left panel hidden on mobile
@@ -213,10 +233,11 @@ function PageContent() {
             <form onSubmit={handleSubmit} noValidate className="space-y-4">
               {/* Full Name */}
               <div className="space-y-1.5">
-                <Label htmlFor="full_name">Full Name</Label>
+                <Label htmlFor="full_name">Full Name <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="full_name" placeholder="Rahul Sharma" autoComplete="name"
+                  <Input id="full_name" placeholder="Rahul Sharma" autoComplete="name" required
+                    maxLength={60}
                     className={cn("pl-10", errors.full_name && "border-destructive")}
                     value={form.full_name}
                     onChange={e => set("full_name", e.target.value)}
@@ -227,10 +248,11 @@ function PageContent() {
 
               {/* Email */}
               <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">Email <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="email" type="email" placeholder="name@example.com" autoComplete="email"
+                  <Input id="email" type="email" placeholder="name@example.com" autoComplete="email" required
+                    maxLength={254}
                     className={cn("pl-10", errors.email && "border-destructive")}
                     value={form.email}
                     onChange={e => set("email", e.target.value)}
@@ -241,24 +263,26 @@ function PageContent() {
 
               {/* Phone */}
               <div className="space-y-1.5">
-                <Label htmlFor="phone">Phone Number</Label>
+                <Label htmlFor="phone">Phone Number <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="phone" type="tel" placeholder="+919876543210" autoComplete="tel"
-                    className={cn("pl-10", errors.phone && "border-destructive")}
+                  <span className="absolute left-9 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">+91</span>
+                  <Input id="phone" type="tel" inputMode="numeric" placeholder="9876543210" autoComplete="tel" required
+                    maxLength={10}
+                    className={cn("pl-16", errors.phone && "border-destructive")}
                     value={form.phone}
-                    onChange={e => set("phone", e.target.value.replace(/[^\d+\s\-]/g, ''))}
+                    onChange={e => set("phone", toTenDigits(e.target.value))}
                     disabled={submitting} />
                 </div>
                 {errors.phone
                   ? <p className="text-xs text-destructive">{errors.phone}</p>
-                  : <p className="text-xs text-muted-foreground">Include country code, e.g. +91</p>
+                  : <p className="text-xs text-muted-foreground">10-digit mobile number, no country code needed</p>
                 }
               </div>
 
               {/* Password */}
               <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">Password <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                   <Input id="password" type={showPwd ? "text" : "password"} placeholder="••••••••"
@@ -302,7 +326,7 @@ function PageContent() {
 
               {/* Confirm Password */}
               <div className="space-y-1.5">
-                <Label htmlFor="confirmPassword">Confirm Password</Label>
+                <Label htmlFor="confirmPassword">Confirm Password <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                   <Input id="confirmPassword" type={showPwd ? "text" : "password"} placeholder="••••••••"
@@ -384,7 +408,7 @@ function PageContent() {
               </div>
               {errors.agreeTerms && <p className="text-xs text-destructive -mt-2">{errors.agreeTerms}</p>}
 
-              <Button type="submit" className="w-full" disabled={submitting}>
+              <Button type="submit" className="w-full" disabled={submitting || !canSubmit}>
                 {submitting
                   ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating account…</>
                   : "Create Account"
