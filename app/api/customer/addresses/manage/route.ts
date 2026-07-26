@@ -4,6 +4,7 @@ import {
   successResponse, errorResponse, notFoundResponse,
   serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
+import { geocodeAddress } from '@/lib/geocode'
 
 interface AddressBody {
   id?:            string     // public_id — required for PUT/DELETE
@@ -30,6 +31,25 @@ async function getCustomerProfileId(userId: string): Promise<number | null> {
   return res.rowCount! > 0 ? res.rows[0].id : null
 }
 
+// Best-effort — a geocoding failure (bad address, API down, etc.) must never
+// block saving the address itself. NULL coordinates just mean this address
+// is excluded from distance-based delivery-fee calculations, same as today.
+async function geocodeBestEffort(body: AddressBody): Promise<{ latitude: number | null; longitude: number | null }> {
+  try {
+    const geo = await geocodeAddress({
+      address_line1: body.address_line1,
+      address_line2: body.address_line2,
+      city: body.city,
+      state: body.state,
+      postal_code: body.postal_code,
+    })
+    return { latitude: geo?.latitude ?? null, longitude: geo?.longitude ?? null }
+  } catch (e) {
+    console.error('[addresses/manage] geocoding failed:', e)
+    return { latitude: null, longitude: null }
+  }
+}
+
 // POST — create
 export async function POST(req: NextRequest) {
   const userId = req.headers.get('x-user-id')
@@ -46,6 +66,8 @@ export async function POST(req: NextRequest) {
   try {
     const profileId = await getCustomerProfileId(userId)
     if (!profileId) return errorResponse('Customer profile not found', 404)
+
+    const { latitude, longitude } = await geocodeBestEffort(body)
 
     const result = await transaction(async (client) => {
       // Check address count (max 10)
@@ -82,8 +104,9 @@ export async function POST(req: NextRequest) {
         `INSERT INTO customer_addresses (
            customer_profile_id, label, tags, address_line1, address_line2,
            landmark, neighborhood, city, state, postal_code, country_code,
-           instructions, contact_name, contact_phone, is_default, position
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+           instructions, contact_name, contact_phone, is_default, position,
+           latitude, longitude
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
          RETURNING *`,
         [
           profileId, body.label, body.tags ?? [], body.address_line1, body.address_line2 ?? null,
@@ -91,6 +114,7 @@ export async function POST(req: NextRequest) {
           body.state ?? null, body.postal_code ?? null, body.country_code,
           body.instructions ?? null, body.contact_name ?? null,
           body.contact_phone ?? null, isDefault, position,
+          latitude, longitude,
         ]
       )
 
@@ -123,6 +147,10 @@ export async function PUT(req: NextRequest) {
     const profileId = await getCustomerProfileId(userId)
     if (!profileId) return errorResponse('Customer profile not found', 404)
 
+    // Re-geocode on every edit so location-based delivery-fee calculations
+    // stay accurate — same best-effort convention as the create path.
+    const { latitude, longitude } = await geocodeBestEffort(body)
+
     const result = await transaction(async (client) => {
       // Verify address belongs to this customer
       const check = await client.query(
@@ -147,8 +175,8 @@ export async function PUT(req: NextRequest) {
            landmark      = $5, neighborhood  = $6, city           = $7,
            state         = $8, postal_code   = $9, country_code   = $10,
            instructions  = $11, contact_name = $12, contact_phone = $13,
-           is_default    = $14, updated_at   = NOW()
-         WHERE id = $15
+           is_default    = $14, latitude      = $15, longitude    = $16, updated_at = NOW()
+         WHERE id = $17
          RETURNING *`,
         [
           body.label, body.tags ?? [], body.address_line1, body.address_line2 ?? null,
@@ -156,6 +184,7 @@ export async function PUT(req: NextRequest) {
           body.state ?? null, body.postal_code ?? null, body.country_code ?? 'IN',
           body.instructions ?? null, body.contact_name ?? null,
           body.contact_phone ?? null, body.is_default ?? false,
+          latitude, longitude,
           addressId,
         ]
       )

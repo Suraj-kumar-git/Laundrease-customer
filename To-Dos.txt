@@ -1,30 +1,16 @@
-**** HIGH Priority: ****
-*Delivery:
-*Laundry:
-1. Put a check on duplicate data feed by customers or laundry or delivery persona in all their write operations like GST number, PAN card number or any unique id can't be same for 2 laundry providers or the bike license plate number can't be same for 2 delivery persons...first let's figure out what all constraints we will have to make in DB so that we can fix this bug....check the whole sql scripts thoroughly...
-*Customer
-2. Public Page content updates - Manual
+*Others
 
 
-**** Future implementation: ****
-* Create one emails tab for both support and admin portal where they can see all the emails received and sent and they can also reply back to the emails with all emails functionalities like attachments and forwarding features.
+* Required Operational
 
-** Code review checklist **
-* Get new image for services, providers, & Product types.
-* There's currently zero cron/scheduled-job infrastructure anywhere in this app — nothing runs on a timer today. How should the daily "reschedule to tomorrow if not picked up" sweep actually get triggered in production?
-* Barcode/Bag Creation Logic for all the orders/Customers when they are picked up by delivery partner from customer
-* In Safety Center page we have mentioned that the customer's PII like Address, Phone, Payment details, etc are encrypted.
-* Do code revisit for each persona Repo & remove unnecessary & duplicate code snippets, also check if files can be simplified per role.
-* Review architectural pattern to enhance the app's performance like using queue or serverless architecture
-
+* Operational Note:
+Barcode/Bag Creation Logic for all the orders/Customers when they are picked up by delivery partner from customers. ---> Delivery partners will write the order number on a sticky paper & paste that on the collected bag. So the bag can be easily tracked using that orderId.
 
 
 Operational Change pending: Once the Customer profile is deployed for testing:
-* For Invoice: Get the Place of Supply, Correct supplier details, Service Accounting Code(SAC), Correct CGST & SGST charge, & check against the gov compliance.
 * Register on https://trueconnect.jio.com/#/home/entity-registration to get the DLT template id for msg91 SMS services. Update the existing SMS template with DLT template ID and add Entity/PE ID.
 * Get Business GST/PAN
 * Complete the account activation step for PayU with Business PAN, business details, Bank Account, Website Details, & KYC Documents. Also edit the UI of PayU payment page.
-* Note: Laundry Providers have to operate daily.
 * Physical machine for delivery persons to get the code for the bag with a QR code on it.
 
 Register the business with Gov...

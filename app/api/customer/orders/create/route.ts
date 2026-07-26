@@ -142,7 +142,7 @@ export async function POST(req: NextRequest) {
 
       // ---- Provider ---------------------------------------------------------
       const providerRes = await client.query(
-        `SELECT lp.id, lp.business_name
+        `SELECT lp.id, lp.business_name, lp.latitude, lp.longitude
          FROM laundry_profiles lp
          WHERE lp.id = $1 AND lp.status = 'active' AND lp.is_verified = TRUE`,
         [body.laundry_profile_id]
@@ -175,12 +175,41 @@ export async function POST(req: NextRequest) {
         body.services.reduce((s, svc) => s + svc.line_total, 0) * 100
       ) / 100
 
+      // ---- Pickup pincode + coordinates --------------------------------------
+      // Pickup pincode is stored denormalized so the delivery available-orders
+      // query can match it directly — it was never being populated before,
+      // which silently broke region matching for every order (the query
+      // would fall through to a fragile city-substring match instead).
+      // Coordinates (best-effort — NULL if this address was never geocoded)
+      // feed the distance-based delivery-fee calculation right below.
+      let pickupPincode: string | null = null
+      let pickupLat: number | null = null
+      let pickupLng: number | null = null
+      if (body.address_id) {
+        const addrRes = await client.query(
+          `SELECT postal_code, latitude, longitude FROM customer_addresses WHERE id = $1 AND customer_profile_id = (
+             SELECT id FROM customer_profiles WHERE user_id = $2
+           )`,
+          [body.address_id, userId]
+        )
+        pickupPincode = addrRes.rows[0]?.postal_code ?? null
+        pickupLat = addrRes.rows[0]?.latitude ?? null
+        pickupLng = addrRes.rows[0]?.longitude ?? null
+      }
+
+      const distanceRes = await client.query<{ distance_km: string | null }>(
+        `SELECT haversine_km($1, $2, $3, $4)::TEXT AS distance_km`,
+        [pickupLat, pickupLng, provider.latitude, provider.longitude]
+      )
+      const distanceKm = distanceRes.rows[0]?.distance_km != null
+        ? parseFloat(distanceRes.rows[0].distance_km) : null
+
       // ---- Fees from order_fee_config via DB function ----------------------
       // calculate_order_fees() reads order_fee_config, respects is_active,
       // skips express_surcharge if !is_express, applies free_above_amount cap
       const feesRes = await client.query(
-        `SELECT calculate_order_fees($1, $2, NULL, $3) AS fees`,
-        [subtotal, body.is_express, body.laundry_profile_id]
+        `SELECT calculate_order_fees($1, $2, $3, $4) AS fees`,
+        [subtotal, body.is_express, distanceKm, body.laundry_profile_id]
       )
       const feeRows: Array<{
         code:         string
@@ -197,7 +226,8 @@ export async function POST(req: NextRequest) {
       if (body.coupon_code) {
         const couponRes = await client.query(
           `SELECT code, discount_type, discount_value, max_discount,
-                  min_order_amount, usage_limit_global, usage_limit_per_user, first_order_only
+                  min_order_amount, usage_limit_global, usage_limit_per_user,
+                  first_order_only, laundry_profile_id
            FROM coupons
            WHERE code = $1 AND is_active = TRUE
              AND (starts_at IS NULL OR starts_at <= NOW())
@@ -243,7 +273,9 @@ export async function POST(req: NextRequest) {
           // first_order_only — same "actually placed" definition used by
           // /api/customer/coupons/validate and the dashboard/orders-list
           // routes: a pending online-payment order that hasn't paid yet
-          // doesn't count as placed.
+          // doesn't count as placed. Scoped to the coupon's own provider
+          // when it has one — a provider's "first order with us" coupon
+          // only cares about history with THAT provider.
           let firstOrderOk = true
           if (c.first_order_only) {
             const historyRes = await client.query(
@@ -251,13 +283,20 @@ export async function POST(req: NextRequest) {
                FROM orders
                WHERE customer_id = $1
                  AND status NOT IN ('cancelled', 'failed', 'rejected')
-                 AND (payment_method LIKE '%cod%' OR payment_status = 'paid')`,
-              [userId]
+                 AND (payment_method LIKE '%cod%' OR payment_status = 'paid')
+                 AND ($2::BIGINT IS NULL OR laundry_profile_id = $2)`,
+              [userId, c.laundry_profile_id]
             )
             firstOrderOk = historyRes.rows[0].n === 0
           }
 
-          if (meetsMin && perUserOk && globalOk && firstOrderOk) {
+          // Provider-scoped coupon — the real enforcement point: reject if
+          // it doesn't belong to this order's actual provider. Frontend
+          // state (checkout selection) is never trusted here.
+          const providerOk = c.laundry_profile_id == null
+            || Number(c.laundry_profile_id) === Number(body.laundry_profile_id)
+
+          if (meetsMin && perUserOk && globalOk && firstOrderOk && providerOk) {
             discountAmount = c.discount_type === 'percent'
               ? (subtotal * parseFloat(c.discount_value)) / 100
               : parseFloat(c.discount_value)
@@ -333,21 +372,6 @@ export async function POST(req: NextRequest) {
           items: body.services.map(svc => ({ serviceId: svc.service_id, isExpress: svc.is_express })),
         }
       )
-
-      // Pickup pincode, stored denormalized so the delivery available-orders
-      // query can match it directly — it was never being populated before,
-      // which silently broke region matching for every order (the query
-      // would fall through to a fragile city-substring match instead).
-      let pickupPincode: string | null = null
-      if (body.address_id) {
-        const addrRes = await client.query(
-          `SELECT postal_code FROM customer_addresses WHERE id = $1 AND customer_profile_id = (
-             SELECT id FROM customer_profiles WHERE user_id = $2
-           )`,
-          [body.address_id, userId]
-        )
-        pickupPincode = addrRes.rows[0]?.postal_code ?? null
-      }
 
       const orderRes = await client.query(
         `INSERT INTO orders (

@@ -29,6 +29,7 @@ interface WalletInfo { balance: number; has_wallet: boolean; wallet_id: number |
 interface AvailableCoupon {
   code: string; name: string; discount_type: string; discount_value: number
   max_discount: number | null; min_order_amount: number; discount_display: string
+  provider_id: number | null; provider_name: string | null
   eligible: boolean; ineligible_reason: string | null
 }
 
@@ -101,7 +102,8 @@ export function CheckoutStep({
     // initialFeesLoaded.current = true
     setFeesLoading(true)
     const providerParam = providerId ? `&provider_id=${providerId}` : ''
-    fetch(`/api/customer/orders/fees?subtotal=${subtotal}&is_express=${currentIsExpress}${providerParam}`)
+    const addressParam  = orderState.pickup_address?.id ? `&address_id=${orderState.pickup_address.id}` : ''
+    fetch(`/api/customer/orders/fees?subtotal=${subtotal}&is_express=${currentIsExpress}${providerParam}${addressParam}`)
       .then(r => r.json())
             .then(json => {
         if (json.success) {
@@ -114,7 +116,7 @@ export function CheckoutStep({
       })
       .catch(() => {})
       .finally(() => setFeesLoading(false))
-  }, [subtotal, currentIsExpress, providerId])
+  }, [subtotal, currentIsExpress, providerId, orderState.pickup_address?.id])
 
   const servicesKey = useMemo(
     () => JSON.stringify(orderState.selected_services.map(s => ({ id: s.service_id, x: s.is_express }))),
@@ -167,15 +169,16 @@ export function CheckoutStep({
       .catch(() => {})
   }, [providerId])
 
-  // ---- Available coupons: re-fetch on subtotal change ----------
-  // This ensures the ineligible_reason ("Add ₹X more") stays accurate
+  // ---- Available coupons: re-fetch on subtotal or provider change ----------
+  // This ensures the ineligible_reason ("Add ₹X more" / "Only valid with X") stays accurate
   useEffect(() => {
     if (subtotal <= 0) return
-    fetch(`/api/customer/coupons/available?order_amount=${subtotal}`, { credentials: 'include' })
+    const providerParam = providerId ? `&provider_id=${providerId}` : ''
+    fetch(`/api/customer/coupons/available?order_amount=${subtotal}${providerParam}`, { credentials: 'include' })
       .then(r => r.json())
       .then(j => { if (j.success) setAvailableCoupons(j.data?.coupons ?? []) })
       .catch(() => {})
-  }, [subtotal])
+  }, [subtotal, providerId])
   const prevSubtotalRef = useRef(subtotal)
   useEffect(() => {
     const prevSubtotal = prevSubtotalRef.current
@@ -271,7 +274,7 @@ export function CheckoutStep({
     try {
       const res  = await fetch('/api/customer/coupons/validate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ coupon_code: trimmed, order_amount: subtotal }),
+        body: JSON.stringify({ coupon_code: trimmed, order_amount: subtotal, provider_id: providerId ?? null }),
       })
       const json = await res.json()
       if (json.success && json.data?.valid) {
@@ -682,11 +685,40 @@ export function CheckoutStep({
                           onClick={() => handleApplyCoupon(c.code)}
                           className="flex cursor-pointer items-center justify-between rounded-xl border border-border/40 bg-muted/30 px-3 py-2.5 transition-colors hover:border-primary/30"
                         >
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold font-mono text-foreground">{c.code}</p>
-                            <p className="text-[11px] text-muted-foreground">{c.name}</p>
+                          <div className="min-w-0 flex items-center gap-1.5">
+                            <div>
+                              <p className="text-xs font-bold font-mono text-foreground">{c.code}</p>
+                              <p className="text-[11px] text-muted-foreground">{c.name}</p>
+                            </div>
+                            {c.provider_id != null && (
+                              <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
+                                {c.provider_name ?? 'Provider'}
+                              </span>
+                            )}
                           </div>
                           <span className="shrink-0 ml-2 text-xs font-semibold text-primary">
+                            {c.discount_display}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Provider-specific coupons — always shown (never hidden), disabled with a
+                      reason when the selected provider doesn't match or eligibility isn't met yet */}
+                  {availableCoupons.some(c => !c.eligible && c.provider_id != null) && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground">Provider coupons</p>
+                      {availableCoupons.filter(c => !c.eligible && c.provider_id != null).map(c => (
+                        <div
+                          key={c.code}
+                          className="flex cursor-not-allowed items-center justify-between rounded-xl border border-dashed border-border/40 bg-muted/10 px-3 py-2.5 opacity-60"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold font-mono text-foreground">{c.code}</p>
+                            <p className="text-[11px] text-muted-foreground">{c.ineligible_reason}</p>
+                          </div>
+                          <span className="shrink-0 ml-2 text-xs font-semibold text-muted-foreground">
                             {c.discount_display}
                           </span>
                         </div>
