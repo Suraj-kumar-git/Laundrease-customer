@@ -72,6 +72,7 @@ export function AddressMapPicker({ initialLat, initialLng, onConfirm, onCancel }
   const [resolved,    setResolved]    = useState<ResolvedLocation | null>(null)
   const [resolveError,setResolveError]= useState<string | null>(null)
   const [locating,    setLocating]    = useState(false)
+  const [locationError, setLocationError] = useState<string | null>(null)
 
   // Whether the pin's postal code is one we actually serve (checked against
   // provider_service_areas) — null = not checked yet / unknown, which is
@@ -207,16 +208,29 @@ export function AddressMapPicker({ initialLat, initialLng, onConfirm, onCancel }
   }
 
   function useMyLocation() {
-    if (!navigator.geolocation || !mapRef.current) return
-    setLocating(true)
+    if (!mapRef.current) return
+    if (!navigator.geolocation) {
+      setLocationError("Your browser doesn't support location access — pick your spot on the map instead.")
+      return
+    }
+    setLocating(true); setLocationError(null)
     navigator.geolocation.getCurrentPosition(
       pos => {
         setLocating(false)
         mapRef.current.panTo({ lat: pos.coords.latitude, lng: pos.coords.longitude })
         mapRef.current.setZoom(17)
       },
-      () => setLocating(false),
-      { timeout: 8000 }
+      (err) => {
+        setLocating(false)
+        setLocationError(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location permission denied — allow location access in your browser/app settings, or pick your spot on the map.'
+            : err.code === err.TIMEOUT
+            ? "Getting your location took too long — try again, or pick your spot on the map."
+            : "Couldn't get your current location — pick your spot on the map instead."
+        )
+      },
+      { timeout: 8000, enableHighAccuracy: true }
     )
   }
 
@@ -264,6 +278,11 @@ export function AddressMapPicker({ initialLat, initialLng, onConfirm, onCancel }
               {locating ? <Loader2 className="h-3 w-3 animate-spin" /> : <LocateFixed className="h-3 w-3" />}
               Use my current location
             </button>
+            {locationError && (
+              <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-600">
+                <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" /> {locationError}
+              </p>
+            )}
           </div>
 
           <div className="relative h-[50vh] min-h-[320px] overflow-hidden rounded-2xl border border-border">
