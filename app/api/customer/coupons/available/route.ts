@@ -7,52 +7,39 @@ export async function GET(req: NextRequest) {
   if (!userId) return unauthorizedResponse()
 
   const orderAmount = parseFloat(req.nextUrl.searchParams.get('order_amount') ?? '0')
+  const providerIdStr = req.nextUrl.searchParams.get('provider_id')
+  const providerId = providerIdStr ? parseInt(providerIdStr) : null
 
   try {
-    // Count user's completed non-cancelled orders (for first_order_only check).
-    // 'rejected' (laundry provider declined before confirming) is terminal
-    // but must not count as a placed order any more than cancelled/failed do.
-    const orderCountRes = await query(
-      `SELECT COUNT(*)::int AS completed_count
-       FROM orders o
-       JOIN order_statuses s ON s.code = o.status
-       WHERE o.customer_id = $1
-         AND s.is_terminal = TRUE
-         AND s.code NOT IN ('cancelled', 'failed', 'rejected')`,
-      [userId]
-    )
-    const completedOrderCount: number = orderCountRes.rows[0].completed_count
-
-    // Also count active (non-terminal, non-cancelled) orders — FIRST50 locked while any order is in progress.
-    // Excludes orders still awaiting online-payment confirmation (status
-    // 'pending' with payment_status not yet 'paid') — those aren't "placed"
-    // yet, same definition used by the dashboard and orders-list routes.
-    const activeOrderCountRes = await query(
-      `SELECT COUNT(*)::int AS active_count
-       FROM orders o
-       WHERE o.customer_id = $1
-         AND o.status NOT IN ('cancelled', 'failed', 'rejected', 'completed', 'delivered', 'returned')
-         AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')`,
-      [userId]
-    )
-    const activeOrderCount: number = activeOrderCountRes.rows[0].active_count
-
-    // Total orders ever placed (completed + active, excludes cancelled/rejected)
-    const anyNonCancelledOrders = completedOrderCount > 0 || activeOrderCount > 0
-
-    // Fetch all active coupons not yet expired
+    // Fetch all active coupons not yet expired — both platform-wide
+    // (laundry_profile_id IS NULL) and provider-owned ones. Provider-owned
+    // coupons are always included here (never filtered out by provider
+    // selection) — the frontend shows them with an eligible/ineligible_reason
+    // so the customer sees "only valid with Provider B" rather than the
+    // coupon silently vanishing when a different provider is selected.
     const couponsRes = await query(
       `SELECT
          c.code, c.name, c.description,
          c.discount_type, c.discount_value, c.max_discount,
          c.min_order_amount, c.usage_limit_per_user, c.first_order_only,
+         c.laundry_profile_id, lp.business_name AS provider_name,
          COALESCE((
            SELECT COUNT(*) FROM coupon_redemptions cr
            LEFT JOIN orders o ON o.id = cr.order_id
            WHERE cr.coupon_code = c.code AND cr.user_id = $1
              AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))
-         ), 0)::int AS times_used
+         ), 0)::int AS times_used,
+         -- "Has this customer already placed an order" scoped to the
+         -- coupon's own provider (NULL laundry_profile_id => platform-wide).
+         EXISTS (
+           SELECT 1 FROM orders o
+           WHERE o.customer_id = $1
+             AND o.status NOT IN ('cancelled', 'failed', 'rejected')
+             AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')
+             AND (c.laundry_profile_id IS NULL OR o.laundry_profile_id = c.laundry_profile_id)
+         ) AS has_placed_order_scoped
        FROM coupons c
+       LEFT JOIN laundry_profiles lp ON lp.id = c.laundry_profile_id
        WHERE c.is_active = TRUE
          AND (c.applicable_to_user IS NULL OR c.applicable_to_user = $1)
          AND (c.starts_at IS NULL OR c.starts_at <= NOW())
@@ -67,12 +54,17 @@ export async function GET(req: NextRequest) {
       const withinLimit = !c.usage_limit_per_user || c.times_used < parseInt(c.usage_limit_per_user)
       const alreadyUsed = c.usage_limit_per_user && c.times_used >= parseInt(c.usage_limit_per_user)
 
-      // BUG 2 FIX: first_order_only coupons are only eligible when:
-      // - User has zero completed orders AND zero active orders
-      // i.e. this will literally be their first order ever
-      const firstOrderEligible = !c.first_order_only || !anyNonCancelledOrders
+      // BUG 2 FIX: first_order_only coupons are only eligible when the
+      // customer has never placed an order with this coupon's own provider
+      // (or anywhere, for a platform-wide coupon).
+      const firstOrderEligible = !c.first_order_only || !c.has_placed_order_scoped
 
-      const eligible = meetsAmount && withinLimit && firstOrderEligible
+      // Provider-scoped coupon: eligible only once that exact provider is
+      // selected. A platform-wide coupon (laundry_profile_id null) always matches.
+      const providerMatches = c.laundry_profile_id == null
+        || (providerId != null && Number(c.laundry_profile_id) === providerId)
+
+      const eligible = meetsAmount && withinLimit && firstOrderEligible && providerMatches
 
       // Compute display discount
       let discountDisplay: string
@@ -87,8 +79,12 @@ export async function GET(req: NextRequest) {
       let ineligible_reason: string | null = null
       if (alreadyUsed) {
         ineligible_reason = 'Already used'
-      } else if (c.first_order_only && anyNonCancelledOrders) {
-        ineligible_reason = 'First order only'
+      } else if (!providerMatches) {
+        ineligible_reason = `Only valid for orders with ${c.provider_name ?? 'this provider'}`
+      } else if (c.first_order_only && c.has_placed_order_scoped) {
+        ineligible_reason = c.laundry_profile_id
+          ? `First order with ${c.provider_name ?? 'this provider'} only`
+          : 'First order only'
       } else if (!meetsAmount) {
         const needed = minAmt - orderAmount
         ineligible_reason = `Add ₹${Math.ceil(needed)} more to unlock`
@@ -103,6 +99,8 @@ export async function GET(req: NextRequest) {
         max_discount:     c.max_discount ? parseFloat(c.max_discount) : null,
         min_order_amount: minAmt,
         discount_display: discountDisplay,
+        provider_id:      c.laundry_profile_id ?? null,
+        provider_name:    c.provider_name ?? null,
         eligible,
         ineligible_reason,
       }

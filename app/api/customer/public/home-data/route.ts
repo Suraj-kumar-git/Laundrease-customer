@@ -50,6 +50,8 @@ export async function GET(req: NextRequest) {
            lp.latitude,
            lp.longitude,
            lp.postal_code,
+           -- Business logo the provider uploaded (preferred card image)
+           lp.logo_url,
            -- Profile image if set (S3 key or URL)
            u.profile_image  AS provider_image,
            -- Latest shop photo uploaded during registration (preferred card image)
@@ -165,9 +167,12 @@ export async function GET(req: NextRequest) {
     }
 
     const providers = await Promise.all(providersRes.rows.map(async r => {
-      // Prefer the shop photo uploaded during registration; fall back to profile image
+      // Prefer the provider's uploaded business logo; then the shop photo
+      // uploaded during registration; fall back to the account owner's
+      // personal profile image last.
       let image: string | null = null
-      if (r.shop_photo_key) image = await getDocSignedUrl(r.shop_photo_key)
+      if (r.logo_url)       image = await resolveProfileImageUrl(r.logo_url)
+      if (!image && r.shop_photo_key) image = await getDocSignedUrl(r.shop_photo_key)
       if (!image)           image = await resolveProfileImageUrl(r.provider_image)
       return {
         id:           r.id,

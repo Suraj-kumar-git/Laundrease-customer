@@ -43,6 +43,7 @@ export interface LaundryProvider {
   distance?: number // calculated on frontend
   estimated_delivery_time?: string // calculated based on turnaround
   is_verified: boolean
+  logo_url?: string | null
 }
 
 // ---- Services -----------------------------------------------

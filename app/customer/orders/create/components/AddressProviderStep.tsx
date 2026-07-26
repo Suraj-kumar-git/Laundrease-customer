@@ -2,6 +2,7 @@
 // app/customer/orders/create/components/AddressProviderStep.tsx
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   MapPin, Home, Briefcase, Building2, Check, Plus,
@@ -379,9 +380,14 @@ export function AddressProviderStep({
 
               {/* Avatar + name */}
               <div className="mb-3 flex items-start gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/80 to-blue-700 text-lg font-bold text-white">
-                  {provider.business_name.charAt(0)}
-                </div>
+                {provider.logo_url ? (
+                  <Image src={provider.logo_url} alt={provider.business_name} width={48} height={48}
+                    className="h-12 w-12 shrink-0 rounded-xl object-cover" />
+                ) : (
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/80 to-blue-700 text-lg font-bold text-white">
+                    {provider.business_name.charAt(0)}
+                  </div>
+                )}
                 <div className="flex-1 min-w-0 pr-6">
                   <p className="truncate text-sm font-bold text-foreground">
                     {provider.business_name}

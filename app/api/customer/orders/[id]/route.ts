@@ -266,10 +266,28 @@ export async function PATCH(
       )
       if (check.rowCount === 0) throw new Error('NOT_FOUND')
       if (!RESCHEDULABLE_STATUSES.has(check.rows[0].status)) throw new Error('NOT_RESCHEDULABLE')
-      const orderId = check.rows[0].id
+      const orderId          = check.rows[0].id
+      const laundryProfileId = check.rows[0].laundry_profile_id
+
+      // Provider closed-date / weekly-off check — mirrors the same check
+      // enforced at order creation. rescheduleOrder() deliberately doesn't
+      // do this itself (see lib/order-reschedule.ts), so it belongs here.
+      if (laundryProfileId != null) {
+        const closed = await client.query(
+          `SELECT 1 FROM provider_closed_dates WHERE provider_id = $1 AND closed_date = $2`,
+          [laundryProfileId, body.pickup_date]
+        )
+        if (closed.rowCount! > 0) throw new Error('PROVIDER_CLOSED')
+
+        const hours = await client.query(
+          `SELECT is_closed FROM provider_operating_hours WHERE provider_id = $1 AND day_of_week = $2`,
+          [laundryProfileId, newDate.getDay()]
+        )
+        if (hours.rowCount! > 0 && hours.rows[0].is_closed) throw new Error('PROVIDER_CLOSED')
+      }
 
       const result = await rescheduleOrder({
-        client, orderId, laundryProfileId: check.rows[0].laundry_profile_id,
+        client, orderId, laundryProfileId,
         newPickupDate: body.pickup_date, newPickupTimeSlot: body.pickup_time_slot,
         reasonNote: `Rescheduled by customer — new pickup slot: ${body.pickup_date} (${body.pickup_time_slot})`,
         initiatedBy: userId, initiatedByRole: 'customer',
@@ -295,6 +313,9 @@ export async function PATCH(
     if (error.message === 'NOT_FOUND')         return notFoundResponse('Order not found')
     if (error.message === 'NOT_RESCHEDULABLE') return errorResponse(
       'This order cannot be rescheduled — it has already been picked up or cancelled', 400
+    )
+    if (error.message === 'PROVIDER_CLOSED') return errorResponse(
+      'The provider is closed on the selected date. Please choose another date.', 400
     )
     console.error('[PATCH /api/customer/orders/:id]', error)
     return serverErrorResponse('Failed to reschedule order')

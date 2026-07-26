@@ -5,13 +5,14 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { usePathname } from "next/navigation"
 
 const role = process.env.ROLE || null;
-// Silent access-token refresh is wired up for the customer build only —
-// other roles (admin/laundry/delivery/support) keep the old behavior of
-// just logging out on a real 401, no refresh attempt.
-const isCustomer = role === "customer"
-// How often to proactively rotate the access token while the customer app
-// stays open in a tab, so a long-lived browsing session never hits a real
-// expiry mid-use. Comfortably under ACCESS_TOKEN_EXPIRY (7d default).
+// Silent access-token refresh needs a working `/api/{role}/auth/refresh-token`
+// endpoint + a refresh_token cookie actually being issued at login — true for
+// customer, laundry, and delivery. admin/support have neither today, so they
+// keep the old behavior of just logging out on a real 401, no refresh attempt.
+const supportsSilentRefresh = role === "customer" || role === "laundry" || role === "delivery"
+// How often to proactively rotate the access token while the app stays open
+// in a tab, so a long-lived session never hits a real expiry mid-use.
+// Comfortably under ACCESS_TOKEN_EXPIRY (7d default).
 const SILENT_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
 type LoginPayload = {
   email?: string
@@ -131,10 +132,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       let res = await fetch(`/api/${role}/auth/me`, { credentials: "include" })
 
-      // Customer-only: the access token may simply have expired while the
-      // (still-valid) refresh token sat untouched — try a silent refresh
-      // and re-check once before treating this as a real logout.
-      if (!res.ok && (res.status === 401 || res.status === 403) && isCustomer) {
+      // The access token may simply have expired while the (still-valid)
+      // refresh token sat untouched — try a silent refresh and re-check
+      // once before treating this as a real logout.
+      if (!res.ok && (res.status === 401 || res.status === 403) && supportsSilentRefresh) {
         const refreshed = await tryRefresh()
         if (refreshed) {
           res = await fetch(`/api/${role}/auth/me`, { credentials: "include" })
@@ -150,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } else if (res.status === 401 || res.status === 403) {
         // Genuinely unauthenticated — token invalid/expired/revoked
-        // (and, for customers, the refresh attempt above didn't help either)
+        // (and, where supported, the refresh attempt above didn't help either)
         clearAuthState()
       }
       // Any other status (500, 502, 503, etc.) is a server/infra hiccup, not
@@ -167,12 +168,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // state until a full page reload.
   useEffect(() => { checkAuth() }, [pathname, checkAuth])
 
-  // Customer-only: proactively rotate the access token on a fixed interval
-  // while the user is logged in and the tab stays open, so a long browsing
-  // session never runs into a real mid-use expiry. Other roles don't get
-  // this — they keep the original "just re-check on next load" behavior.
+  // Proactively rotate the access token on a fixed interval while the user
+  // is logged in and the tab stays open, so a long browsing/working session
+  // never runs into a real mid-use expiry. Roles without a refresh endpoint
+  // (admin/support) don't get this — they keep the original "just re-check
+  // on next load" behavior.
   useEffect(() => {
-    if (!isCustomer || !user) return
+    if (!supportsSilentRefresh || !user) return
     const interval = setInterval(() => { tryRefresh() }, SILENT_REFRESH_INTERVAL_MS)
     return () => clearInterval(interval)
   }, [user, tryRefresh])

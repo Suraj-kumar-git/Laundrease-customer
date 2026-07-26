@@ -52,9 +52,11 @@ const STATUS_CONFIG: Record<string, {
 }> = {
   pending:          { label: 'Pending',          color: 'text-amber-700',   bg: 'bg-amber-100 dark:bg-amber-950/40 dark:text-amber-400',    icon: Clock },
   confirmed:        { label: 'Confirmed',        color: 'text-blue-700',    bg: 'bg-blue-100 dark:bg-blue-950/40 dark:text-blue-400',       icon: CheckCircle },
+  assigned_for_pickup:{ label: 'Delivery Partner Assigned',        color: 'text-blue-700',    bg: 'bg-blue-100 dark:bg-blue-950/40 dark:text-blue-400',       icon: Truck },
+  out_for_pickup:   { label: 'Partner On the Way for Pickup',        color: 'text-cyan-700',    bg: 'bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-400',       icon: Clock },
   picked_up:        { label: 'Picked Up',        color: 'text-blue-700',  bg: 'bg-blue-100 dark:bg-blue-950/40 dark:text-blue-400', icon: Package },
   processing:       { label: 'At Laundry',       color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-400', icon: Package },
-  ready:            { label: 'Dispatch Ready',   color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40 dark:text-teal-400',       icon: Package },
+  ready_for_delivery:{ label: 'Item is ready to dispatch from laundry',   color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40 dark:text-teal-400',       icon: Package },
   out_for_delivery: { label: 'Out for Delivery', color: 'text-emerald-700', bg: 'bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-400', icon: Truck },
   delivered:        { label: 'Delivered',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40 dark:text-green-400',    icon: CheckCircle },
   completed:        { label: 'Completed',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40 dark:text-green-400',    icon: CheckCircle },
