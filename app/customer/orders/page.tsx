@@ -97,8 +97,8 @@ function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status] ?? { label: status, bg: 'bg-muted', color: 'text-foreground', icon: Package }
   const Icon = cfg.icon
   return (
-    <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold', cfg.bg, cfg.color)}>
-      <Icon className="h-3 w-3" /> {cfg.label}
+    <span className={cn('inline-flex max-w-[130px] flex-wrap items-center justify-center gap-1 rounded-lg px-2.5 py-1 text-center text-[11px] font-semibold leading-tight', cfg.bg, cfg.color)}>
+      <Icon className="h-3 w-3 shrink-0" /> {cfg.label}
     </span>
   )
 }
