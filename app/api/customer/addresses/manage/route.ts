@@ -4,7 +4,6 @@ import {
   successResponse, errorResponse, notFoundResponse,
   serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
-import { geocodeAddress } from '@/lib/geocode'
 
 interface AddressBody {
   id?:            string     // public_id — required for PUT/DELETE
@@ -18,6 +17,11 @@ interface AddressBody {
   state?:         string
   postal_code?:   string
   country_code:   string
+  // Required — the customer address form now only ever produces an address
+  // via a confirmed map pin (see components/common/AddressMapPicker), so
+  // there's no text-only path left to geocode server-side as a fallback.
+  latitude:       number
+  longitude:      number
   instructions?:  string
   contact_name?:  string
   contact_phone?: string
@@ -31,23 +35,9 @@ async function getCustomerProfileId(userId: string): Promise<number | null> {
   return res.rowCount! > 0 ? res.rows[0].id : null
 }
 
-// Best-effort — a geocoding failure (bad address, API down, etc.) must never
-// block saving the address itself. NULL coordinates just mean this address
-// is excluded from distance-based delivery-fee calculations, same as today.
-async function geocodeBestEffort(body: AddressBody): Promise<{ latitude: number | null; longitude: number | null }> {
-  try {
-    const geo = await geocodeAddress({
-      address_line1: body.address_line1,
-      address_line2: body.address_line2,
-      city: body.city,
-      state: body.state,
-      postal_code: body.postal_code,
-    })
-    return { latitude: geo?.latitude ?? null, longitude: geo?.longitude ?? null }
-  } catch (e) {
-    console.error('[addresses/manage] geocoding failed:', e)
-    return { latitude: null, longitude: null }
-  }
+function isValidCoords(lat: unknown, lng: unknown): lat is number {
+  return typeof lat === 'number' && typeof lng === 'number'
+    && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
 }
 
 // POST — create
@@ -62,12 +52,14 @@ export async function POST(req: NextRequest) {
   if (!body.address_line1?.trim()) return errorResponse('Address line 1 is required', 400)
   if (!body.city?.trim())          return errorResponse('City is required', 400)
   if (!body.country_code?.trim())  return errorResponse('Country code is required', 400)
+  if (!isValidCoords(body.latitude, body.longitude))
+    return errorResponse('Please pick a location on the map', 400)
 
   try {
     const profileId = await getCustomerProfileId(userId)
     if (!profileId) return errorResponse('Customer profile not found', 404)
 
-    const { latitude, longitude } = await geocodeBestEffort(body)
+    const { latitude, longitude } = body
 
     const result = await transaction(async (client) => {
       // Check address count (max 10)
@@ -142,14 +134,14 @@ export async function PUT(req: NextRequest) {
   if (!body.label?.trim())         return errorResponse('Label is required', 400)
   if (!body.address_line1?.trim()) return errorResponse('Address line 1 is required', 400)
   if (!body.city?.trim())          return errorResponse('City is required', 400)
+  if (!isValidCoords(body.latitude, body.longitude))
+    return errorResponse('Please pick a location on the map', 400)
 
   try {
     const profileId = await getCustomerProfileId(userId)
     if (!profileId) return errorResponse('Customer profile not found', 404)
 
-    // Re-geocode on every edit so location-based delivery-fee calculations
-    // stay accurate — same best-effort convention as the create path.
-    const { latitude, longitude } = await geocodeBestEffort(body)
+    const { latitude, longitude } = body
 
     const result = await transaction(async (client) => {
       // Verify address belongs to this customer

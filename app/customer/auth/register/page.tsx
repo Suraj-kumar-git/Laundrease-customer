@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
@@ -43,7 +43,9 @@ function validate(f: typeof INITIAL_FORM): Record<string, string> {
   const e: Record<string, string> = {}
   const name = f.full_name.trim()
   if (!name)                        e.full_name = "Full name is required"
-  else if (!isValidPersonName(name)) e.full_name = "Enter a valid name — letters only, 2–60 characters"
+  else if (name.length < 2)         e.full_name = "Full name must be at least 2 characters"
+  else if (name.length > 50)        e.full_name = "Full name must be 50 characters or fewer"
+  else if (!isValidPersonName(name)) e.full_name = "Use letters only (spaces, apostrophes, hyphens allowed)"
 
   const email = f.email.trim()
   if (!email)                       e.email = "Email is required"
@@ -76,6 +78,12 @@ const INITIAL_FORM = {
   confirmPassword: "", referral_code: "", agreeTerms: false,
 }
 
+// Top-to-bottom field order — determines which field gets focus when the
+// user submits with multiple fields invalid.
+const FIELD_ORDER = [
+  "full_name", "email", "phone", "password", "confirmPassword", "referral_code", "agreeTerms",
+] as const
+
 const FEATURES = [
   { emoji: "📅", title: "Easy Scheduling",  sub: "Book pickup & delivery at your convenience" },
   { emoji: "📍", title: "Live Tracking",    sub: "Track your laundry every step of the way" },
@@ -94,6 +102,18 @@ function PageContent() {
   const [submitting,  setSubmitting]  = useState(false)
   const [serverError, setServerError] = useState("")
   const [pwdFocused,  setPwdFocused]  = useState(false)
+
+  // One ref per field so a failed submit can jump the user straight to the
+  // first invalid field instead of just disabling the button silently.
+  const fieldRefs = {
+    full_name:       useRef<HTMLInputElement>(null),
+    email:            useRef<HTMLInputElement>(null),
+    phone:            useRef<HTMLInputElement>(null),
+    password:         useRef<HTMLInputElement>(null),
+    confirmPassword:  useRef<HTMLInputElement>(null),
+    referral_code:    useRef<HTMLInputElement>(null),
+    agreeTerms:       useRef<HTMLButtonElement>(null),
+  }
 
   // Referral-code lookup — debounced as the user types, so they see the
   // referrer's name (or why the code doesn't work) before submitting.
@@ -181,7 +201,16 @@ function PageContent() {
     e.preventDefault()
     setServerError("")
     const errs = validate(form)
-    if (Object.keys(errs).length > 0) { setErrors(errs); return }
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs)
+      const firstInvalid = FIELD_ORDER.find(f => errs[f])
+      if (firstInvalid) {
+        const el = fieldRefs[firstInvalid].current
+        el?.scrollIntoView({ behavior: "smooth", block: "center" })
+        el?.focus()
+      }
+      return
+    }
 
     const fullPhone = `+91${form.phone}`
 
@@ -208,7 +237,6 @@ function PageContent() {
 
   const pwd      = form.password
   const strength = pwd ? passwordStrength(pwd) : null
-  const canSubmit = Object.keys(validate(form)).length === 0
 
   return (
     // Full-screen two-column layout; left panel hidden on mobile
@@ -236,8 +264,8 @@ function PageContent() {
                 <Label htmlFor="full_name">Full Name <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="full_name" placeholder="Rahul Sharma" autoComplete="name" required
-                    maxLength={60}
+                  <Input id="full_name" ref={fieldRefs.full_name} placeholder="Rahul Sharma" autoComplete="name" required
+                    maxLength={50}
                     className={cn("pl-10", errors.full_name && "border-destructive")}
                     value={form.full_name}
                     onChange={e => set("full_name", e.target.value)}
@@ -251,7 +279,7 @@ function PageContent() {
                 <Label htmlFor="email">Email <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="email" type="email" placeholder="name@example.com" autoComplete="email" required
+                  <Input id="email" ref={fieldRefs.email} type="email" placeholder="name@example.com" autoComplete="email" required
                     maxLength={254}
                     className={cn("pl-10", errors.email && "border-destructive")}
                     value={form.email}
@@ -267,7 +295,7 @@ function PageContent() {
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
                   <span className="absolute left-9 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">+91</span>
-                  <Input id="phone" type="tel" inputMode="numeric" placeholder="9876543210" autoComplete="tel" required
+                  <Input id="phone" ref={fieldRefs.phone} type="tel" inputMode="numeric" placeholder="9876543210" autoComplete="tel" required
                     maxLength={10}
                     className={cn("pl-16", errors.phone && "border-destructive")}
                     value={form.phone}
@@ -285,7 +313,7 @@ function PageContent() {
                 <Label htmlFor="password">Password <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="password" type={showPwd ? "text" : "password"} placeholder="••••••••"
+                  <Input id="password" ref={fieldRefs.password} type={showPwd ? "text" : "password"} placeholder="••••••••"
                     autoComplete="new-password"
                     className={cn("pl-10 pr-10", errors.password && "border-destructive")}
                     value={form.password}
@@ -329,7 +357,7 @@ function PageContent() {
                 <Label htmlFor="confirmPassword">Confirm Password <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="confirmPassword" type={showPwd ? "text" : "password"} placeholder="••••••••"
+                  <Input id="confirmPassword" ref={fieldRefs.confirmPassword} type={showPwd ? "text" : "password"} placeholder="••••••••"
                     autoComplete="new-password"
                     className={cn("pl-10", errors.confirmPassword && "border-destructive",
                       !errors.confirmPassword && form.confirmPassword && form.password === form.confirmPassword && "border-emerald-500"
@@ -352,7 +380,7 @@ function PageContent() {
                   <span className="text-xs font-normal text-muted-foreground">(optional)</span>
                 </Label>
                 <div className="relative">
-                  <Input id="referral_code" placeholder="LDR-XXXXXXX"
+                  <Input id="referral_code" ref={fieldRefs.referral_code} placeholder="LDR-XXXXXXX"
                     className={cn("font-mono tracking-widest uppercase pr-9",
                       errors.referral_code || referralCheck.status === "invalid" ? "border-destructive" :
                       referralCheck.status === "valid" ? "border-emerald-500 bg-emerald-500/5" :
@@ -389,7 +417,7 @@ function PageContent() {
 
               {/* Terms */}
               <div className="flex items-start gap-3 pt-1">
-                <Checkbox id="agreeTerms" checked={form.agreeTerms}
+                <Checkbox id="agreeTerms" ref={fieldRefs.agreeTerms} checked={form.agreeTerms}
                   onCheckedChange={v => set("agreeTerms", !!v)}
                   disabled={submitting}
                   className={errors.agreeTerms ? "border-destructive" : ""} />
@@ -408,7 +436,7 @@ function PageContent() {
               </div>
               {errors.agreeTerms && <p className="text-xs text-destructive -mt-2">{errors.agreeTerms}</p>}
 
-              <Button type="submit" className="w-full" disabled={submitting || !canSubmit}>
+              <Button type="submit" className="w-full" disabled={submitting}>
                 {submitting
                   ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Creating account…</>
                   : "Create Account"
