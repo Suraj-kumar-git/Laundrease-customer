@@ -95,6 +95,8 @@ export async function GET(req: NextRequest) {
            lp.latitude,
            lp.longitude,
            lp.postal_code,
+           -- Business logo the provider uploaded (preferred card image)
+           lp.logo_url,
            u.profile_image  AS provider_image,
            (
              SELECT pd.s3_key FROM provider_documents pd
