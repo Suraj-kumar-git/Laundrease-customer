@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Package, Plus, ChevronRight, Calendar, Clock,
   Store, Zap, Loader2, AlertCircle, Filter,
-  ShoppingBag, CheckCircle, XCircle, Truck, Star, ArrowLeft,
+  ShoppingBag, CheckCircle, XCircle, Truck, Star, ArrowLeft, CreditCard,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
@@ -24,6 +24,7 @@ interface Order {
   pickup_date:      string
   pickup_time_slot: string | null
   delivery_date:    string | null
+  delivery_time_slot: string | null
   is_express:       boolean
   subtotal:         number
   total_amount:     number
@@ -52,11 +53,14 @@ const STATUS_CONFIG: Record<string, {
 }> = {
   pending:          { label: 'Pending',          color: 'text-amber-700',   bg: 'bg-amber-100 dark:bg-amber-950/40 dark:text-amber-400',    icon: Clock },
   confirmed:        { label: 'Confirmed',        color: 'text-blue-700',    bg: 'bg-blue-100 dark:bg-blue-950/40 dark:text-blue-400',       icon: CheckCircle },
-  assigned_for_pickup:{ label: 'Delivery Partner Assigned',        color: 'text-blue-700',    bg: 'bg-blue-100 dark:bg-blue-950/40 dark:text-blue-400',       icon: Truck },
-  out_for_pickup:   { label: 'Partner On the Way for Pickup',        color: 'text-cyan-700',    bg: 'bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-400',       icon: Clock },
+  assigned_for_pickup:{ label: 'Partner Assigned',        color: 'text-blue-700',    bg: 'bg-blue-100 dark:bg-blue-950/40 dark:text-blue-400',       icon: Truck },
+  out_for_pickup:   { label: 'Partner En Route',        color: 'text-cyan-700',    bg: 'bg-cyan-100 dark:bg-cyan-950/40 dark:text-cyan-400',       icon: Clock },
   picked_up:        { label: 'Picked Up',        color: 'text-blue-700',  bg: 'bg-blue-100 dark:bg-blue-950/40 dark:text-blue-400', icon: Package },
-  processing:       { label: 'At Laundry',       color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-400', icon: Package },
-  ready_for_delivery:{ label: 'Item is ready to dispatch from laundry',   color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40 dark:text-teal-400',       icon: Package },
+  // Real order_statuses.code is 'at_laundry' — was mismatched to a
+  // never-used 'processing' key, so both the badge and the filter chip
+  // silently fell back to the raw status string / always-empty results.
+  at_laundry:       { label: 'At Laundry',       color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40 dark:text-indigo-400', icon: Package },
+  ready_for_delivery:{ label: 'Ready for Delivery',   color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40 dark:text-teal-400',       icon: Package },
   out_for_delivery: { label: 'Out for Delivery', color: 'text-emerald-700', bg: 'bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-400', icon: Truck },
   delivered:        { label: 'Delivered',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40 dark:text-green-400',    icon: CheckCircle },
   completed:        { label: 'Completed',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40 dark:text-green-400',    icon: CheckCircle },
@@ -72,12 +76,25 @@ const STATUS_FILTERS = [
   { value: '', label: 'All' },
   { value: 'pending',     label: 'Pending' },
   { value: 'confirmed',   label: 'Confirmed' },
-  { value: 'processing',  label: 'At Laundry' },
+  { value: 'at_laundry',  label: 'At Laundry' },
   { value: 'delivered',   label: 'Delivered' },
   // { value: 'completed',   label: 'Completed' },
   { value: 'cancelled',   label: 'Cancelled' },
   { value: 'failed',      label: 'Order Failed' },
   { value: 'rejected',    label: 'Rejected' },
+]
+
+const TIME_FILTERS = [
+  { value: '',    label: 'Any time' },
+  { value: '30d', label: 'Last 30 days' },
+  { value: '3m',  label: 'Last 3 months' },
+  { value: '6m',  label: 'Last 6 months' },
+]
+
+const PAYMENT_FILTERS = [
+  { value: '',       label: 'Any payment' },
+  { value: 'cod',    label: 'Cash on Delivery' },
+  { value: 'online', label: 'Online Payment' },
 ]
 
 function formatINR(n: number) {
@@ -94,11 +111,15 @@ function formatDate(d: string) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const cfg = STATUS_CONFIG[status] ?? { label: status, bg: 'bg-muted', color: 'text-foreground', icon: Package }
+  const cfg = STATUS_CONFIG[status] ?? { label: status.replace(/_/g, ' '), bg: 'bg-muted', color: 'text-foreground', icon: Package }
   const Icon = cfg.icon
   return (
-    <span className={cn('inline-flex max-w-[130px] flex-wrap items-center justify-center gap-1 rounded-lg px-2.5 py-1 text-center text-[11px] font-semibold leading-tight', cfg.bg, cfg.color)}>
-      <Icon className="h-3 w-3 shrink-0" /> {cfg.label}
+    <span
+      title={cfg.label}
+      className={cn('inline-flex max-w-[150px] items-center gap-1 whitespace-nowrap rounded-lg px-2.5 py-1 text-[11px] font-semibold leading-tight', cfg.bg, cfg.color)}
+    >
+      <Icon className="h-3 w-3 shrink-0" />
+      <span className="truncate">{cfg.label}</span>
     </span>
   )
 }
@@ -176,8 +197,11 @@ function OrderCard({
             )}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Calendar className="h-3.5 w-3.5 shrink-0" />
-              <span>Pickup: {formatDate(order.pickup_date)}</span>
-              {order.pickup_time_slot && <span className="text-muted-foreground/70">· {order.pickup_time_slot}</span>}
+              <span className="truncate whitespace-nowrap">
+                {isReviewable && order.delivery_date
+                  ? <>Delivered: {formatDate(order.delivery_date)}{order.delivery_time_slot && ` · ${order.delivery_time_slot}`}</>
+                  : <>Pickup: {formatDate(order.pickup_date)}{order.pickup_time_slot && ` · ${order.pickup_time_slot}`}</>}
+              </span>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {order.item_count} item{order.item_count !== 1 ? 's' : ''} · {order.service_count} service{order.service_count !== 1 ? 's' : ''}
@@ -223,7 +247,9 @@ function PageContent() {
   const [loadingMore,  setLoadingMore]  = useState(false)
   const [error,        setError]        = useState<string | null>(null)
   const searchParams = useSearchParams();
-  const [statusFilter, setStatusFilter] = useState(() => searchParams.get('status') ?? '');
+  const [statusFilter,  setStatusFilter]  = useState(() => searchParams.get('status') ?? '');
+  const [timeFilter,    setTimeFilter]    = useState(() => searchParams.get('time_range') ?? '');
+  const [paymentFilter, setPaymentFilter] = useState(() => searchParams.get('payment') ?? '');
   const [page,         setPage]         = useState(1)
   const [hasMore,      setHasMore]      = useState(false)
   const [total,        setTotal]        = useState(0)
@@ -234,12 +260,14 @@ function PageContent() {
   // Review modal state
   const [reviewTarget, setReviewTarget] = useState<ReviewState | null>(null)
 
-  const fetchOrders = useCallback(async (p: number, filter: string, replace: boolean) => {
+  const fetchOrders = useCallback(async (p: number, filter: string, time: string, payment: string, replace: boolean) => {
     if (p === 1) setLoading(true); else setLoadingMore(true)
     setError(null)
     try {
       const params = new URLSearchParams({ page: String(p), limit: '10' })
-      if (filter) params.set('status', filter)
+      if (filter)  params.set('status', filter)
+      if (time)    params.set('time_range', time)
+      if (payment) params.set('payment', payment)
       const res  = await fetch(`/api/customer/orders?${params}`, { credentials: 'include' })
       const json = await res.json()
       if (!json.success) throw new Error(json.error ?? 'Failed')
@@ -274,7 +302,10 @@ function PageContent() {
     }
   }, [])
 
-  useEffect(() => { setPage(1); fetchOrders(1, statusFilter, true) }, [statusFilter, fetchOrders])
+  useEffect(() => {
+    setPage(1)
+    fetchOrders(1, statusFilter, timeFilter, paymentFilter, true)
+  }, [statusFilter, timeFilter, paymentFilter, fetchOrders])
 
   const handleRateClick = async (order: Order) => {
     try {
@@ -300,7 +331,7 @@ function PageContent() {
   const handleReviewSaved = () => {
     // Refresh the rating shown for this order
     if (reviewTarget) {
-      fetchOrders(1, statusFilter, true)
+      fetchOrders(1, statusFilter, timeFilter, paymentFilter, true)
     }
     setReviewTarget(null)
   }
@@ -346,6 +377,42 @@ function PageContent() {
           ))}
         </div>
 
+        {/* Secondary filters: order time + payment method */}
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <div className="relative">
+            <Calendar className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <select
+              value={timeFilter}
+              onChange={e => {
+                setTimeFilter(e.target.value)
+                const url = new URL(window.location.href)
+                if (e.target.value) url.searchParams.set('time_range', e.target.value)
+                else url.searchParams.delete('time_range')
+                window.history.replaceState(null, '', url.toString())
+              }}
+              className="appearance-none rounded-full border border-border/50 bg-card py-1.5 pl-8 pr-7 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground focus:outline-none"
+            >
+              {TIME_FILTERS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          </div>
+          <div className="relative">
+            <CreditCard className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <select
+              value={paymentFilter}
+              onChange={e => {
+                setPaymentFilter(e.target.value)
+                const url = new URL(window.location.href)
+                if (e.target.value) url.searchParams.set('payment', e.target.value)
+                else url.searchParams.delete('payment')
+                window.history.replaceState(null, '', url.toString())
+              }}
+              className="appearance-none rounded-full border border-border/50 bg-card py-1.5 pl-8 pr-7 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground focus:outline-none"
+            >
+              {PAYMENT_FILTERS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          </div>
+        </div>
+
         {/* Content */}
         {loading ? (
           <div className="flex items-center justify-center py-20">
@@ -355,7 +422,7 @@ function PageContent() {
           <div className="rounded-2xl border border-destructive/30 bg-destructive/10 p-6 text-center">
             <AlertCircle className="mx-auto mb-2 h-8 w-8 text-destructive" />
             <p className="text-sm text-destructive">{error}</p>
-            <button type="button" onClick={() => fetchOrders(1, statusFilter, true)}
+            <button type="button" onClick={() => fetchOrders(1, statusFilter, timeFilter, paymentFilter, true)}
               className="mt-3 text-xs text-primary hover:underline">Try again</button>
           </div>
         ) : orders.length === 0 ? (
@@ -392,7 +459,7 @@ function PageContent() {
             {hasMore && (
               <div className="flex justify-center pt-2">
                 <button type="button"
-                  onClick={() => { const next = page + 1; setPage(next); fetchOrders(next, statusFilter, false) }}
+                  onClick={() => { const next = page + 1; setPage(next); fetchOrders(next, statusFilter, timeFilter, paymentFilter, false) }}
                   disabled={loadingMore}
                   className="flex items-center gap-2 rounded-xl border border-border/50 px-6 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-border hover:text-foreground disabled:opacity-50">
                   {loadingMore ? <><Loader2 className="h-4 w-4 animate-spin" /> Loading…</> : 'Load more orders'}
