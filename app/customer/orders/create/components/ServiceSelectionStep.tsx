@@ -278,6 +278,17 @@ function VariantSheet({
   onChange: (key: string, field: 'quantity' | 'remove', value: any, product: UnitProduct) => void
   onClose: () => void
 }) {
+  // Summary across this sheet's own variants, so the footer button can say
+  // exactly what closing it will keep — same math ProductCard already uses.
+  let totalQty = 0
+  let totalLine = 0
+  for (const v of allVariants) {
+    const sel = selections.get(variantKey(v))
+    if (!sel) continue
+    totalQty  += sel.quantity
+    totalLine += Math.round(effectiveUnitPrice(v, isExpressGlobal) * sel.quantity * 100) / 100
+  }
+
   return (
     <BottomSheet onClose={onClose}>
       <div className="flex items-center justify-between gap-3 px-5 pt-5 pb-3 border-b border-border/50">
@@ -318,6 +329,14 @@ function VariantSheet({
             </div>
           )
         })}
+      </div>
+      <div className="sticky bottom-0 border-t border-border/50 bg-background px-5 py-3">
+        <button type="button" onClick={onClose}
+          className="flex h-11 w-full items-center justify-center gap-1.5 rounded-xl bg-primary text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-colors hover:bg-primary/90">
+          {totalQty > 0
+            ? `Done · ${totalQty} item${totalQty > 1 ? 's' : ''} · ${formatINR(totalLine)}`
+            : 'Done'}
+        </button>
       </div>
     </BottomSheet>
   )
