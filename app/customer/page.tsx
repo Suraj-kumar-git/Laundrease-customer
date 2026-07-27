@@ -468,6 +468,21 @@ function useLocation() {
     )
   }, [])
 
+  // Guards the *automatic* initial request so it only ever fires once total,
+  // no matter which branch below triggers it. Without this, React Strict
+  // Mode's dev-only double-invoke of effects — or a browser (e.g. Safari)
+  // where permissions.query() rejects instead of resolving — could call
+  // request() twice, producing two distinct coords objects and making the
+  // provider list fetch (which depends on coords) run and visibly flicker
+  // twice. The manual "Try again" button calls `request` directly and is
+  // unaffected by this guard.
+  const autoRequestedRef = useRef(false)
+  const requestOnce = useCallback(() => {
+    if (autoRequestedRef.current) return
+    autoRequestedRef.current = true
+    request()
+  }, [request])
+
   useEffect(() => {
     let cancelled = false
     if (navigator.permissions?.query) {
@@ -478,15 +493,14 @@ function useLocation() {
           // Keep in sync if the user changes the permission from browser
           // settings while this tab stays open — no reload needed.
           status.onchange = () => { if (!cancelled) setPermission(status.state as LocationPermission) }
-          if (status.state !== 'denied') request()
+          if (status.state !== 'denied') requestOnce()
         })
-        .catch(() => request())
+        .catch(() => { if (!cancelled) requestOnce() })
     } else {
-      request()
+      requestOnce()
     }
     return () => { cancelled = true }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request])
+  }, [requestOnce])
 
   return { coords, permission, asking, request }
 }

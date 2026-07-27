@@ -15,6 +15,7 @@ interface CheckoutStepProps {
   orderState:             OrderFlowState
   onCouponApply:          (coupon: AppliedCoupon | null) => void
   onSpecialInstructions:  (val: string) => void
+  onCustomerGstin:        (val: string) => void
   onExpressToggle:        (isExpress: boolean, updatedServices: SelectedService[]) => void
   onEditServices:         () => void
   onSubmit:               (paymentMethod: string, walletAmount: number) => Promise<void>
@@ -43,7 +44,7 @@ function formatDate(d: string) {
 }
 
 export function CheckoutStep({
-  orderState, onCouponApply, onSpecialInstructions, onExpressToggle, onEditServices, onSubmit, isSubmitting,
+  orderState, onCouponApply, onSpecialInstructions, onCustomerGstin, onExpressToggle, onEditServices, onSubmit, isSubmitting,
 }: CheckoutStepProps) {
   const currentIsExpress    = orderState.selected_services.some(s => s.is_express)
   const hasAnyExpressCapable= orderState.selected_services.some(s => s.express_multiplier > 1)
@@ -86,6 +87,10 @@ export function CheckoutStep({
   // Instructions
   const [instructions,   setInstructions]   = useState(orderState.special_instructions ?? '')
   const [editingInstr,   setEditingInstr]   = useState(false)
+  // Customer GSTIN (optional, for B2B orders — hotels/hospitals claiming ITC)
+  const [gstin,          setGstin]          = useState(orderState.customer_gstin ?? '')
+  const [editingGstin,   setEditingGstin]   = useState(false)
+  const [gstinError,     setGstinError]     = useState<string | null>(null)
   // Estimated delivery date preview
   const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState<string | null>(null)
   const [estimateLoading,       setEstimateLoading]       = useState(false)
@@ -153,7 +158,16 @@ export function CheckoutStep({
     fetch('/api/customer/payments/gateway-info')
       .then(r => r.json()).then(j => { if (j.success) setGatewayInfo(j.data) }).catch(() => {})
       .finally(() => setGatewayLoading(false))
-  }, [])
+
+    // Pre-fill GSTIN from the saved profile, unless this checkout already has
+    // one set (e.g. navigating back to this step after entering it).
+    if (!orderState.customer_gstin) {
+      fetch('/api/customer/profile', { credentials: 'include' })
+        .then(r => r.json())
+        .then(j => { if (j.success && j.data.gstin) { setGstin(j.data.gstin); onCustomerGstin(j.data.gstin) } })
+        .catch(() => {})
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Provider availability (re-check on checkout mount) -------
   // A resumed cart can carry a provider selected days ago — re-verify here
@@ -483,6 +497,40 @@ export function CheckoutStep({
               className="w-full resize-none rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
           ) : (
             <p className="text-sm text-muted-foreground">{instructions || <span className="italic">None</span>}</p>
+          )}
+        </div>
+
+        {/* Customer GSTIN — optional, for B2B orders claiming ITC */}
+        <div className="rounded-xl border border-border/50 bg-card p-3">
+          <div className="mb-1.5 flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Receipt className="h-3.5 w-3.5 text-primary" />
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">GSTIN (optional)</span>
+            </div>
+            <button type="button" onClick={() => setEditingGstin(v => !v)}
+              className="text-xs text-primary hover:underline">
+              {editingGstin ? 'Done' : 'Edit'}
+            </button>
+          </div>
+          {editingGstin ? (
+            <>
+              <input value={gstin}
+                onChange={e => {
+                  const val = e.target.value.toUpperCase()
+                  setGstin(val)
+                  onCustomerGstin(val)
+                  setGstinError(
+                    val && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(val)
+                      ? 'Enter a valid GST number (e.g. 22AAAAA0000A1Z5)' : null
+                  )
+                }}
+                maxLength={15} placeholder="e.g. 22AAAAA0000A1Z5"
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
+              {gstinError && <p className="mt-1 text-xs text-destructive">{gstinError}</p>}
+              <p className="mt-1 text-xs text-muted-foreground">For hotels/hospitals/businesses claiming input tax credit.</p>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">{gstin || <span className="italic">None</span>}</p>
           )}
         </div>
 

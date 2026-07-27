@@ -36,9 +36,15 @@ export async function getOrCreateOrderInvoiceUrl(
     provider_name:        string | null
     provider_phone:       string | null
     provider_city:        string | null
+    provider_address_line1: string | null
+    provider_address_line2: string | null
+    provider_state:         string | null
+    provider_postal_code:   string | null
+    provider_gst_number:    string | null
     customer_name:        string
     customer_email:       string
     customer_phone:       string | null
+    customer_gstin:       string | null
   }>(
     `SELECT
        o.id, o.order_number, o.status, o.is_express,
@@ -53,9 +59,17 @@ export async function getOrCreateOrderInvoiceUrl(
        lp.business_name  AS provider_name,
        lp.contact_person_phone          AS provider_phone,
        lp.city           AS provider_city,
+       lp.address_line1  AS provider_address_line1,
+       lp.address_line2  AS provider_address_line2,
+       lp.state          AS provider_state,
+       lp.postal_code    AS provider_postal_code,
+       -- Only ever surfaced on the invoice when this order actually carries
+       -- GST (tax_amount > 0) — see the taxAmount > 0 branch below.
+       lp.gst_number     AS provider_gst_number,
        u.full_name       AS customer_name,
        u.email           AS customer_email,
-       u.phone           AS customer_phone
+       u.phone           AS customer_phone,
+       o.customer_gstin  AS customer_gstin
      FROM orders o
      JOIN users u ON u.id = o.customer_id
      LEFT JOIN laundry_profiles lp ON lp.id = o.laundry_profile_id
@@ -122,6 +136,27 @@ export async function getOrCreateOrderInvoiceUrl(
     [orderId]
   )
 
+  const subtotal  = parseFloat(order.subtotal)
+  const taxAmount = parseFloat(order.tax_amount)
+
+  // A GST-inclusive order is legally the individual laundry provider's own
+  // supply (their GSTIN, their liability) — not the platform's — so the
+  // invoice's "Supplier" section shows the provider's own business details
+  // only when this order actually carries GST. Non-GST orders keep the
+  // existing Laundrease-branded placeholder (InvoiceDocument's defaults)
+  // exactly as before, since nothing here changes their supplier fields.
+  const gstSupplierFields = taxAmount > 0 ? {
+    supplierName: order.provider_name,
+    supplierAddress: [order.provider_address_line1, order.provider_address_line2, order.provider_city]
+      .filter(Boolean).join(', ') || null,
+    supplierState: order.provider_state,
+    supplierGstin: order.provider_gst_number,
+    // The taxable (pre-GST) value — subtotal here is GST-inclusive, so this
+    // must be passed explicitly or InvoiceDocument would default it to the
+    // full inclusive subtotal and derive the wrong effective tax rate.
+    taxableAmount: Math.round((subtotal - taxAmount) * 100) / 100,
+  } : {}
+
   const invoiceData: InvoiceData = {
     useLogo: true,
     orderNumber: order.order_number,
@@ -142,10 +177,14 @@ export async function getOrCreateOrderInvoiceUrl(
     customerName: order.customer_name,
     customerEmail: order.customer_email,
     customerPhone: order.customer_phone ?? '',
-    subtotal: parseFloat(order.subtotal),
-    taxAmount: parseFloat(order.tax_amount),
+    // Only relevant for ITC claims on a GST-carrying order — a non-GST order
+    // has no tax to claim back, so the GSTIN is omitted from that invoice.
+    customerGstin: taxAmount > 0 ? order.customer_gstin : null,
+    subtotal,
+    taxAmount,
     discountAmount: parseFloat(order.discount_amount),
     totalAmount: parseFloat(order.total_amount),
+    ...gstSupplierFields,
     items: itemsRes.rows.map(r => ({
       label: r.label,
       quantity: r.quantity,

@@ -89,8 +89,16 @@ export function AddressProviderStep({
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
+  // One-shot guard so a duplicate effect invocation (React Strict Mode's
+  // dev-only double-invoke on mount, in particular) can't fire a second
+  // /api/customer/addresses request and re-run address/provider selection —
+  // which was visibly re-showing step 1 for a moment on the deep-link path.
+  const addressesFetchedRef = useRef(false)
+
   // Load addresses
   useEffect(() => {
+    if (addressesFetchedRef.current) return
+    addressesFetchedRef.current = true
     fetch('/api/customer/addresses', { credentials: 'include' })
       .then(r => r.json())
       .then(json => {
