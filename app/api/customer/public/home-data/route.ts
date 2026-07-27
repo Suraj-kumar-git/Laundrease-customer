@@ -10,6 +10,7 @@
 import { NextRequest } from 'next/server'
 import { query, queryOne } from '@/lib/db'
 import { resolveProfileImageUrl, getDocSignedUrl } from '@/lib/s3'
+import { getGstRate, applyGst } from '@/lib/gst'
 import { successResponse, serverErrorResponse } from '@/lib/api-response'
 
 // Haversine distance in km (SQL approximation — good enough for city-level sorting)
@@ -52,6 +53,8 @@ export async function GET(req: NextRequest) {
            lp.postal_code,
            -- Business logo the provider uploaded (preferred card image)
            lp.logo_url,
+           lp.has_gst,
+           lp.gst_inclusive_pricing,
            -- Profile image if set (S3 key or URL)
            u.profile_image  AS provider_image,
            -- Latest shop photo uploaded during registration (preferred card image)
@@ -97,6 +100,8 @@ export async function GET(req: NextRequest) {
            lp.postal_code,
            -- Business logo the provider uploaded (preferred card image)
            lp.logo_url,
+           lp.has_gst,
+           lp.gst_inclusive_pricing,
            u.profile_image  AS provider_image,
            (
              SELECT pd.s3_key FROM provider_documents pd
@@ -168,6 +173,12 @@ export async function GET(req: NextRequest) {
       config[row.key] = row.value
     }
 
+    // Teaser price shown before a customer opens a provider — must match
+    // what they'll actually see once they get to the shopping flow (see
+    // app/api/customer/laundry-providers/[id]/services/route.ts).
+    const anyGstInclusive = providersRes.rows.some(r => r.has_gst && r.gst_inclusive_pricing)
+    const gstRate = anyGstInclusive ? await getGstRate() : 0
+
     const providers = await Promise.all(providersRes.rows.map(async r => {
       // Prefer the provider's uploaded business logo; then the shop photo
       // uploaded during registration; fall back to the account owner's
@@ -176,6 +187,7 @@ export async function GET(req: NextRequest) {
       if (r.logo_url)       image = await resolveProfileImageUrl(r.logo_url)
       if (!image && r.shop_photo_key) image = await getDocSignedUrl(r.shop_photo_key)
       if (!image)           image = await resolveProfileImageUrl(r.provider_image)
+      const gstInclusive = r.has_gst && r.gst_inclusive_pricing
       return {
         id:           r.id,
         name:         r.business_name,
@@ -183,7 +195,9 @@ export async function GET(req: NextRequest) {
         rating:       parseFloat(r.rating) || 0,
         rating_count: r.rating_count || 0,
         image,
-        min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
+        min_price_kg: r.min_price_kg
+          ? (gstInclusive ? applyGst(parseFloat(r.min_price_kg), gstRate) : parseFloat(r.min_price_kg))
+          : null,
         distance_km:  r.distance_km  ? parseFloat(r.distance_km)  : null,
         postal_code:  r.postal_code,
       }

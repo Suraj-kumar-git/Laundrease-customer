@@ -91,6 +91,8 @@ export function CheckoutStep({
   const [gstin,          setGstin]          = useState(orderState.customer_gstin ?? '')
   const [editingGstin,   setEditingGstin]   = useState(false)
   const [gstinError,     setGstinError]     = useState<string | null>(null)
+  // Collapsed "GST & other charges" row in the price breakdown
+  const [otherFeesOpen,  setOtherFeesOpen]  = useState(false)
   // Estimated delivery date preview
   const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState<string | null>(null)
   const [estimateLoading,       setEstimateLoading]       = useState(false)
@@ -369,6 +371,12 @@ export function CheckoutStep({
   }
 
   const expressFeeRow = feeBreakdown?.fees.find(f => f.code === 'express_surcharge')
+  // Price breakdown collapses to 4 rows: Subtotal, Delivery Fee (its own
+  // logistics cost), Discounts, and everything else (platform/convenience
+  // fee, express surcharge, GST on fees, …) bundled under one expandable row.
+  const deliveryFeeRow = feeBreakdown?.fees.find(f => f.code === 'delivery_fee')
+  const otherFees = feeBreakdown?.fees.filter(f => f.code !== 'delivery_fee') ?? []
+  const otherFeesTotal = otherFees.reduce((s, f) => s + f.amount, 0)
 
   return (
     <div className="grid gap-6 lg:grid-cols-5">
@@ -558,16 +566,40 @@ export function CheckoutStep({
                   <span className="font-medium text-foreground">{formatINR(subtotal)}</span>
                 </span>
               </div>
-              {feeBreakdown?.fees.map(fee => (
-                <div key={fee.code} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">{fee.display_name}</span>
-                  </div>
-                  <span className={cn('font-medium', fee.is_free ? 'text-emerald-600' : 'text-foreground')}>
-                    {fee.is_free ? 'FREE' : formatINR(fee.amount)}
+              {deliveryFeeRow && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{deliveryFeeRow.display_name}</span>
+                  <span className={cn('font-medium', deliveryFeeRow.is_free ? 'text-emerald-600' : 'text-foreground')}>
+                    {deliveryFeeRow.is_free ? 'FREE' : formatINR(deliveryFeeRow.amount)}
                   </span>
                 </div>
-              ))}
+              )}
+              {otherFees.length > 0 && (
+                <div>
+                  <button type="button" onClick={() => setOtherFeesOpen(v => !v)}
+                    className="flex w-full items-center justify-between">
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      GST & other charges
+                      {otherFeesOpen
+                        ? <ChevronUp className="h-3 w-3" />
+                        : <ChevronDown className="h-3 w-3" />}
+                    </span>
+                    <span className="font-medium text-foreground">{formatINR(otherFeesTotal)}</span>
+                  </button>
+                  {otherFeesOpen && (
+                    <div className="mt-1.5 space-y-1.5 border-l-2 border-border/40 pl-3">
+                      {otherFees.map(fee => (
+                        <div key={fee.code} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">{fee.display_name}</span>
+                          <span className={cn('font-medium', fee.is_free ? 'text-emerald-600' : 'text-foreground')}>
+                            {fee.is_free ? 'FREE' : formatINR(fee.amount)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {hasAnyExpressCapable && (
                 <div className="flex items-center justify-between rounded-lg border border-border/40 px-3 py-2">
                   <div className="flex items-center gap-2">
@@ -595,12 +627,6 @@ export function CheckoutStep({
                   </button>
                 </div>
               )}
-              {/* {feeBreakdown && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">GST ({Math.round((feeBreakdown.tax_rate ?? 0.18) * 100)}%)</span>
-                  <span className="font-medium text-foreground">{formatINR(feeBreakdown.tax_amount)}</span>
-                </div>
-              )} */}
               {discountAmount > 0 && (
                 <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
                   <span className="flex items-center gap-1">

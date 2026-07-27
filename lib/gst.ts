@@ -31,3 +31,17 @@ export async function getSubscriptionGstMode(): Promise<SubscriptionGstMode> {
   )
   return row?.value?.mode === 'exclusive' ? 'exclusive' : 'inclusive'
 }
+
+// ─── Order-fee GST (Part C) ──────────────────────────────────────────────────
+// Laundrease's own GSTIN — the fee-level GST (order_fee_config-driven fees,
+// never delivery fee) is Laundrease's own liability, not the provider's, so
+// invoices attribute it separately (see lib/order-invoice.ts's feeGst block).
+// Returns null when the admin hasn't filled it in yet — callers should show
+// an explicit "not configured" state rather than a fabricated placeholder.
+
+export async function getPlatformGstin(): Promise<string | null> {
+  const row = await queryOne<{ value: string }>(
+    `SELECT value FROM platform_config WHERE key = 'platform_gstin'`
+  )
+  return row?.value?.trim() || null
+}

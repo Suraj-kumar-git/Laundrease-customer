@@ -4,6 +4,7 @@ import { query } from '@/lib/db'
 import { successResponse, errorResponse, serverErrorResponse } from '@/lib/api-response'
 import { PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL } from '@/lib/subscription'
 import { resolveProfileImageUrl } from '@/lib/s3'
+import { getGstRate, applyGst } from '@/lib/gst'
 
 // GET /api/customer/laundry-providers/search
 // Query params: ?location=411045 (pincode or city)
@@ -87,6 +88,8 @@ export async function GET(req: NextRequest) {
              lp.operating_hours,
              lp.is_verified,
              lp.logo_url,
+             lp.has_gst,
+             lp.gst_inclusive_pricing,
              ${minPriceKgExpr} AS min_price_kg,
              ${NORMALIZED_HOURS_SUBQUERY}
            FROM laundry_profiles lp
@@ -116,7 +119,15 @@ export async function GET(req: NextRequest) {
       [isPincode ? location : `%${location}%`]
     )
 
-    const providers = await Promise.all(result.rows.map(async r => ({
+    // Teaser price shown before a customer opens a provider — must match
+    // what they'll actually see once they get to the shopping flow (see
+    // app/api/customer/laundry-providers/[id]/services/route.ts).
+    const anyGstInclusive = result.rows.some(r => r.has_gst && r.gst_inclusive_pricing)
+    const gstRate = anyGstInclusive ? await getGstRate() : 0
+
+    const providers = await Promise.all(result.rows.map(async r => {
+      const gstInclusive = r.has_gst && r.gst_inclusive_pricing
+      return {
       id: r.id,
       business_name: r.business_name,
       business_address: r.business_address,
@@ -130,9 +141,12 @@ export async function GET(req: NextRequest) {
       services_offered: r.services_offered ?? [],
       operating_hours: normalizeOperatingHours(r.normalized_hours ?? r.operating_hours),
       is_verified: r.is_verified,
-      min_price_kg: r.min_price_kg ? parseFloat(r.min_price_kg) : null,
+      min_price_kg: r.min_price_kg
+        ? (gstInclusive ? applyGst(parseFloat(r.min_price_kg), gstRate) : parseFloat(r.min_price_kg))
+        : null,
       logo_url: await resolveProfileImageUrl(r.logo_url),
-    })))
+      }
+    }))
 
     return successResponse({ providers })
   } catch (error) {
