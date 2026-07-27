@@ -218,11 +218,12 @@ export async function POST(req: NextRequest) {
         [subtotal, body.is_express, distanceKm, body.laundry_profile_id]
       )
       const feeRows: Array<{
-        code:         string
-        display_name: string
-        charge_type:  string
-        amount:       number
-        is_free:      boolean
+        code:          string
+        display_name:  string
+        charge_type:   string
+        amount:        number
+        is_free:       boolean
+        taxable_base?: number
       }> = feesRes.rows[0].fees ?? []
       const feesTotal = feeRows.reduce((s, f) => s + parseFloat(String(f.amount)), 0)
 
@@ -439,7 +440,10 @@ export async function POST(req: NextRequest) {
             feeCodeToKind(fee.code),   // valid CHECK constraint value
             fee.amount,
             fee.display_name,          // display_name from order_fee_config
-            JSON.stringify({ fee_code: fee.code, is_free: fee.is_free }),
+            JSON.stringify({
+              fee_code: fee.code, is_free: fee.is_free,
+              ...(fee.taxable_base != null ? { taxable_base: fee.taxable_base } : {}),
+            }),
           ]
         )
       }
