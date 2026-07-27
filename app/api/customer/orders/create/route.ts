@@ -6,6 +6,7 @@ import { calculateEstimatedDeliveryDate } from '@/lib/delivery-estimate'
 import { getActiveGateway } from '@/lib/payment'
 import { getMixedLoadProductTypeId } from '@/lib/product-types'
 import { checkProviderOrderEligibility } from '@/lib/subscription'
+import { getGstRate } from '@/lib/gst'
 import { randomUUID } from 'crypto'
 import {
   successResponse, errorResponse, validationError,
@@ -40,6 +41,7 @@ interface CreateOrderBody {
   wallet_amount?:        number   // amount to use from wallet
   coupon_code?:          string
   special_instructions?: string
+  customer_gstin?:       string   // optional — B2B customers (hotels/hospitals) claiming ITC
   draft_order_number?:   string   // idempotency key from cart
 }
 
@@ -71,6 +73,9 @@ export async function POST(req: NextRequest) {
   if (!body.pickup_time_slot)                  errors.pickup_time_slot   = 'Pickup time slot is required'
   if (!body.services?.length)                  errors.services           = 'At least one service is required'
   if (!body.payment_method)                    errors.payment_method     = 'Payment method is required'
+  const customerGstin = body.customer_gstin?.trim().toUpperCase() || null
+  if (customerGstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(customerGstin))
+    errors.customer_gstin = 'Enter a valid GST number (e.g. 22AAAAA0000A1Z5)'
   if (Object.keys(errors).length > 0) return validationError(errors)
 
   for (const svc of body.services) {
@@ -142,7 +147,8 @@ export async function POST(req: NextRequest) {
 
       // ---- Provider ---------------------------------------------------------
       const providerRes = await client.query(
-        `SELECT lp.id, lp.business_name, lp.latitude, lp.longitude
+        `SELECT lp.id, lp.business_name, lp.latitude, lp.longitude,
+                lp.has_gst, lp.gst_inclusive_pricing
          FROM laundry_profiles lp
          WHERE lp.id = $1 AND lp.status = 'active' AND lp.is_verified = TRUE`,
         [body.laundry_profile_id]
@@ -312,13 +318,15 @@ export async function POST(req: NextRequest) {
         Math.round((subtotal + feesTotal - discountAmount) * 100) / 100
       )
 
-      // GST is just another row from order_fee_config (already included in
-      // feesTotal/totalAmount above) — pulled out separately so it can be
-      // stored in orders.tax_amount for invoices/order-detail breakdowns
-      // that read the column directly instead of the adjustments list.
-      const taxAmount = feeRows
-        .filter(f => f.code === 'gst')
-        .reduce((s, f) => s + parseFloat(String(f.amount)), 0)
+      // Unlike a checkout fee, GST here is a portion already embedded in the
+      // subtotal (the provider's GST-inclusive-pricing toggle folds it into
+      // each service's price at display time — see the customer-facing
+      // services endpoint) — so it's reverse-derived from the subtotal, not
+      // added on top. Purely informational: it feeds orders.tax_amount for
+      // the invoice's taxable-value/GST breakdown; total_amount is unaffected.
+      const taxAmount = (provider.has_gst && provider.gst_inclusive_pricing)
+        ? Math.round((subtotal - subtotal / (1 + (await getGstRate()) / 100)) * 100) / 100
+        : 0
 
       // ---- Wallet -----------------------------------------------------------
       let effectiveWalletAmount = 0
@@ -380,15 +388,15 @@ export async function POST(req: NextRequest) {
            pickup_date, pickup_time_slot, special_instructions,
            is_express, subtotal, tax_amount, discount_amount,
            total_amount, payment_status, payment_method, assignment_status,
-           estimated_delivery_date
-         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'unassigned',$17)
+           estimated_delivery_date, customer_gstin
+         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'unassigned',$17,$18)
          RETURNING id, public_id`,
         [
           orderNumber, userId, body.laundry_profile_id,
           body.pickup_address, body.delivery_address ?? body.pickup_address, pickupPincode,
           body.pickup_date, body.pickup_time_slot, body.special_instructions ?? null,
           body.is_express, subtotal, taxAmount, discountAmount, totalAmount,
-          paymentStatus, paymentMethod, estimatedDeliveryDate,
+          paymentStatus, paymentMethod, estimatedDeliveryDate, customerGstin,
         ]
       )
       const orderId = orderRes.rows[0].id

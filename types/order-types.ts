@@ -183,6 +183,7 @@ export interface OrderFlowState {
   applied_coupon?: AppliedCoupon
   payment_method?: string
   special_instructions?: string
+  customer_gstin?: string
   order_summary?: OrderSummary
   // Post-submit
   order_id?: string

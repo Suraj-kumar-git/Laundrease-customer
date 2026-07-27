@@ -267,6 +267,13 @@ function PageContent() {
 
   // Stored for resuming after modal decision
   const pendingCartData = useRef<any>(null)
+  // One-shot guard: this effect depends on [user, resumeMode], and `user`
+  // can still legitimately flip from null -> the real user object once auth
+  // resolves — but once we've actually run the cart check, a duplicate
+  // invocation (React Strict Mode's dev-only double-invoke of effects, or
+  // any other re-render that doesn't represent a real navigation) must not
+  // re-fetch and re-flash the loading state a second time.
+  const cartCheckedRef = useRef(false)
 
   useEffect(() => {
     if (!authLoading && !user)
@@ -281,6 +288,8 @@ function PageContent() {
   // ---- On mount: check for existing cart ----------------------------------
   useEffect(() => {
     if (!user) return
+    if (cartCheckedRef.current) return
+    cartCheckedRef.current = true
     const checkCart = async () => {
       setCartLoading(true)
       try {
@@ -454,6 +463,7 @@ function PageContent() {
           wallet_amount:         walletAmount,
           coupon_code:           state.applied_coupon?.code,
           special_instructions:  state.special_instructions,
+          customer_gstin:        state.customer_gstin,
           // Idempotency key — if API already created this order, returns existing
           draft_order_number:    state.draft_order_number,
         }),
@@ -653,6 +663,7 @@ function PageContent() {
                   orderState={state}
                   onCouponApply={coupon => setState(prev => ({ ...prev, applied_coupon: coupon ?? undefined }))}
                   onSpecialInstructions={val => setState(prev => ({ ...prev, special_instructions: val }))}
+                  onCustomerGstin={val => setState(prev => ({ ...prev, customer_gstin: val }))}
                   onExpressToggle={handleExpressToggle}
                   onEditServices={() => setState(prev => ({ ...prev, step: 2 }))}
                   onSubmit={handleSubmitOrder}

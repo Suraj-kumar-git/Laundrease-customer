@@ -26,6 +26,12 @@ export interface SubscriptionInvoiceData {
   providerAddress:  string | null
   commissionType:   string
   commissionValue:  string
+  // GST breakdown — only rendered when taxAmount > 0. amountPaid is always
+  // the GST-inclusive total actually charged; taxableAmount + taxAmount
+  // together add up to it.
+  taxableAmount?:   number
+  taxAmount?:       number
+  gstRate?:         number
 }
 
 const logoUrl = process.env.NEXT_PUBLIC_S3_LOGO_URL
@@ -102,6 +108,7 @@ export function SubscriptionInvoiceDocument({ data, ...docProps }: SubscriptionI
   const commissionStr = data.commissionType === 'percent'
     ? `${data.commissionValue}% per order`
     : `Rs ${data.commissionValue} per order`
+  const hasGst = !data.isTrial && (data.taxAmount ?? 0) > 0
 
   return (
     <Document title={`Subscription Invoice ${data.invoiceNumber}`} {...docProps}>
@@ -168,9 +175,17 @@ export function SubscriptionInvoiceDocument({ data, ...docProps }: SubscriptionI
               <Text style={s.tdSub}>Commission: {commissionStr} - Period: {fmtDate(data.startsAt)} to {fmtDate(data.endsAt)}</Text>
             </View>
             <Text style={[s.td, s.colAmt]}>
-              {data.isTrial ? 'Free trial' : fmt(data.amountPaid)}
+              {data.isTrial ? 'Free trial' : fmt(hasGst ? data.taxableAmount! : data.amountPaid)}
             </Text>
           </View>
+          {hasGst && (
+            <View style={s.tRow}>
+              <View style={s.colDesc}>
+                <Text style={s.td}>GST ({data.gstRate}%)</Text>
+              </View>
+              <Text style={[s.td, s.colAmt]}>{fmt(data.taxAmount!)}</Text>
+            </View>
+          )}
           <View style={s.totalRow}>
             <Text style={s.totalLabel}>Total Paid</Text>
             <Text style={s.totalAmt}>{data.isTrial ? 'Rs 0.00' : fmt(data.amountPaid)}</Text>

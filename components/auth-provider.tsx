@@ -50,6 +50,20 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
+// Signed S3 URLs (see resolveProfileImageUrl) carry a fresh signature +
+// expiry query string on every single call, even when the underlying image
+// is unchanged — comparing raw avatar strings would make two fetches of the
+// exact same user always look "different". Comparing just the pathname
+// avoids that false-positive while still detecting a genuinely new photo.
+function avatarIdentity(url?: string): string | undefined {
+  if (!url) return url
+  try { return new URL(url).pathname } catch { return url }
+}
+function usersEquivalent(a: NonNullable<User>, b: NonNullable<User>): boolean {
+  return JSON.stringify({ ...a, avatar: avatarIdentity(a.avatar) })
+      === JSON.stringify({ ...b, avatar: avatarIdentity(b.avatar) })
+}
+
 function buildUser(u: any): NonNullable<User> {
   return {
     id:            String(u.id),
@@ -153,7 +167,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // object, which retriggers any effect keyed on `user` elsewhere in
           // the app (e.g. the order-create page's cart check), causing a
           // visible flash of re-fetched/re-rendered content on every page.
-          setUser(prev => (prev && JSON.stringify(prev) === JSON.stringify(serverUser)) ? prev : serverUser)
+          setUser(prev => (prev && usersEquivalent(prev, serverUser)) ? prev : serverUser)
           localStorage.setItem("user", JSON.stringify(serverUser))
         }
       } else if (res.status === 401 || res.status === 403) {
