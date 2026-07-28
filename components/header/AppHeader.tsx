@@ -370,8 +370,14 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -16 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
-              // top-14 = header height; max-h = viewport minus header; overflow-y-auto for scroll
-              className="fixed left-0 right-0 top-14 z-40 max-h-[calc(100vh-3.5rem)] overflow-y-auto border-b border-border/50 bg-background shadow-xl lg:hidden"
+              // top-14 = header height; max-h = viewport minus header; overflow-y-auto for scroll.
+              // dvh (not vh) — iOS Safari's address bar doesn't shrink 100vh
+              // when visible, so a vh-based max-height can be TALLER than
+              // what's actually on screen: the box never becomes scrollable
+              // (nothing overflows it from the DOM's point of view) even
+              // though the real visible viewport clips the bottom of it —
+              // exactly how Log Out was going missing on iPhone.
+              className="fixed left-0 right-0 top-14 z-40 max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-b border-border/50 bg-background shadow-xl lg:hidden"
             >
               {/* User info banner (logged in) */}
               {user && (
