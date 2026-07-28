@@ -8,13 +8,13 @@ import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ShoppingCart, X, Loader2, Trash2, ArrowRight,
-  ShoppingBag, RefreshCw, MapPin, Calendar,
+  ShoppingBag, RefreshCw, MapPin, Calendar, Plus, Minus, AlertTriangle,
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
 import { useCart } from '@/components/cart-provider'
-import { serverItemsToCartLineItems } from '@/lib/cart-store'
+import { serverItemsToCartLineItems, makeCartItemKey } from '@/lib/cart-store'
 
 interface CartItem {
   cart_item_id:      number
@@ -63,6 +63,39 @@ function timeAgo(iso: string) {
   return `${Math.floor(hrs / 24)}d ago`
 }
 
+// Compact -/value/+ control used by every cart row (guest and signed-in
+// alike). Decrementing past the floor (1 unit / 0.5kg) is the caller's cue
+// to open the remove-confirmation modal instead of going to 0 silently.
+function QtyStepper({
+  displayValue, onDecrement, onIncrement, disabled,
+}: {
+  displayValue: string
+  onDecrement: () => void
+  onIncrement: () => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex shrink-0 items-center gap-1.5">
+      <button type="button" onClick={onDecrement} disabled={disabled}
+        className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive disabled:opacity-40">
+        <Minus className="h-3 w-3" />
+      </button>
+      <span className="w-9 text-center text-xs font-semibold text-foreground">{displayValue}</span>
+      <button type="button" onClick={onIncrement} disabled={disabled}
+        className="flex h-6 w-6 items-center justify-center rounded-full border border-border/60 text-muted-foreground transition-colors hover:border-primary/50 hover:text-primary disabled:opacity-40">
+        <Plus className="h-3 w-3" />
+      </button>
+    </div>
+  )
+}
+
+interface PendingRemoval {
+  scope: 'guest' | 'server'
+  key?: string       // guest cart item key (product_type_id_service_id)
+  itemId?: number    // server cart_item_id
+  label: string       // shown in the confirm modal
+}
+
 export function CartSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router   = useRouter()
   const { user } = useAuth()
@@ -71,6 +104,8 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
     items:    guestItems,
     subtotal: guestSubtotal,
     clear:    clearGuestCart,
+    updateItem: updateGuestItem,
+    removeItem: removeGuestItem,
     syncFromServer,
     placeOrder,
   } = useCart()
@@ -78,6 +113,9 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
   const [items,    setItems]    = useState<CartItem[]>([])
   const [loading,  setLoading]  = useState(false)
   const [clearing, setClearing] = useState(false)
+  // Row being mutated (server cart only — guest updates are instant/local)
+  const [busyItemId, setBusyItemId]  = useState<number | null>(null)
+  const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null)
 
   const fetchCart = useCallback(async () => {
     if (!user) return
@@ -119,6 +157,42 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
   const handleContinue = () => {
     onClose()
     router.push('/customer/orders/create?resume=1')
+  }
+
+  // Server-cart item mutations — the DB trigger chain (see scripts/03-create-
+  // function.sql: trg_ci_recompute_services -> trg_cis_compute_line_total_upd
+  // -> trg_cis_recalc_totals) recomputes line_total/subtotal automatically,
+  // so this route is a plain UPDATE/DELETE; refetch afterwards for the
+  // authoritative numbers rather than re-deriving them client-side.
+  const updateServerItemQty = async (itemId: number, field: 'quantity' | 'weight_kg', value: number) => {
+    setBusyItemId(itemId)
+    try {
+      await fetch(`/api/customer/cart/items/${itemId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        credentials: 'include', body: JSON.stringify({ [field]: value }),
+      })
+      await fetchCart()
+    } catch { /* silent */ }
+    finally { setBusyItemId(null) }
+  }
+
+  const removeServerItem = async (itemId: number) => {
+    setBusyItemId(itemId)
+    try {
+      await fetch(`/api/customer/cart/items/${itemId}`, { method: 'DELETE', credentials: 'include' })
+      await fetchCart()
+    } catch { /* silent */ }
+    finally { setBusyItemId(null) }
+  }
+
+  const confirmRemoval = async () => {
+    if (!pendingRemoval) return
+    if (pendingRemoval.scope === 'guest' && pendingRemoval.key) {
+      removeGuestItem(pendingRemoval.key)
+    } else if (pendingRemoval.scope === 'server' && pendingRemoval.itemId != null) {
+      await removeServerItem(pendingRemoval.itemId)
+    }
+    setPendingRemoval(null)
   }
 
   // Group items by service
@@ -199,37 +273,50 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-4 p-4">
+                  <div className="space-y-3 p-3.5">
                     <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-xs text-amber-700 dark:text-amber-400">
                       You&apos;re browsing as a guest — sign in when you&apos;re ready to place this order.
                     </div>
 
                     {Object.entries(guestGrouped).map(([serviceName, serviceItems]) => (
                       <div key={serviceName} className="overflow-hidden rounded-xl border border-border/50 bg-card">
-                        <div className="border-b border-border/40 bg-muted/30 px-4 py-2">
+                        <div className="border-b border-border/40 bg-muted/30 px-3.5 py-1.5">
                           <p className="text-xs font-semibold text-muted-foreground">{serviceName}</p>
                         </div>
                         <div className="divide-y divide-border/30">
-                          {serviceItems.map(item => (
-                            <div key={`${item.product_type_id}-${item.service_id}`} className="flex items-center gap-3 px-4 py-3">
-                              <span className="text-lg">{item.icon ?? '🧺'}</span>
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm font-medium text-foreground">{item.product_type_name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {(item.pricing_model === 'per_kg' && item.weight_kg != null) ? `${item.weight_kg} kg` : `×${item.quantity}`}
-                                  {item.is_express && <span className="ml-1 text-amber-600">· Express</span>}
-                                </p>
+                          {serviceItems.map(item => {
+                            const isPerKg = item.pricing_model === 'per_kg' && item.weight_kg != null
+                            const key = makeCartItemKey(item.product_type_id, item.service_id)
+                            const step = isPerKg ? 0.5 : 1
+                            const atFloor = isPerKg ? item.weight_kg <= 0.5 : item.quantity <= 1
+                            const field: 'quantity' | 'weight_kg' = isPerKg ? 'weight_kg' : 'quantity'
+                            const currentVal = isPerKg ? item.weight_kg : item.quantity
+                            return (
+                              <div key={`${item.product_type_id}-${item.service_id}`} className="flex items-center gap-2.5 px-3.5 py-2">
+                                <span className="shrink-0 text-base">{item.icon ?? '🧺'}</span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-sm font-medium text-foreground">{item.product_type_name}</p>
+                                  {item.is_express && <span className="text-[10px] font-medium text-amber-600">Express</span>}
+                                </div>
+                                <QtyStepper
+                                  displayValue={isPerKg ? `${item.weight_kg}kg` : String(item.quantity)}
+                                  onDecrement={() => {
+                                    if (atFloor) setPendingRemoval({ scope: 'guest', key, label: item.product_type_name })
+                                    else updateGuestItem(key, field, Math.round((currentVal - step) * 100) / 100)
+                                  }}
+                                  onIncrement={() => updateGuestItem(key, field, Math.round((currentVal + step) * 100) / 100)}
+                                />
+                                <span className="shrink-0 text-right text-sm">
+                                  {item.mrp && item.mrp > item.unit_price && (
+                                    <span className="block text-[10px] text-muted-foreground line-through">
+                                      {formatINR(item.mrp * (isPerKg ? item.weight_kg : item.quantity))}
+                                    </span>
+                                  )}
+                                  <span className="font-semibold text-foreground">{formatINR(item.line_total)}</span>
+                                </span>
                               </div>
-                              <span className="shrink-0 text-right text-sm">
-                                {item.mrp && item.mrp > item.unit_price && (
-                                  <span className="block text-xs text-muted-foreground line-through">
-                                    {formatINR(item.mrp * (item.pricing_model === 'per_kg' ? item.weight_kg : item.quantity))}
-                                  </span>
-                                )}
-                                <span className="font-semibold text-foreground">{formatINR(item.line_total)}</span>
-                              </span>
-                            </div>
-                          ))}
+                            )
+                          })}
                         </div>
                       </div>
                     ))}
@@ -254,7 +341,7 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
                   </button>
                 </div>
               ) : (
-                <div className="space-y-4 p-4">
+                <div className="space-y-3 p-3.5">
                   {/* Progress summary */}
                   <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
                     <div className="flex items-center justify-between text-xs">
@@ -286,25 +373,39 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
                   {/* Items grouped by service */}
                   {Object.entries(grouped).map(([serviceName, serviceItems]) => (
                     <div key={serviceName} className="overflow-hidden rounded-xl border border-border/50 bg-card">
-                      <div className="border-b border-border/40 bg-muted/30 px-4 py-2">
+                      <div className="border-b border-border/40 bg-muted/30 px-3.5 py-1.5">
                         <p className="text-xs font-semibold text-muted-foreground">{serviceName}</p>
                       </div>
                       <div className="divide-y divide-border/30">
-                        {serviceItems.map(item => (
-                          <div key={item.cart_item_id} className="flex items-center gap-3 px-4 py-3">
-                            <span className="text-lg">{item.icon ?? '🧺'}</span>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-sm font-medium text-foreground">{item.product_type_name}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {(item.pricing_model === 'per_kg' && item.weight_kg != null) ? `${item.weight_kg} kg` : `×${item.quantity}`}
-                                {item.is_express && <span className="ml-1 text-amber-600">· Express</span>}
-                              </p>
+                        {serviceItems.map(item => {
+                          const isPerKg = item.pricing_model === 'per_kg' && item.weight_kg != null
+                          const step = isPerKg ? 0.5 : 1
+                          const currentVal = isPerKg ? (item.weight_kg ?? 0) : item.quantity
+                          const atFloor = currentVal <= step
+                          const field: 'quantity' | 'weight_kg' = isPerKg ? 'weight_kg' : 'quantity'
+                          const busy = busyItemId === item.cart_item_id
+                          return (
+                            <div key={item.cart_item_id} className="flex items-center gap-2.5 px-3.5 py-2">
+                              <span className="shrink-0 text-base">{item.icon ?? '🧺'}</span>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-sm font-medium text-foreground">{item.product_type_name}</p>
+                                {item.is_express && <span className="text-[10px] font-medium text-amber-600">Express</span>}
+                              </div>
+                              <QtyStepper
+                                displayValue={isPerKg ? `${item.weight_kg}kg` : String(item.quantity)}
+                                disabled={busy}
+                                onDecrement={() => {
+                                  if (atFloor) setPendingRemoval({ scope: 'server', itemId: item.cart_item_id, label: item.product_type_name })
+                                  else updateServerItemQty(item.cart_item_id, field, Math.round((currentVal - step) * 100) / 100)
+                                }}
+                                onIncrement={() => updateServerItemQty(item.cart_item_id, field, Math.round((currentVal + step) * 100) / 100)}
+                              />
+                              <span className="shrink-0 w-16 text-right text-sm font-semibold text-foreground">
+                                {busy ? <Loader2 className="ml-auto h-3.5 w-3.5 animate-spin text-muted-foreground" /> : formatINR(item.line_total)}
+                              </span>
                             </div>
-                            <span className="shrink-0 text-sm font-semibold text-foreground">
-                              {formatINR(item.line_total)}
-                            </span>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     </div>
                   ))}
@@ -352,6 +453,37 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
                 </p>
               </div>
             )}
+          </motion.div>
+        </>
+      )}
+
+      {/* Remove-item confirmation */}
+      {pendingRemoval && (
+        <>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setPendingRemoval(null)} className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm" />
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
+            transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+            className="fixed inset-x-4 bottom-4 z-[60] mx-auto max-w-sm rounded-2xl border border-border/50 bg-background p-5 shadow-2xl sm:inset-x-auto sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:-translate-x-1/2 sm:-translate-y-1/2">
+            <div className="mb-3 flex items-center gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <AlertTriangle className="h-4.5 w-4.5" />
+              </div>
+              <h3 className="text-sm font-bold text-foreground">Remove item?</h3>
+            </div>
+            <p className="mb-4 text-sm text-muted-foreground">
+              Remove <span className="font-medium text-foreground">{pendingRemoval.label}</span> from your cart?
+            </p>
+            <div className="flex gap-3">
+              <button type="button" onClick={() => setPendingRemoval(null)}
+                className="flex-1 rounded-xl border border-border/50 py-2.5 text-sm font-medium text-muted-foreground hover:bg-muted">
+                Cancel
+              </button>
+              <button type="button" onClick={confirmRemoval}
+                className="flex-1 rounded-xl bg-destructive py-2.5 text-sm font-semibold text-destructive-foreground hover:bg-destructive/90">
+                Remove
+              </button>
+            </div>
           </motion.div>
         </>
       )}

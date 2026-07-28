@@ -185,16 +185,20 @@ export function CheckoutStep({
       .catch(() => {})
   }, [providerId])
 
-  // ---- Available coupons: re-fetch on subtotal or provider change ----------
-  // This ensures the ineligible_reason ("Add ₹X more" / "Only valid with X") stays accurate
+  // ---- Available coupons: re-fetch on subtotal, provider, or address change --
+  // This ensures the ineligible_reason ("Add ₹X more" / "Only valid with X")
+  // stays accurate, and address_id lets the backend hide coupons from
+  // providers that don't serve this customer's area at all (not just mark
+  // them ineligible).
   useEffect(() => {
     if (subtotal <= 0) return
     const providerParam = providerId ? `&provider_id=${providerId}` : ''
-    fetch(`/api/customer/coupons/available?order_amount=${subtotal}${providerParam}`, { credentials: 'include' })
+    const addressParam  = orderState.pickup_address?.id ? `&address_id=${orderState.pickup_address.id}` : ''
+    fetch(`/api/customer/coupons/available?order_amount=${subtotal}${providerParam}${addressParam}`, { credentials: 'include' })
       .then(r => r.json())
       .then(j => { if (j.success) setAvailableCoupons(j.data?.coupons ?? []) })
       .catch(() => {})
-  }, [subtotal, providerId])
+  }, [subtotal, providerId, orderState.pickup_address?.id])
   const prevSubtotalRef = useRef(subtotal)
   useEffect(() => {
     const prevSubtotal = prevSubtotalRef.current
