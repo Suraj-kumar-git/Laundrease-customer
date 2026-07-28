@@ -768,7 +768,13 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docPr
   // owed by two different suppliers under two different GSTINs.
   const hasServiceTax = data.taxAmount > 0
   const hasFeeTax = !!data.feeGst && data.feeGst.taxAmount > 0
-  const combinedTaxableAmount = taxableAmount + (data.feeGst?.taxableAmount ?? 0)
+  // Only sum a section's taxable value into the combined "Total Tax" row
+  // when that section actually rendered above — `taxableAmount` on its own
+  // silently defaults to the full subtotal (see line 754) whenever no
+  // explicit value was passed, which is fine as a fallback for a lone
+  // service-tax block but was wrongly leaking a phantom "taxable value" into
+  // the combined total on orders with fee-GST but no service-price GST.
+  const combinedTaxableAmount = (hasServiceTax ? taxableAmount : 0) + (hasFeeTax ? data.feeGst!.taxableAmount : 0)
   const combinedTaxAmount = data.taxAmount + (data.feeGst?.taxAmount ?? 0)
   const serviceAccountingCode =
     data.serviceAccountingCode ||
@@ -1071,7 +1077,7 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docPr
                 <View style={s.taxGroupHeader}>
                   <Text style={s.taxGroupHeaderTxt}>
                     GST on Platform Fee — Supplier: {data.feeGst!.supplierName}
-                    {' '}(GSTIN: {data.feeGst!.supplierGstin || 'Not configured'})
+                    {data.feeGst!.supplierGstin ? ` (GSTIN: ${data.feeGst!.supplierGstin})` : ''}
                   </Text>
                 </View>
                 <View style={s.taxTableRow}>

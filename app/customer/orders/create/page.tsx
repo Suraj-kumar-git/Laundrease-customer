@@ -308,6 +308,22 @@ function PageContent() {
           const restored = cartToFlowState(json.data, items)
           setState(prev => ({ ...prev, ...restored }))
           setCartLoading(false)
+        } else if (preferredProviderId && cart.provider?.id === preferredProviderId) {
+          // Deep-linked from the dashboard to the SAME provider already in
+          // this cart — just resume it, no need to ask.
+          const restored = cartToFlowState(json.data, items)
+          setState(prev => ({ ...prev, ...restored }))
+          setCartLoading(false)
+        } else if (preferredProviderId) {
+          // Deep-linked to a DIFFERENT provider (or the stale cart never
+          // got a provider) — the customer's explicit "Create order" click
+          // is a clear, fresh intent that should win over an old/abandoned
+          // cart, not get intercepted by a "resume?" popup. Clear it and
+          // fall through exactly like the no-existing-cart path, so Step 1's
+          // own auto-advance logic (AddressProviderStep) takes it from here.
+          await fetch('/api/customer/cart', { method: 'DELETE', credentials: 'include' })
+          pendingCartData.current = null
+          setCartLoading(false)
         } else {
           // Landed here directly — show popup
           setExistingCartMeta({
@@ -323,7 +339,7 @@ function PageContent() {
       }
     }
     checkCart()
-  }, [user, resumeMode])
+  }, [user, resumeMode, preferredProviderId])
 
   const handleContinueExisting = () => {
     if (!pendingCartData.current) return
