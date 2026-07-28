@@ -388,8 +388,10 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
                 </div>
               )}
 
-              {/* Menu items */}
-              <div className="px-3 py-3">
+              {/* Menu items — extra bottom padding clears the fixed
+                  MobileBottomNav bar (h-16 + safe-area) so Log Out is always
+                  reachable by scrolling instead of sitting hidden behind it. */}
+              <div className="px-3 pt-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))]">
                 {user ? (
                   <>
                     {mobileLoggedInItems.map((item, index) => {

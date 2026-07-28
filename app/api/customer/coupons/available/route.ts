@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { query } from '@/lib/db'
+import { query, queryOne } from '@/lib/db'
 import { successResponse, serverErrorResponse, unauthorizedResponse } from '@/lib/api-response'
 
 export async function GET(req: NextRequest) {
@@ -9,14 +9,37 @@ export async function GET(req: NextRequest) {
   const orderAmount = parseFloat(req.nextUrl.searchParams.get('order_amount') ?? '0')
   const providerIdStr = req.nextUrl.searchParams.get('provider_id')
   const providerId = providerIdStr ? parseInt(providerIdStr) : null
+  const addressIdStr = req.nextUrl.searchParams.get('address_id')
+  const addressId = addressIdStr ? parseInt(addressIdStr) : null
 
   try {
+    // Resolve the pickup pincode (ownership-scoped) so provider-owned
+    // coupons can be limited to providers that actually serve this
+    // customer's area — a provider's coupon shouldn't leak to customers
+    // clear across the country just because it's "active". Falls back to
+    // unfiltered (today's behaviour) when no address is known yet.
+    let postalCode: string | null = null
+    if (addressId) {
+      const addr = await queryOne<{ postal_code: string | null }>(
+        `SELECT ca.postal_code FROM customer_addresses ca
+         WHERE ca.id = $1 AND ca.customer_profile_id = (
+           SELECT id FROM customer_profiles WHERE user_id = $2
+         )`,
+        [addressId, userId]
+      )
+      postalCode = addr?.postal_code ?? null
+    }
+
     // Fetch all active coupons not yet expired — both platform-wide
     // (laundry_profile_id IS NULL) and provider-owned ones. Provider-owned
-    // coupons are always included here (never filtered out by provider
-    // selection) — the frontend shows them with an eligible/ineligible_reason
-    // so the customer sees "only valid with Provider B" rather than the
-    // coupon silently vanishing when a different provider is selected.
+    // coupons are never filtered out just because a *different* provider is
+    // currently selected — the frontend shows them with an eligible/
+    // ineligible_reason so the customer sees "only valid with Provider B"
+    // instead of the coupon silently vanishing. They ARE filtered out
+    // entirely, though, when the provider that created them doesn't serve
+    // this customer's own pickup area at all — a Chennai-only provider's
+    // coupon has no business appearing (even as "ineligible") to a customer
+    // ordering in Pune.
     const couponsRes = await query(
       `SELECT
          c.code, c.name, c.description,
@@ -44,8 +67,18 @@ export async function GET(req: NextRequest) {
          AND (c.applicable_to_user IS NULL OR c.applicable_to_user = $1)
          AND (c.starts_at IS NULL OR c.starts_at <= NOW())
          AND (c.ends_at   IS NULL OR c.ends_at   >= NOW())
+         AND (
+           c.laundry_profile_id IS NULL
+           OR $2::text IS NULL -- no pickup address resolved yet — don't hide anything
+           OR EXISTS (
+             SELECT 1 FROM provider_service_areas psa
+             WHERE psa.provider_id = c.laundry_profile_id
+               AND psa.is_active = TRUE
+               AND psa.postal_code = $2
+           )
+         )
        ORDER BY c.min_order_amount ASC NULLS FIRST`,
-      [userId]
+      [userId, postalCode]
     )
 
     const result = couponsRes.rows.map(c => {
