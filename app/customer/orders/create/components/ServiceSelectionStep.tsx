@@ -831,7 +831,7 @@ export function ServiceSelectionStep({
       <AnimatePresence>
         {selections.length > 0 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
-            className="sticky bottom-4 rounded-2xl bg-primary p-4 shadow-xl shadow-primary/25">
+            className="sticky bottom-[calc(4rem+1rem+env(safe-area-inset-bottom))] lg:bottom-4 rounded-2xl bg-primary p-4 shadow-xl shadow-primary/25">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-xs font-medium text-primary-foreground/70">

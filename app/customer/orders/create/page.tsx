@@ -196,6 +196,15 @@ function PageContent() {
   // ?provider=<id> — set by the dashboard's "Providers near you" cards to
   // auto-select that provider once step 1's provider list loads.
   const preferredProviderId = Number(searchParams.get('provider')) || null
+  // ?address=<id> — the exact address the dashboard was showing providers
+  // for when the customer clicked. Step 1 independently re-deriving "the
+  // default address" was the actual bug here: if the customer's dashboard
+  // view (or its own default-resolution) ever disagreed with Step 1's own
+  // default pick, the preferred provider — found for the DASHBOARD's
+  // address — could be entirely absent from Step 1's re-fetched provider
+  // list for a DIFFERENT address, silently falling back to the manual
+  // picker. Passing the exact address id removes the guesswork.
+  const preferredAddressId = Number(searchParams.get('address')) || null
   const { user, isLoading: authLoading } = useAuth()
   const { toast } = useToast()
   const { clear: clearGuestCart, syncFromServer } = useCart()
@@ -652,6 +661,7 @@ function PageContent() {
                   initialAddress={state.pickup_address}
                   initialProvider={state.selected_provider}
                   preferredProviderId={preferredProviderId}
+                  preferredAddressId={preferredAddressId}
                   onComplete={handleStep1Complete}
                 />
               )}
