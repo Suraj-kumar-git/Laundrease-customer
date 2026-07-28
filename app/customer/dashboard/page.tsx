@@ -553,7 +553,7 @@ interface NearbyProvider {
   distance?: number; logo_url?: string | null
 }
 
-function ProvidersNearYou({ postalCode }: { postalCode: string | null }) {
+function ProvidersNearYou({ postalCode, addressId }: { postalCode: string | null; addressId: number | null }) {
   const [providers, setProviders] = useState<NearbyProvider[]>([])
   const [loading,   setLoading]   = useState(false)
 
@@ -613,7 +613,7 @@ function ProvidersNearYou({ postalCode }: { postalCode: string | null }) {
                   <span className="flex items-center gap-0.5 text-green-600"><ShieldCheck className="h-3 w-3" /> Verified</span>
                 )}
               </div>
-              <Link href={`/customer/orders/create?provider=${p.id}`}
+              <Link href={addressId ? `/customer/orders/create?provider=${p.id}&address=${addressId}` : `/customer/orders/create?provider=${p.id}`}
                 className="mt-3 flex items-center justify-center gap-1.5 rounded-lg bg-primary/10 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground">
                 Create order <ArrowRight className="h-3.5 w-3.5" />
               </Link>
@@ -1127,6 +1127,7 @@ export default function CustomerDashboard() {
               {/* Providers near you — based on the selected address */}
               <ProvidersNearYou
                 postalCode={data.addresses.find(a => a.id === selectedAddressId)?.postalCode ?? null}
+                addressId={selectedAddressId}
               />
 
               {/* Popular services */}

@@ -20,6 +20,10 @@ interface AddressProviderStepProps {
   // "Providers near you" cards via /customer/orders/create?provider=<id>.
   // Applied once; the user can still switch to any other provider after.
   preferredProviderId?: number | null
+  // The exact address the dashboard was showing that provider for — takes
+  // priority over this step's own "default address" auto-pick, so the two
+  // can never disagree about which address's provider list to use.
+  preferredAddressId?: number | null
   // onComplete also returns prefetched services so Step 2 has zero loading time
   onComplete: (
     address: Address,
@@ -58,6 +62,7 @@ export function AddressProviderStep({
   initialAddress,
   initialProvider,
   preferredProviderId,
+  preferredAddressId,
   onComplete,
 }: AddressProviderStepProps) {
   const [addresses, setAddresses]               = useState<Address[]>([])
@@ -106,7 +111,11 @@ export function AddressProviderStep({
           const addrs: Address[] = json.data?.addresses ?? json.data ?? []
           setAddresses(addrs)
           if (!selectedAddress) {
-            const def = addrs.find(a => a.is_default) ?? addrs[0]
+            // Prefer the exact address the dashboard was showing (by id) —
+            // only fall back to "default"/first when it wasn't provided or
+            // no longer exists (e.g. deleted since the dashboard loaded).
+            const preferred = preferredAddressId ? addrs.find(a => a.id === preferredAddressId) : undefined
+            const def = preferred ?? addrs.find(a => a.is_default) ?? addrs[0]
             if (def) setSelectedAddress(def)
             else if (preferredProviderId) setAutoAdvancing(false)
           }
