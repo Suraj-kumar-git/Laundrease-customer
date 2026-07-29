@@ -46,6 +46,8 @@ export async function GET(req: NextRequest) {
          c.discount_type, c.discount_value, c.max_discount,
          c.min_order_amount, c.usage_limit_per_user, c.first_order_only,
          c.laundry_profile_id, lp.business_name AS provider_name,
+         c.ends_at::text AS expires_at,
+         (c.applicable_to_user IS NOT NULL) AS is_personal,
          COALESCE((
            SELECT COUNT(*) FROM coupon_redemptions cr
            LEFT JOIN orders o ON o.id = cr.order_id
@@ -134,6 +136,8 @@ export async function GET(req: NextRequest) {
         discount_display: discountDisplay,
         provider_id:      c.laundry_profile_id ?? null,
         provider_name:    c.provider_name ?? null,
+        expires_at:       c.expires_at ?? null,
+        is_personal:      c.is_personal,
         eligible,
         ineligible_reason,
       }

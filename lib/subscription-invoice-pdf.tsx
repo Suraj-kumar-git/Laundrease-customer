@@ -37,8 +37,10 @@ export interface SubscriptionInvoiceData {
 const logoUrl = process.env.NEXT_PUBLIC_S3_LOGO_URL
   || `${process.env.NEXT_PUBLIC_CUSTOMER_URL}/laundrease-logo.PNG`
 
+// Matches lib/invoice-pdf.tsx's BLUE — the platform's current brand color
+// (swept from the old violet everywhere else; this template was missed).
 const c = {
-  brand:  '#7c3aed',
+  brand:  '#3b82f6',
   dark:   '#111827',
   mid:    '#374151',
   light:  '#6b7280',
@@ -65,10 +67,10 @@ const s = StyleSheet.create({
   colSub:      { fontSize: 8, color: c.light, marginBottom: 2 },
   planBanner:  { backgroundColor: c.brand, borderRadius: 5, padding: 12, marginBottom: 14, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   planName:    { fontSize: 13, fontFamily: 'Helvetica-Bold', color: c.white },
-  planTagline: { fontSize: 8, color: '#ddd6fe', marginTop: 2 },
-  planPeriod:  { fontSize: 8, color: '#ddd6fe', marginTop: 4 },
+  planTagline: { fontSize: 8, color: '#dbeafe', marginTop: 2 },
+  planPeriod:  { fontSize: 8, color: '#dbeafe', marginTop: 4 },
   planAmt:     { fontSize: 18, fontFamily: 'Helvetica-Bold', color: c.white },
-  planAmtSub:  { fontSize: 8, color: '#ddd6fe', textAlign: 'right' },
+  planAmtSub:  { fontSize: 8, color: '#dbeafe', textAlign: 'right' },
   table:       { marginBottom: 14 },
   tHead:       { flexDirection: 'row', backgroundColor: c.bg, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: c.border },
   tRow:        { flexDirection: 'row', paddingHorizontal: 10, paddingVertical: 7, borderLeftWidth: 1, borderRightWidth: 1, borderBottomWidth: 1, borderColor: c.border },
