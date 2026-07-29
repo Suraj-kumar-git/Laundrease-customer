@@ -701,7 +701,7 @@ export function ServiceSelectionStep({
   const [isExpressGlobal, setIsExpressGlobal] = useState(false)
 
   const defaultTab = useMemo(
-    () => (prefetchedServices?.per_kg_services && prefetchedServices.per_kg_services.length > 0 ? 'per_kg' : 'per_unit') as 'per_kg' | 'per_unit',
+    () => (prefetchedServices?.per_unit_products && prefetchedServices.per_unit_products.length > 0 ? 'per_unit' : 'per_kg') as 'per_kg' | 'per_unit',
     []
   )
   const [activeTab, setActiveTab] = useState<'per_kg' | 'per_unit'>(defaultTab)
@@ -795,8 +795,8 @@ export function ServiceSelectionStep({
       <div className="flex items-center gap-2">
         <div className="flex flex-1 gap-1 rounded-xl border border-border/50 bg-muted/30 p-1">
           {([
-            { id: 'per_kg' as const, label: 'By Weight', count: kgServices.length },
             { id: 'per_unit' as const, label: 'By Piece', count: unitProducts.length },
+            { id: 'per_kg' as const, label: 'By Weight', count: kgServices.length },
           ]).map(tab => (
             <button type="button" key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={cn(

@@ -83,23 +83,6 @@ export function AddressProviderStep({
   const servicesCache = useRef<Map<number, { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }>>(new Map())
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  // TEMPORARY DIAGNOSTIC — pinpointing why the dashboard "Create order" deep
-  // link keeps landing on the manual picker instead of auto-advancing to
-  // Services. Only renders when preferredProviderId is actually set (i.e.
-  // only on the deep-link path), so it never shows up for the plain "New
-  // Order" flow. Remove this whole block once the real cause is confirmed
-  // and fixed for good.
-  const [debugLog, setDebugLog] = useState<string[]>([])
-  const pushLog = useCallback((msg: string) => {
-    setDebugLog(prev => [...prev, `${new Date().toISOString().slice(11, 19)} ${msg}`])
-  }, [])
-  useEffect(() => {
-    if (preferredProviderId) {
-      pushLog(`mount: preferredProviderId=${preferredProviderId} preferredAddressId=${preferredAddressId} initialProvider=${initialProvider ? `#${initialProvider.id}` : 'none'} autoAdvancing(initial)=${!!preferredProviderId && !initialProvider}`)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   // Close dropdown on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -119,10 +102,7 @@ export function AddressProviderStep({
 
   // Load addresses
   useEffect(() => {
-    if (addressesFetchedRef.current) {
-      if (preferredProviderId) pushLog('addresses effect: SKIPPED — addressesFetchedRef already true (stale ref from a reused instance?)')
-      return
-    }
+    if (addressesFetchedRef.current) return
     addressesFetchedRef.current = true
     fetch('/api/customer/addresses', { credentials: 'include' })
       .then(r => r.json())
@@ -130,27 +110,20 @@ export function AddressProviderStep({
         if (json.success) {
           const addrs: Address[] = json.data?.addresses ?? json.data ?? []
           setAddresses(addrs)
-          if (preferredProviderId) pushLog(`addresses loaded: count=${addrs.length} ids=[${addrs.map(a => a.id).join(',')}]`)
           if (!selectedAddress) {
             // Prefer the exact address the dashboard was showing (by id) —
             // only fall back to "default"/first when it wasn't provided or
             // no longer exists (e.g. deleted since the dashboard loaded).
             const preferred = preferredAddressId ? addrs.find(a => a.id === preferredAddressId) : undefined
             const def = preferred ?? addrs.find(a => a.is_default) ?? addrs[0]
-            if (preferredProviderId) {
-              pushLog(`address resolution: preferredMatch=${preferred ? `#${preferred.id}(${preferred.postal_code})` : 'NOT FOUND'} chosen=${def ? `#${def.id}(${def.postal_code})` : 'NONE'}`)
-            }
             if (def) setSelectedAddress(def)
-            else if (preferredProviderId) { pushLog('no address at all -> autoAdvancing=false'); setAutoAdvancing(false) }
+            else if (preferredProviderId) setAutoAdvancing(false)
           }
         } else if (preferredProviderId) {
-          pushLog(`addresses fetch returned success=false: ${JSON.stringify(json).slice(0, 200)}`)
           setAutoAdvancing(false)
         }
       })
-      .catch((err) => {
-        if (preferredProviderId) { pushLog(`addresses fetch threw: ${err}`); setAutoAdvancing(false) }
-      })
+      .catch(() => { if (preferredProviderId) setAutoAdvancing(false) })
       .finally(() => setLoadingAddresses(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -163,7 +136,6 @@ export function AddressProviderStep({
   // Load providers when address changes
   useEffect(() => {
     if (!selectedAddress?.postal_code) return
-    if (preferredProviderId) pushLog(`providers effect firing for postal_code=${selectedAddress.postal_code} (address #${selectedAddress.id}), preferredAppliedRef=${preferredAppliedRef.current}`)
     setLoadingProviders(true)
     setProviderError(null)
     setSelectedProvider(null)
@@ -172,7 +144,6 @@ export function AddressProviderStep({
       .then(json => {
         const list: LaundryProvider[] = json.success ? (json.data?.providers ?? []) : []
         setProviders(list)
-        if (preferredProviderId) pushLog(`providers loaded: count=${list.length} ids=[${list.map(p => p.id).join(',')}] success=${json.success}`)
         if (preferredProviderId && !preferredAppliedRef.current) {
           preferredAppliedRef.current = true
           // Postgres bigint columns (laundry_profiles.id) come back through
@@ -181,14 +152,12 @@ export function AddressProviderStep({
           // matched, even when the id was right there in the list. Number()
           // both sides so this works regardless of which type the API returns.
           const match = list.find(p => Number(p.id) === preferredProviderId)
-          pushLog(`matching preferredProviderId=${preferredProviderId} against list -> ${match ? `FOUND #${match.id}` : 'NOT FOUND'}`)
           if (match) {
             setSelectedProvider(match)
             prefetchServices(match.id).then(() => {
               const cached = servicesCache.current.get(match.id) ?? {
                 per_kg_services: [], per_unit_products: [],
               }
-              pushLog('calling onComplete() -> should advance to step 2 now')
               onComplete(selectedAddress, selectedAddress, match, cached)
             })
           } else {
@@ -196,15 +165,13 @@ export function AddressProviderStep({
             // back to letting the customer pick manually.
             setAutoAdvancing(false)
           }
-        } else if (preferredProviderId) {
-          pushLog('SKIPPED matching — preferredAppliedRef was already true before this run')
         }
         if (list.length === 0)
           setProviderError(`No providers found for pincode ${selectedAddress.postal_code}`)
       })
-      .catch((err) => {
+      .catch(() => {
         setProviderError('Failed to load providers')
-        if (preferredProviderId) { pushLog(`providers fetch threw: ${err}`); setAutoAdvancing(false) }
+        if (preferredProviderId) setAutoAdvancing(false)
       })
       .finally(() => setLoadingProviders(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -541,22 +508,9 @@ export function AddressProviderStep({
     )
   }
 
-  // TEMPORARY DIAGNOSTIC overlay — only appears on the deep-link path
-  // (preferredProviderId set). Screenshot this and send it back — remove
-  // this whole block once the deep-link bug is confirmed fixed.
-  const debugOverlay = preferredProviderId ? (
-    <div className="mb-4 rounded-xl border-2 border-dashed border-amber-500 bg-amber-50 dark:bg-amber-950/30 p-3 text-[10px] font-mono text-amber-900 dark:text-amber-300 whitespace-pre-wrap break-all">
-      <p className="font-bold mb-1">TEMP DEBUG — screenshot this box and send to Claude</p>
-      <p>URL params: provider={preferredProviderId} address={preferredAddressId}</p>
-      <p>autoAdvancing={String(autoAdvancing)}</p>
-      {debugLog.length === 0 ? <p>(no log entries yet)</p> : debugLog.map((l, i) => <p key={i}>{l}</p>)}
-    </div>
-  ) : null
-
   if (autoAdvancing) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-24">
-        {debugOverlay}
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
         <p className="text-sm text-muted-foreground">Loading your order…</p>
       </div>
@@ -565,7 +519,6 @@ export function AddressProviderStep({
 
   return (
     <div className="space-y-6">
-      {debugOverlay}
       {/* Address */}
       <div>
         <div className="mb-3 flex items-center justify-between">
