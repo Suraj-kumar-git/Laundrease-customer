@@ -724,10 +724,31 @@ function PageContent() {
     </>
   )
 }
+// Reads the deep-link identity and remounts PageContent whenever it changes.
+// Next.js reuses the same PageContent instance across same-route navigations
+// (dashboard -> create?provider=A -> back -> create?provider=B never actually
+// unmounts anything since it's the same /customer/orders/create route) — but
+// PageContent and AddressProviderStep both guard their one-shot init logic
+// (cart check, address fetch, preferred-provider auto-advance) behind refs
+// that only ever fire once per mount. Without a remount, a SECOND "Create
+// order" click in the same session hits those already-tripped refs and
+// silently skips the auto-advance entirely, leaving the customer stuck
+// manually re-picking address + provider — this key forces a clean remount
+// so every deep-link click gets a fresh run of that logic.
+function PageWithFreshMountPerDeepLink() {
+  const searchParams = useSearchParams()
+  const mountKey = [
+    searchParams.get('provider') ?? '',
+    searchParams.get('address') ?? '',
+    searchParams.get('resume') ?? '',
+  ].join(':')
+  return <PageContent key={mountKey} />
+}
+
 export default function CreateOrderPage() {
   return (
     <SearchParamProvider>
-      <PageContent />
+      <PageWithFreshMountPerDeepLink />
     </SearchParamProvider>
   )
 }

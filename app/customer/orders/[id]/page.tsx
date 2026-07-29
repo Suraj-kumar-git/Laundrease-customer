@@ -1165,6 +1165,10 @@ export default function OrderDetailPage() {
         )}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+          {/* Left column — content grows independently of the right column,
+              so a short card here is never stretched by a taller card next
+              to it (which is what a flat grid row-pairing used to do). */}
+          <div className="flex flex-col gap-4">
           {/* Pickup & Delivery schedule — meaningless once the order never
               went through (cancelled/rejected/returned/failed), so hidden
               alongside the progress tracker for those statuses. */}
@@ -1449,6 +1453,18 @@ export default function OrderDetailPage() {
             </div>
           </Section>
 
+          {/* Special instructions */}
+          {order.special_instructions && (
+            <Section title="Special Instructions" icon={Info}>
+              <p className="text-sm text-muted-foreground">{order.special_instructions}</p>
+            </Section>
+          )}
+          </div>
+
+          {/* Right column — its own independent height, same reasoning as
+              the left column above. */}
+          <div className="flex flex-col gap-4">
+
           {/* Payment — shows split clearly for wallet+COD / wallet+UPI */}
           <Section title="Payment" icon={CreditCard}>
             {(() => {
@@ -1546,13 +1562,6 @@ export default function OrderDetailPage() {
             )}
           </Section>
 
-          {/* Special instructions */}
-          {order.special_instructions && (
-            <Section title="Special Instructions" icon={Info}>
-              <p className="text-sm text-muted-foreground">{order.special_instructions}</p>
-            </Section>
-          )}
-
           {/* Order Timeline — an accordion, collapsed by default. Every
               reschedule (customer, delivery partner, admin/support, or the
               automatic "not picked up" sweep) logs a note here, so this can
@@ -1588,18 +1597,20 @@ export default function OrderDetailPage() {
             })()}
           </Section>
 
-          {/* Help CTA */}
-          <div className="flex items-center gap-3 rounded-2xl border border-border/50 bg-card p-4 lg:col-span-2">
-            <Shield className="h-8 w-8 shrink-0 text-primary/40" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground">Need help with this order?</p>
-              <p className="text-xs text-muted-foreground">Our support team is here for you</p>
-            </div>
-            <Link href={`/customer/support?category=order&order_id=${order.id}`}
-              className="shrink-0 rounded-xl border border-border/50 px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted">
-              Get Help
-            </Link>
           </div>
+        </div>
+
+        {/* Help CTA — full width below both columns */}
+        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-border/50 bg-card p-4">
+          <Shield className="h-8 w-8 shrink-0 text-primary/40" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Need help with this order?</p>
+            <p className="text-xs text-muted-foreground">Our support team is here for you</p>
+          </div>
+          <Link href={`/customer/support?category=order&order_id=${order.id}`}
+            className="shrink-0 rounded-xl border border-border/50 px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted">
+            Get Help
+          </Link>
         </div>
       </div>
 
