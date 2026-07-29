@@ -44,7 +44,6 @@ interface DashboardData {
   addresses: Address[]
   activeOrder: ActiveOrder | null
   wallet: { balance: number; currency: string }
-  coupons: Coupon[]
   statistics: { completedOrders: number; activeOrders: number; totalSpent: number }
 }
 interface LoyaltyLedgerItem {
@@ -539,6 +538,75 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
         {coupon.expiresAt && <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> Valid till {formatDate(coupon.expiresAt)}</span>}
       </div>
     </div>
+  )
+}
+
+// ---- Active offers --------------------------------------------
+// Same pincode-scoped eligibility endpoint the checkout page's coupon
+// picker uses (/api/customer/coupons/available) — one shared source of
+// truth instead of a second, separately-maintained coupon query, so a
+// provider's coupon can never be visible here but hidden at checkout (or
+// vice versa). Refetches whenever the selected address changes.
+
+function ActiveOffers({ addressId }: { addressId: number | null }) {
+  const [coupons, setCoupons] = useState<Coupon[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    const params = new URLSearchParams({ order_amount: '0' })
+    if (addressId) params.set('address_id', String(addressId))
+    fetch(`/api/customer/coupons/available?${params}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => {
+        if (cancelled || !j.success) return
+        const mapped: Coupon[] = (j.data?.coupons ?? []).map((c: any) => ({
+          code: c.code,
+          name: c.name,
+          description: c.description ?? null,
+          discountType: c.discount_type,
+          discountValue: parseFloat(c.discount_value),
+          maxDiscount: c.max_discount ? parseFloat(c.max_discount) : null,
+          minOrderAmount: c.min_order_amount ? parseFloat(c.min_order_amount) : null,
+          expiresAt: c.expires_at ?? null,
+          isPersonal: !!c.is_personal,
+          providerId: c.provider_id ?? null,
+          providerName: c.provider_name ?? null,
+          eligible: c.eligible,
+          ineligibleReason: c.ineligible_reason ?? null,
+        }))
+        setCoupons(mapped)
+      })
+      .catch(() => { if (!cancelled) setCoupons([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [addressId])
+
+  if (!loading && coupons.length === 0) return null
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+      className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
+      <div className="mb-4 flex items-center gap-2">
+        <Gift className="h-4 w-4 text-primary" />
+        <h2 className="text-sm font-semibold text-foreground">
+          Your Offers
+          {coupons.length > 0 && (
+            <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{coupons.length}</span>
+          )}
+        </h2>
+      </div>
+      {loading ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {[1, 2].map(i => <div key={i} className="h-32 animate-pulse rounded-xl bg-muted" />)}
+        </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {coupons.map(c => <CouponCard key={c.code} coupon={c} />)}
+        </div>
+      )}
+    </motion.div>
   )
 }
 
@@ -1143,22 +1211,9 @@ export default function CustomerDashboard() {
                 <WhyLaundrease />
               </motion.div> */}
 
-              {/* Active Offers */}
-              {data.coupons.length > 0 && (
-                <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-                  className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
-                  <div className="mb-4 flex items-center gap-2">
-                    <Gift className="h-4 w-4 text-primary" />
-                    <h2 className="text-sm font-semibold text-foreground">
-                      Your Offers
-                      <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{data.coupons.length}</span>
-                    </h2>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {data.coupons.map(c => <CouponCard key={c.code} coupon={c} />)}
-                  </div>
-                </motion.div>
-              )}
+              {/* Active Offers — pincode-scoped to the selected address, same
+                  eligibility rules as checkout */}
+              <ActiveOffers addressId={selectedAddressId} />
             </div>
 
             {/* ============ RIGHT / SIDEBAR ============ */}
