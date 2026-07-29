@@ -317,7 +317,7 @@ function PageContent() {
           const restored = cartToFlowState(json.data, items)
           setState(prev => ({ ...prev, ...restored }))
           setCartLoading(false)
-        } else if (preferredProviderId && cart.provider?.id === preferredProviderId) {
+        } else if (preferredProviderId && cart.provider?.id != null && Number(cart.provider.id) === preferredProviderId) {
           // Deep-linked from the dashboard to the SAME provider already in
           // this cart — just resume it, no need to ask.
           const restored = cartToFlowState(json.data, items)
