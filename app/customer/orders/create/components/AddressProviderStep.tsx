@@ -175,7 +175,12 @@ export function AddressProviderStep({
         if (preferredProviderId) pushLog(`providers loaded: count=${list.length} ids=[${list.map(p => p.id).join(',')}] success=${json.success}`)
         if (preferredProviderId && !preferredAppliedRef.current) {
           preferredAppliedRef.current = true
-          const match = list.find(p => p.id === preferredProviderId)
+          // Postgres bigint columns (laundry_profiles.id) come back through
+          // the driver as strings, not numbers — a strict === against the
+          // numeric preferredProviderId parsed from the URL silently never
+          // matched, even when the id was right there in the list. Number()
+          // both sides so this works regardless of which type the API returns.
+          const match = list.find(p => Number(p.id) === preferredProviderId)
           pushLog(`matching preferredProviderId=${preferredProviderId} against list -> ${match ? `FOUND #${match.id}` : 'NOT FOUND'}`)
           if (match) {
             setSelectedProvider(match)
