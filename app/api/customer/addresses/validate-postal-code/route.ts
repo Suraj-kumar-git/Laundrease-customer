@@ -21,6 +21,8 @@ export async function GET(req: NextRequest) {
       FROM provider_service_areas psa
       INNER JOIN laundry_profiles lp ON lp.id = psa.provider_id
       WHERE psa.postal_code = $1
+        AND psa.is_active = TRUE
+        AND lp.status = 'active' AND lp.is_verified = TRUE
       ORDER BY lp.rating DESC
       LIMIT 5
     `, [postalCode])

@@ -22,7 +22,7 @@ const nextConfig: NextConfig = {
 
   images: {
     remotePatterns: [
-      { protocol: 'https', hostname: 'laundrease.in' },
+      { protocol: 'https', hostname: '*.laundrease.in' },
       { protocol: 'http', hostname: 'localhost' },
       { protocol: 'https', hostname: '*.s3.ap-south-1.amazonaws.com' },
     ],

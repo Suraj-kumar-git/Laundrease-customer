@@ -15,6 +15,7 @@ interface CheckoutStepProps {
   orderState:             OrderFlowState
   onCouponApply:          (coupon: AppliedCoupon | null) => void
   onSpecialInstructions:  (val: string) => void
+  onCustomerGstin:        (val: string) => void
   onExpressToggle:        (isExpress: boolean, updatedServices: SelectedService[]) => void
   onEditServices:         () => void
   onSubmit:               (paymentMethod: string, walletAmount: number) => Promise<void>
@@ -29,6 +30,7 @@ interface WalletInfo { balance: number; has_wallet: boolean; wallet_id: number |
 interface AvailableCoupon {
   code: string; name: string; discount_type: string; discount_value: number
   max_discount: number | null; min_order_amount: number; discount_display: string
+  provider_id: number | null; provider_name: string | null
   eligible: boolean; ineligible_reason: string | null
 }
 
@@ -42,7 +44,7 @@ function formatDate(d: string) {
 }
 
 export function CheckoutStep({
-  orderState, onCouponApply, onSpecialInstructions, onExpressToggle, onEditServices, onSubmit, isSubmitting,
+  orderState, onCouponApply, onSpecialInstructions, onCustomerGstin, onExpressToggle, onEditServices, onSubmit, isSubmitting,
 }: CheckoutStepProps) {
   const currentIsExpress    = orderState.selected_services.some(s => s.is_express)
   const hasAnyExpressCapable= orderState.selected_services.some(s => s.express_multiplier > 1)
@@ -85,6 +87,12 @@ export function CheckoutStep({
   // Instructions
   const [instructions,   setInstructions]   = useState(orderState.special_instructions ?? '')
   const [editingInstr,   setEditingInstr]   = useState(false)
+  // Customer GSTIN (optional, for B2B orders — hotels/hospitals claiming ITC)
+  const [gstin,          setGstin]          = useState(orderState.customer_gstin ?? '')
+  const [editingGstin,   setEditingGstin]   = useState(false)
+  const [gstinError,     setGstinError]     = useState<string | null>(null)
+  // Collapsed "GST & other charges" row in the price breakdown
+  const [otherFeesOpen,  setOtherFeesOpen]  = useState(false)
   // Estimated delivery date preview
   const [estimatedDeliveryDate, setEstimatedDeliveryDate] = useState<string | null>(null)
   const [estimateLoading,       setEstimateLoading]       = useState(false)
@@ -101,7 +109,8 @@ export function CheckoutStep({
     // initialFeesLoaded.current = true
     setFeesLoading(true)
     const providerParam = providerId ? `&provider_id=${providerId}` : ''
-    fetch(`/api/customer/orders/fees?subtotal=${subtotal}&is_express=${currentIsExpress}${providerParam}`)
+    const addressParam  = orderState.pickup_address?.id ? `&address_id=${orderState.pickup_address.id}` : ''
+    fetch(`/api/customer/orders/fees?subtotal=${subtotal}&is_express=${currentIsExpress}${providerParam}${addressParam}`)
       .then(r => r.json())
             .then(json => {
         if (json.success) {
@@ -114,7 +123,7 @@ export function CheckoutStep({
       })
       .catch(() => {})
       .finally(() => setFeesLoading(false))
-  }, [subtotal, currentIsExpress, providerId])
+  }, [subtotal, currentIsExpress, providerId, orderState.pickup_address?.id])
 
   const servicesKey = useMemo(
     () => JSON.stringify(orderState.selected_services.map(s => ({ id: s.service_id, x: s.is_express }))),
@@ -151,7 +160,16 @@ export function CheckoutStep({
     fetch('/api/customer/payments/gateway-info')
       .then(r => r.json()).then(j => { if (j.success) setGatewayInfo(j.data) }).catch(() => {})
       .finally(() => setGatewayLoading(false))
-  }, [])
+
+    // Pre-fill GSTIN from the saved profile, unless this checkout already has
+    // one set (e.g. navigating back to this step after entering it).
+    if (!orderState.customer_gstin) {
+      fetch('/api/customer/profile', { credentials: 'include' })
+        .then(r => r.json())
+        .then(j => { if (j.success && j.data.gstin) { setGstin(j.data.gstin); onCustomerGstin(j.data.gstin) } })
+        .catch(() => {})
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Provider availability (re-check on checkout mount) -------
   // A resumed cart can carry a provider selected days ago — re-verify here
@@ -167,15 +185,20 @@ export function CheckoutStep({
       .catch(() => {})
   }, [providerId])
 
-  // ---- Available coupons: re-fetch on subtotal change ----------
-  // This ensures the ineligible_reason ("Add ₹X more") stays accurate
+  // ---- Available coupons: re-fetch on subtotal, provider, or address change --
+  // This ensures the ineligible_reason ("Add ₹X more" / "Only valid with X")
+  // stays accurate, and address_id lets the backend hide coupons from
+  // providers that don't serve this customer's area at all (not just mark
+  // them ineligible).
   useEffect(() => {
     if (subtotal <= 0) return
-    fetch(`/api/customer/coupons/available?order_amount=${subtotal}`, { credentials: 'include' })
+    const providerParam = providerId ? `&provider_id=${providerId}` : ''
+    const addressParam  = orderState.pickup_address?.id ? `&address_id=${orderState.pickup_address.id}` : ''
+    fetch(`/api/customer/coupons/available?order_amount=${subtotal}${providerParam}${addressParam}`, { credentials: 'include' })
       .then(r => r.json())
       .then(j => { if (j.success) setAvailableCoupons(j.data?.coupons ?? []) })
       .catch(() => {})
-  }, [subtotal])
+  }, [subtotal, providerId, orderState.pickup_address?.id])
   const prevSubtotalRef = useRef(subtotal)
   useEffect(() => {
     const prevSubtotal = prevSubtotalRef.current
@@ -271,7 +294,7 @@ export function CheckoutStep({
     try {
       const res  = await fetch('/api/customer/coupons/validate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ coupon_code: trimmed, order_amount: subtotal }),
+        body: JSON.stringify({ coupon_code: trimmed, order_amount: subtotal, provider_id: providerId ?? null }),
       })
       const json = await res.json()
       if (json.success && json.data?.valid) {
@@ -352,6 +375,12 @@ export function CheckoutStep({
   }
 
   const expressFeeRow = feeBreakdown?.fees.find(f => f.code === 'express_surcharge')
+  // Price breakdown collapses to 4 rows: Subtotal, Delivery Fee (its own
+  // logistics cost), Discounts, and everything else (platform/convenience
+  // fee, express surcharge, GST on fees, …) bundled under one expandable row.
+  const deliveryFeeRow = feeBreakdown?.fees.find(f => f.code === 'delivery_fee')
+  const otherFees = feeBreakdown?.fees.filter(f => f.code !== 'delivery_fee') ?? []
+  const otherFeesTotal = otherFees.reduce((s, f) => s + f.amount, 0)
 
   return (
     <div className="grid gap-6 lg:grid-cols-5">
@@ -483,6 +512,40 @@ export function CheckoutStep({
           )}
         </div>
 
+        {/* Customer GSTIN — optional, for B2B orders claiming ITC */}
+        <div className="rounded-xl border border-border/50 bg-card p-3">
+          <div className="mb-1.5 flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Receipt className="h-3.5 w-3.5 text-primary" />
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">GSTIN (optional)</span>
+            </div>
+            <button type="button" onClick={() => setEditingGstin(v => !v)}
+              className="text-xs text-primary hover:underline">
+              {editingGstin ? 'Done' : 'Edit'}
+            </button>
+          </div>
+          {editingGstin ? (
+            <>
+              <input value={gstin}
+                onChange={e => {
+                  const val = e.target.value.toUpperCase()
+                  setGstin(val)
+                  onCustomerGstin(val)
+                  setGstinError(
+                    val && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(val)
+                      ? 'Enter a valid GST number (e.g. 22AAAAA0000A1Z5)' : null
+                  )
+                }}
+                maxLength={15} placeholder="e.g. 22AAAAA0000A1Z5"
+                className="w-full rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/20" />
+              {gstinError && <p className="mt-1 text-xs text-destructive">{gstinError}</p>}
+              <p className="mt-1 text-xs text-muted-foreground">For hotels/hospitals/businesses claiming input tax credit.</p>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">{gstin || <span className="italic">None</span>}</p>
+          )}
+        </div>
+
         {/* Price breakdown */}
         <div className="rounded-xl border border-border/50 bg-card p-3">
           <div className="mb-2 flex items-center gap-1.5">
@@ -507,16 +570,40 @@ export function CheckoutStep({
                   <span className="font-medium text-foreground">{formatINR(subtotal)}</span>
                 </span>
               </div>
-              {feeBreakdown?.fees.map(fee => (
-                <div key={fee.code} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="text-muted-foreground">{fee.display_name}</span>
-                  </div>
-                  <span className={cn('font-medium', fee.is_free ? 'text-emerald-600' : 'text-foreground')}>
-                    {fee.is_free ? 'FREE' : formatINR(fee.amount)}
+              {deliveryFeeRow && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">{deliveryFeeRow.display_name}</span>
+                  <span className={cn('font-medium', deliveryFeeRow.is_free ? 'text-emerald-600' : 'text-foreground')}>
+                    {deliveryFeeRow.is_free ? 'FREE' : formatINR(deliveryFeeRow.amount)}
                   </span>
                 </div>
-              ))}
+              )}
+              {otherFees.length > 0 && (
+                <div>
+                  <button type="button" onClick={() => setOtherFeesOpen(v => !v)}
+                    className="flex w-full items-center justify-between">
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      GST & other charges
+                      {otherFeesOpen
+                        ? <ChevronUp className="h-3 w-3" />
+                        : <ChevronDown className="h-3 w-3" />}
+                    </span>
+                    <span className="font-medium text-foreground">{formatINR(otherFeesTotal)}</span>
+                  </button>
+                  {otherFeesOpen && (
+                    <div className="mt-1.5 space-y-1.5 border-l-2 border-border/40 pl-3">
+                      {otherFees.map(fee => (
+                        <div key={fee.code} className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">{fee.display_name}</span>
+                          <span className={cn('font-medium', fee.is_free ? 'text-emerald-600' : 'text-foreground')}>
+                            {fee.is_free ? 'FREE' : formatINR(fee.amount)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {hasAnyExpressCapable && (
                 <div className="flex items-center justify-between rounded-lg border border-border/40 px-3 py-2">
                   <div className="flex items-center gap-2">
@@ -544,12 +631,6 @@ export function CheckoutStep({
                   </button>
                 </div>
               )}
-              {/* {feeBreakdown && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">GST ({Math.round((feeBreakdown.tax_rate ?? 0.18) * 100)}%)</span>
-                  <span className="font-medium text-foreground">{formatINR(feeBreakdown.tax_amount)}</span>
-                </div>
-              )} */}
               {discountAmount > 0 && (
                 <div className="flex justify-between text-emerald-600 dark:text-emerald-400">
                   <span className="flex items-center gap-1">
@@ -682,11 +763,40 @@ export function CheckoutStep({
                           onClick={() => handleApplyCoupon(c.code)}
                           className="flex cursor-pointer items-center justify-between rounded-xl border border-border/40 bg-muted/30 px-3 py-2.5 transition-colors hover:border-primary/30"
                         >
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold font-mono text-foreground">{c.code}</p>
-                            <p className="text-[11px] text-muted-foreground">{c.name}</p>
+                          <div className="min-w-0 flex items-center gap-1.5">
+                            <div>
+                              <p className="text-xs font-bold font-mono text-foreground">{c.code}</p>
+                              <p className="text-[11px] text-muted-foreground">{c.name}</p>
+                            </div>
+                            {c.provider_id != null && (
+                              <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary">
+                                {c.provider_name ?? 'Provider'}
+                              </span>
+                            )}
                           </div>
                           <span className="shrink-0 ml-2 text-xs font-semibold text-primary">
+                            {c.discount_display}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Provider-specific coupons — always shown (never hidden), disabled with a
+                      reason when the selected provider doesn't match or eligibility isn't met yet */}
+                  {availableCoupons.some(c => !c.eligible && c.provider_id != null) && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground">Provider coupons</p>
+                      {availableCoupons.filter(c => !c.eligible && c.provider_id != null).map(c => (
+                        <div
+                          key={c.code}
+                          className="flex cursor-not-allowed items-center justify-between rounded-xl border border-dashed border-border/40 bg-muted/10 px-3 py-2.5 opacity-60"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold font-mono text-foreground">{c.code}</p>
+                            <p className="text-[11px] text-muted-foreground">{c.ineligible_reason}</p>
+                          </div>
+                          <span className="shrink-0 ml-2 text-xs font-semibold text-muted-foreground">
                             {c.discount_display}
                           </span>
                         </div>

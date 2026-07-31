@@ -92,7 +92,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   picked_up:        { label: 'Picked Up',        color: 'text-blue-700',  bg: 'bg-blue-100 dark:bg-blue-950/40', step: 3 },
   at_laundry:       { label: 'Delivered to Laundry',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 7 },
   processing:       { label: 'Being Cleaned',    color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40', step: 4 },
-  ready:            { label: 'Ready',            color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40',     step: 5 },
+  ready_for_delivery:{ label: 'Ready for Delivery', color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40',     step: 5 },
   out_for_delivery: { label: 'Out for Delivery', color: 'text-emerald-700', bg: 'bg-emerald-100 dark:bg-emerald-950/40', step: 6 },
   delivered:        { label: 'Delivered',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 7 },
   completed:        { label: 'Completed',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 8 },
@@ -107,7 +107,7 @@ const PROGRESS_STEPS = [
   { key: 'confirmed', label: 'Confirmed' },
   { key: 'picked_up', label: 'Picked Up' },
   { key: 'processing', label: 'Cleaning' },
-  { key: 'ready', label: 'Ready' },
+  { key: 'ready_for_delivery', label: 'Ready for Delivery' },
   { key: 'out_for_delivery', label: 'Delivery' },
   { key: 'delivered', label: 'Delivered' },
 ]
@@ -174,9 +174,9 @@ function Section({ title, icon: Icon, children, className, collapsible = false, 
 
 // ---- Reschedule modal ---------------------------------------
 function RescheduleModal({
-  orderId, currentDate, currentSlot, onClose, onSuccess, onCancelled,
+  orderId, providerId, currentDate, currentSlot, onClose, onSuccess, onCancelled,
 }: {
-  orderId: string; currentDate: string; currentSlot: string
+  orderId: string; providerId: number | null; currentDate: string; currentSlot: string
   onClose: () => void; onSuccess: (date: string, slot: string, estimatedDeliveryDate: string | null) => void
   onCancelled: (message: string) => void
 }) {
@@ -184,7 +184,35 @@ function RescheduleModal({
   const [selectedDate, setSelectedDate] = useState<string>(currentDate)
   const [selectedSlot, setSelectedSlot] = useState<string>(currentSlot)
   const [saving,       setSaving]       = useState(false)
+  const [closedDates,  setClosedDates]  = useState<string[]>([])
+  const [closedWeekdays, setClosedWeekdays] = useState<Set<number>>(new Set())
   const availableDates = Array.from({ length: 14 }, (_, i) => addDays(startOfDay(new Date()), i + 1))
+
+  // Which dates the provider isn't taking pickups on — mirrors the same
+  // check already enforced on the provider-selection and checkout steps of
+  // order creation, previously missing here entirely.
+  useEffect(() => {
+    if (!providerId) return
+    fetch(`/api/customer/laundry-providers/${providerId}/closed-dates`)
+      .then(r => r.json())
+      .then(j => { if (j.success) setClosedDates(j.data?.closed_dates ?? []) })
+      .catch(() => {})
+
+    fetch(`/api/customer/laundry-providers/${providerId}`)
+      .then(r => r.json())
+      .then(j => {
+        if (j.success) {
+          const closed = (j.data?.operating_hours ?? [])
+            .filter((h: { is_closed: boolean }) => h.is_closed)
+            .map((h: { day_of_week: number }) => h.day_of_week)
+          setClosedWeekdays(new Set(closed))
+        }
+      })
+      .catch(() => {})
+  }, [providerId])
+
+  const isDateClosed = (d: Date) =>
+    closedDates.includes(format(d, 'yyyy-MM-dd')) || closedWeekdays.has(d.getDay())
 
   const TIME_SLOTS = [
     { id: 'morning',   label: 'Morning',   range: '09:00 – 12:00', value: '09:00-12:00' },
@@ -251,25 +279,34 @@ function RescheduleModal({
           </p>
           <div className="flex gap-2 overflow-x-auto pb-1">
             {availableDates.map(date => {
-              const ds      = format(date, 'yyyy-MM-dd')
+              const ds       = format(date, 'yyyy-MM-dd')
               const isActive = selectedDate === ds
+              const isClosed = isDateClosed(date)
               return (
-                <button key={ds} type="button" onClick={() => setSelectedDate(ds)}
+                <button key={ds} type="button" disabled={isClosed}
+                  onClick={() => { if (!isClosed) setSelectedDate(ds) }}
                   className={cn(
                     'flex shrink-0 flex-col items-center rounded-xl border px-3 py-2 text-center transition-all',
-                    isActive
+                    isClosed
+                      ? 'cursor-not-allowed border-border/30 bg-muted/30 opacity-40'
+                      : isActive
                       ? 'border-primary bg-primary text-primary-foreground'
                       : 'border-border/50 bg-card hover:border-primary/40'
                   )}>
-                  <span className={cn('text-[10px] font-medium', isActive ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
+                  <span className={cn('text-[10px] font-medium', isActive && !isClosed ? 'text-primary-foreground/80' : 'text-muted-foreground')}>
                     {format(date, 'EEE')}
                   </span>
-                  <span className={cn('text-base font-bold', isActive ? 'text-primary-foreground' : 'text-foreground')}>
+                  <span className={cn('text-base font-bold', isActive && !isClosed ? 'text-primary-foreground' : 'text-foreground')}>
                     {format(date, 'd')}
                   </span>
-                  <span className={cn('text-[10px]', isActive ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+                  <span className={cn('text-[10px]', isActive && !isClosed ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
                     {format(date, 'MMM')}
                   </span>
+                  {isClosed && (
+                    <span className="mt-1 rounded-full bg-destructive/20 px-1 py-0.5 text-[8px] text-destructive">
+                      Closed
+                    </span>
+                  )}
                 </button>
               )
             })}
@@ -303,13 +340,21 @@ function RescheduleModal({
           </div>
         </div>
 
+        {selectedDate && isDateClosed(new Date(selectedDate + 'T00:00:00')) && (
+          <div className="mb-4 flex items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            Provider is closed on this date. Please select another.
+          </div>
+        )}
+
         {/* Actions */}
         <div className="flex gap-3">
           <button type="button" onClick={onClose}
             className="flex-1 rounded-xl border border-border/50 py-3 text-sm font-medium text-muted-foreground hover:bg-muted">
             Cancel
           </button>
-          <button type="button" onClick={handleSave} disabled={saving || !selectedDate || !selectedSlot}
+          <button type="button" onClick={handleSave}
+            disabled={saving || !selectedDate || !selectedSlot || isDateClosed(new Date(selectedDate + 'T00:00:00'))}
             className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground disabled:opacity-50 hover:bg-primary/90">
             {saving ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving...</> : 'Confirm'}
           </button>
@@ -1120,6 +1165,10 @@ export default function OrderDetailPage() {
         )}
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-start">
+          {/* Left column — content grows independently of the right column,
+              so a short card here is never stretched by a taller card next
+              to it (which is what a flat grid row-pairing used to do). */}
+          <div className="flex flex-col gap-4">
           {/* Pickup & Delivery schedule — meaningless once the order never
               went through (cancelled/rejected/returned/failed), so hidden
               alongside the progress tracker for those statuses. */}
@@ -1404,6 +1453,18 @@ export default function OrderDetailPage() {
             </div>
           </Section>
 
+          {/* Special instructions */}
+          {order.special_instructions && (
+            <Section title="Special Instructions" icon={Info}>
+              <p className="text-sm text-muted-foreground">{order.special_instructions}</p>
+            </Section>
+          )}
+          </div>
+
+          {/* Right column — its own independent height, same reasoning as
+              the left column above. */}
+          <div className="flex flex-col gap-4">
+
           {/* Payment — shows split clearly for wallet+COD / wallet+UPI */}
           <Section title="Payment" icon={CreditCard}>
             {(() => {
@@ -1501,13 +1562,6 @@ export default function OrderDetailPage() {
             )}
           </Section>
 
-          {/* Special instructions */}
-          {order.special_instructions && (
-            <Section title="Special Instructions" icon={Info}>
-              <p className="text-sm text-muted-foreground">{order.special_instructions}</p>
-            </Section>
-          )}
-
           {/* Order Timeline — an accordion, collapsed by default. Every
               reschedule (customer, delivery partner, admin/support, or the
               automatic "not picked up" sweep) logs a note here, so this can
@@ -1543,18 +1597,20 @@ export default function OrderDetailPage() {
             })()}
           </Section>
 
-          {/* Help CTA */}
-          <div className="flex items-center gap-3 rounded-2xl border border-border/50 bg-card p-4 lg:col-span-2">
-            <Shield className="h-8 w-8 shrink-0 text-primary/40" />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground">Need help with this order?</p>
-              <p className="text-xs text-muted-foreground">Our support team is here for you</p>
-            </div>
-            <Link href={`/customer/support?category=order&order_id=${order.id}`}
-              className="shrink-0 rounded-xl border border-border/50 px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted">
-              Get Help
-            </Link>
           </div>
+        </div>
+
+        {/* Help CTA — full width below both columns */}
+        <div className="mt-4 flex items-center gap-3 rounded-2xl border border-border/50 bg-card p-4">
+          <Shield className="h-8 w-8 shrink-0 text-primary/40" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Need help with this order?</p>
+            <p className="text-xs text-muted-foreground">Our support team is here for you</p>
+          </div>
+          <Link href={`/customer/support?category=order&order_id=${order.id}`}
+            className="shrink-0 rounded-xl border border-border/50 px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted">
+            Get Help
+          </Link>
         </div>
       </div>
 
@@ -1563,6 +1619,7 @@ export default function OrderDetailPage() {
         {showReschedule && (
           <RescheduleModal
             orderId={order.id}
+            providerId={order.provider?.id ?? null}
             currentDate={order.pickup_date}
             currentSlot={order.pickup_time_slot}
             onClose={() => setShowReschedule(false)}
