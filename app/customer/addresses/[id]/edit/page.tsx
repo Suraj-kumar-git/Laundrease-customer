@@ -74,6 +74,8 @@ export default function EditAddressPage() {
             state:          address.state ?? '',
             postal_code:    address.postal_code ?? '',
             country_code:   address.country_code ?? 'IN',
+            latitude:       address.latitude  ?? null,
+            longitude:      address.longitude ?? null,
             instructions:   address.instructions ?? '',
             contact_name:   address.contact_name ?? '',
             contact_phone:  address.contact_phone ?? '',

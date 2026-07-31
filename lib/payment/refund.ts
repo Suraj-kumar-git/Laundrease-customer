@@ -151,8 +151,8 @@ export async function checkOriginalMethodRefundStatus(refundId: number): Promise
 
   await query(
     `UPDATE payment_refunds
-     SET status = $1, gateway_response = COALESCE(gateway_response, '{}'::jsonb) || $2::jsonb,
-         completed_at = CASE WHEN $1 = 'completed' THEN NOW() ELSE completed_at END,
+     SET status = $1::TEXT, gateway_response = COALESCE(gateway_response, '{}'::jsonb) || $2::jsonb,
+         completed_at = CASE WHEN $1::TEXT = 'completed' THEN NOW() ELSE completed_at END,
          updated_at = NOW()
      WHERE id = $3`,
     [statusResult.status, JSON.stringify(statusResult.rawResponse), refundId]

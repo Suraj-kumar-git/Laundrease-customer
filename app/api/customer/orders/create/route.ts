@@ -6,6 +6,7 @@ import { calculateEstimatedDeliveryDate } from '@/lib/delivery-estimate'
 import { getActiveGateway } from '@/lib/payment'
 import { getMixedLoadProductTypeId } from '@/lib/product-types'
 import { checkProviderOrderEligibility } from '@/lib/subscription'
+import { getGstRate, applyGst } from '@/lib/gst'
 import { randomUUID } from 'crypto'
 import {
   successResponse, errorResponse, validationError,
@@ -40,6 +41,7 @@ interface CreateOrderBody {
   wallet_amount?:        number   // amount to use from wallet
   coupon_code?:          string
   special_instructions?: string
+  customer_gstin?:       string   // optional — B2B customers (hotels/hospitals) claiming ITC
   draft_order_number?:   string   // idempotency key from cart
 }
 
@@ -71,6 +73,9 @@ export async function POST(req: NextRequest) {
   if (!body.pickup_time_slot)                  errors.pickup_time_slot   = 'Pickup time slot is required'
   if (!body.services?.length)                  errors.services           = 'At least one service is required'
   if (!body.payment_method)                    errors.payment_method     = 'Payment method is required'
+  const customerGstin = body.customer_gstin?.trim().toUpperCase() || null
+  if (customerGstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(customerGstin))
+    errors.customer_gstin = 'Enter a valid GST number (e.g. 22AAAAA0000A1Z5)'
   if (Object.keys(errors).length > 0) return validationError(errors)
 
   for (const svc of body.services) {
@@ -142,7 +147,8 @@ export async function POST(req: NextRequest) {
 
       // ---- Provider ---------------------------------------------------------
       const providerRes = await client.query(
-        `SELECT lp.id, lp.business_name
+        `SELECT lp.id, lp.business_name, lp.latitude, lp.longitude,
+                lp.has_gst, lp.gst_inclusive_pricing
          FROM laundry_profiles lp
          WHERE lp.id = $1 AND lp.status = 'active' AND lp.is_verified = TRUE`,
         [body.laundry_profile_id]
@@ -170,24 +176,123 @@ export async function POST(req: NextRequest) {
       if (customer.status === 'suspended')
         throw new Error('Your account has been suspended. Please contact support.')
 
+      // ---- Server-side price resolution (SECURITY) ---------------------------
+      // Never trust the client's unit_price/line_total — re-derive every line
+      // from the provider's actual catalog (provider override > base price),
+      // the exact same resolution /api/customer/laundry-providers/[id]/services
+      // uses, including the GST-inclusive overlay. Without this, a customer
+      // could submit an arbitrary price for a real order.
+      const gstInclusive = provider.has_gst && provider.gst_inclusive_pricing
+      const gstRate      = gstInclusive ? await getGstRate() : 0
+
+      const resolvedServices: ServiceItem[] = []
+      for (const svc of body.services) {
+        if (svc.type === 'per_kg') {
+          const priceRow = await client.query(
+            `SELECT
+               COALESCE(ps.price_per_kg_override, ps.price_override, s.price_per_kg, s.base_price) AS price,
+               COALESCE(ps.is_express_available_override, s.is_express_available) AS effective_express,
+               COALESCE(ps.express_multiplier_override, s.express_multiplier) AS effective_multiplier
+             FROM provider_services ps
+             JOIN services s ON s.id = ps.service_id
+             WHERE ps.provider_id = $1 AND ps.service_id = $2
+               AND s.category IN ('wash_fold', 'wash_iron')`,
+            [body.laundry_profile_id, svc.service_id]
+          )
+          if (priceRow.rowCount === 0) throw new Error('SERVICE_UNAVAILABLE')
+          const row = priceRow.rows[0]
+          const basePrice = gstInclusive
+            ? applyGst(parseFloat(row.price), gstRate)!
+            : parseFloat(row.price)
+          const multiplier   = parseFloat(row.effective_multiplier)
+          const isExpress    = !!svc.is_express && row.effective_express
+          const weightKg     = svc.weight_kg!
+          const lineTotal    = Math.round(basePrice * (isExpress ? multiplier : 1) * weightKg * 100) / 100
+          resolvedServices.push({
+            ...svc, unit_price: basePrice, line_total: lineTotal,
+            is_express: isExpress, express_multiplier: multiplier,
+          })
+        } else {
+          const priceRow = await client.query(
+            `SELECT
+               COALESCE(ppsp.unit_price, psp.unit_price) AS price,
+               s.is_express_available, s.express_multiplier
+             FROM product_service_prices psp
+             JOIN product_types pt ON pt.id = psp.product_type_id
+             JOIN services s ON s.id = psp.service_id
+             LEFT JOIN provider_product_service_prices ppsp
+               ON ppsp.provider_id = $1 AND ppsp.product_type_id = psp.product_type_id
+                  AND ppsp.service_id = psp.service_id
+             INNER JOIN provider_services ps ON ps.provider_id = $1 AND ps.service_id = psp.service_id
+             WHERE pt.id = $2 AND s.id = $3 AND pt.is_active = TRUE
+               AND s.category NOT IN ('wash_fold', 'wash_iron')
+               AND (ppsp.unit_price IS NOT NULL OR psp.unit_price IS NOT NULL)`,
+            [body.laundry_profile_id, svc.product_type_id, svc.service_id]
+          )
+          if (priceRow.rowCount === 0) throw new Error('SERVICE_UNAVAILABLE')
+          const row = priceRow.rows[0]
+          const basePrice = gstInclusive
+            ? applyGst(parseFloat(row.price), gstRate)!
+            : parseFloat(row.price)
+          const multiplier   = parseFloat(row.express_multiplier)
+          const isExpress    = !!svc.is_express && row.is_express_available
+          const quantity     = svc.quantity!
+          const lineTotal    = Math.round(basePrice * (isExpress ? multiplier : 1) * quantity * 100) / 100
+          resolvedServices.push({
+            ...svc, unit_price: basePrice, line_total: lineTotal,
+            is_express: isExpress, express_multiplier: multiplier,
+          })
+        }
+      }
+
       // ---- Subtotal ---------------------------------------------------------
       const subtotal = Math.round(
-        body.services.reduce((s, svc) => s + svc.line_total, 0) * 100
+        resolvedServices.reduce((s, svc) => s + svc.line_total, 0) * 100
       ) / 100
+
+      // ---- Pickup pincode + coordinates --------------------------------------
+      // Pickup pincode is stored denormalized so the delivery available-orders
+      // query can match it directly — it was never being populated before,
+      // which silently broke region matching for every order (the query
+      // would fall through to a fragile city-substring match instead).
+      // Coordinates (best-effort — NULL if this address was never geocoded)
+      // feed the distance-based delivery-fee calculation right below.
+      let pickupPincode: string | null = null
+      let pickupLat: number | null = null
+      let pickupLng: number | null = null
+      if (body.address_id) {
+        const addrRes = await client.query(
+          `SELECT postal_code, latitude, longitude FROM customer_addresses WHERE id = $1 AND customer_profile_id = (
+             SELECT id FROM customer_profiles WHERE user_id = $2
+           )`,
+          [body.address_id, userId]
+        )
+        pickupPincode = addrRes.rows[0]?.postal_code ?? null
+        pickupLat = addrRes.rows[0]?.latitude ?? null
+        pickupLng = addrRes.rows[0]?.longitude ?? null
+      }
+
+      const distanceRes = await client.query<{ distance_km: string | null }>(
+        `SELECT haversine_km($1, $2, $3, $4)::TEXT AS distance_km`,
+        [pickupLat, pickupLng, provider.latitude, provider.longitude]
+      )
+      const distanceKm = distanceRes.rows[0]?.distance_km != null
+        ? parseFloat(distanceRes.rows[0].distance_km) : null
 
       // ---- Fees from order_fee_config via DB function ----------------------
       // calculate_order_fees() reads order_fee_config, respects is_active,
       // skips express_surcharge if !is_express, applies free_above_amount cap
       const feesRes = await client.query(
-        `SELECT calculate_order_fees($1, $2, NULL, $3) AS fees`,
-        [subtotal, body.is_express, body.laundry_profile_id]
+        `SELECT calculate_order_fees($1, $2, $3, $4) AS fees`,
+        [subtotal, body.is_express, distanceKm, body.laundry_profile_id]
       )
       const feeRows: Array<{
-        code:         string
-        display_name: string
-        charge_type:  string
-        amount:       number
-        is_free:      boolean
+        code:          string
+        display_name:  string
+        charge_type:   string
+        amount:        number
+        is_free:       boolean
+        taxable_base?: number
       }> = feesRes.rows[0].fees ?? []
       const feesTotal = feeRows.reduce((s, f) => s + parseFloat(String(f.amount)), 0)
 
@@ -197,7 +302,8 @@ export async function POST(req: NextRequest) {
       if (body.coupon_code) {
         const couponRes = await client.query(
           `SELECT code, discount_type, discount_value, max_discount,
-                  min_order_amount, usage_limit_global, usage_limit_per_user, first_order_only
+                  min_order_amount, usage_limit_global, usage_limit_per_user,
+                  first_order_only, laundry_profile_id
            FROM coupons
            WHERE code = $1 AND is_active = TRUE
              AND (starts_at IS NULL OR starts_at <= NOW())
@@ -243,7 +349,9 @@ export async function POST(req: NextRequest) {
           // first_order_only — same "actually placed" definition used by
           // /api/customer/coupons/validate and the dashboard/orders-list
           // routes: a pending online-payment order that hasn't paid yet
-          // doesn't count as placed.
+          // doesn't count as placed. Scoped to the coupon's own provider
+          // when it has one — a provider's "first order with us" coupon
+          // only cares about history with THAT provider.
           let firstOrderOk = true
           if (c.first_order_only) {
             const historyRes = await client.query(
@@ -251,13 +359,20 @@ export async function POST(req: NextRequest) {
                FROM orders
                WHERE customer_id = $1
                  AND status NOT IN ('cancelled', 'failed', 'rejected')
-                 AND (payment_method LIKE '%cod%' OR payment_status = 'paid')`,
-              [userId]
+                 AND (payment_method LIKE '%cod%' OR payment_status = 'paid')
+                 AND ($2::BIGINT IS NULL OR laundry_profile_id = $2)`,
+              [userId, c.laundry_profile_id]
             )
             firstOrderOk = historyRes.rows[0].n === 0
           }
 
-          if (meetsMin && perUserOk && globalOk && firstOrderOk) {
+          // Provider-scoped coupon — the real enforcement point: reject if
+          // it doesn't belong to this order's actual provider. Frontend
+          // state (checkout selection) is never trusted here.
+          const providerOk = c.laundry_profile_id == null
+            || Number(c.laundry_profile_id) === Number(body.laundry_profile_id)
+
+          if (meetsMin && perUserOk && globalOk && firstOrderOk && providerOk) {
             discountAmount = c.discount_type === 'percent'
               ? (subtotal * parseFloat(c.discount_value)) / 100
               : parseFloat(c.discount_value)
@@ -273,13 +388,15 @@ export async function POST(req: NextRequest) {
         Math.round((subtotal + feesTotal - discountAmount) * 100) / 100
       )
 
-      // GST is just another row from order_fee_config (already included in
-      // feesTotal/totalAmount above) — pulled out separately so it can be
-      // stored in orders.tax_amount for invoices/order-detail breakdowns
-      // that read the column directly instead of the adjustments list.
-      const taxAmount = feeRows
-        .filter(f => f.code === 'gst')
-        .reduce((s, f) => s + parseFloat(String(f.amount)), 0)
+      // Unlike a checkout fee, GST here is a portion already embedded in the
+      // subtotal (the provider's GST-inclusive-pricing toggle folds it into
+      // each service's price at display time — see the customer-facing
+      // services endpoint) — so it's reverse-derived from the subtotal, not
+      // added on top. Purely informational: it feeds orders.tax_amount for
+      // the invoice's taxable-value/GST breakdown; total_amount is unaffected.
+      const taxAmount = (provider.has_gst && provider.gst_inclusive_pricing)
+        ? Math.round((subtotal - subtotal / (1 + (await getGstRate()) / 100)) * 100) / 100
+        : 0
 
       // ---- Wallet -----------------------------------------------------------
       let effectiveWalletAmount = 0
@@ -330,24 +447,9 @@ export async function POST(req: NextRequest) {
         {
           providerId: body.laundry_profile_id,
           pickupDate: body.pickup_date,
-          items: body.services.map(svc => ({ serviceId: svc.service_id, isExpress: svc.is_express })),
+          items: resolvedServices.map(svc => ({ serviceId: svc.service_id, isExpress: svc.is_express })),
         }
       )
-
-      // Pickup pincode, stored denormalized so the delivery available-orders
-      // query can match it directly — it was never being populated before,
-      // which silently broke region matching for every order (the query
-      // would fall through to a fragile city-substring match instead).
-      let pickupPincode: string | null = null
-      if (body.address_id) {
-        const addrRes = await client.query(
-          `SELECT postal_code FROM customer_addresses WHERE id = $1 AND customer_profile_id = (
-             SELECT id FROM customer_profiles WHERE user_id = $2
-           )`,
-          [body.address_id, userId]
-        )
-        pickupPincode = addrRes.rows[0]?.postal_code ?? null
-      }
 
       const orderRes = await client.query(
         `INSERT INTO orders (
@@ -356,15 +458,15 @@ export async function POST(req: NextRequest) {
            pickup_date, pickup_time_slot, special_instructions,
            is_express, subtotal, tax_amount, discount_amount,
            total_amount, payment_status, payment_method, assignment_status,
-           estimated_delivery_date
-         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'unassigned',$17)
+           estimated_delivery_date, customer_gstin
+         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'unassigned',$17,$18)
          RETURNING id, public_id`,
         [
           orderNumber, userId, body.laundry_profile_id,
           body.pickup_address, body.delivery_address ?? body.pickup_address, pickupPincode,
           body.pickup_date, body.pickup_time_slot, body.special_instructions ?? null,
           body.is_express, subtotal, taxAmount, discountAmount, totalAmount,
-          paymentStatus, paymentMethod, estimatedDeliveryDate,
+          paymentStatus, paymentMethod, estimatedDeliveryDate, customerGstin,
         ]
       )
       const orderId = orderRes.rows[0].id
@@ -374,10 +476,10 @@ export async function POST(req: NextRequest) {
       // Per-kg items aren't tied to a specific garment — resolve the shared
       // "Regular Laundry (Mixed)" product type once up front rather than
       // hardcoding an id that may not exist in every environment.
-      const hasKgItem = body.services.some(svc => svc.type === 'per_kg')
+      const hasKgItem = resolvedServices.some(svc => svc.type === 'per_kg')
       const mixedLoadProductTypeId = hasKgItem ? await getMixedLoadProductTypeId(client) : null
 
-      for (const svc of body.services) {
+      for (const svc of resolvedServices) {
         const productTypeId = svc.type === 'per_unit' ? (svc.product_type_id ?? 1) : mixedLoadProductTypeId
         const weightKg      = svc.type === 'per_kg'   ? svc.weight_kg              : null
         const quantity      = svc.type === 'per_unit' ? (svc.quantity ?? 1)        : 1
@@ -407,7 +509,10 @@ export async function POST(req: NextRequest) {
             feeCodeToKind(fee.code),   // valid CHECK constraint value
             fee.amount,
             fee.display_name,          // display_name from order_fee_config
-            JSON.stringify({ fee_code: fee.code, is_free: fee.is_free }),
+            JSON.stringify({
+              fee_code: fee.code, is_free: fee.is_free,
+              ...(fee.taxable_base != null ? { taxable_base: fee.taxable_base } : {}),
+            }),
           ]
         )
       }
@@ -559,7 +664,7 @@ export async function POST(req: NextRequest) {
           [result.provider.id]
         )
         if (providerContact?.email) {
-          const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL || 'http://localhost:3000'
+          const baseUrl = process.env.NEXT_PUBLIC_LAUNDRY_URL || 'http://localhost:3000'
           sendProviderNewOrderEmail({
             to: providerContact.email,
             providerName: providerContact.business_name,
@@ -593,6 +698,7 @@ export async function POST(req: NextRequest) {
     if (error.message === 'SUBSCRIPTION_EXPIRED')        return errorResponse('This provider’s subscription has expired and they cannot accept new orders right now. Please choose another provider.', 400)
     if (error.message === 'ORDER_LIMIT_REACHED')         return errorResponse('This provider has reached their order limit for this billing cycle. Please choose another provider.', 400)
     if (error.message === 'CUSTOMER_NOT_FOUND')          return errorResponse('Customer profile not found', 404)
+    if (error.message === 'SERVICE_UNAVAILABLE')         return errorResponse('One or more selected services are no longer available from this provider. Please review your cart and try again.', 400)
     if (error.message === 'COD_DISABLED')                return errorResponse('Cash on Delivery is not available', 400)
     if (error.message === 'COD_LIMIT_EXCEEDED')          return errorResponse('Order amount exceeds COD limit', 400)
     if (error.message === 'WALLET_NOT_FOUND')            return errorResponse('Wallet not found', 400)

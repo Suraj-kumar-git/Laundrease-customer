@@ -21,6 +21,7 @@ export async function getOrCreateSubscriptionInvoiceUrl(
     plan_name:                 string
     plan_tagline:              string | null
     amount_paid:               string
+    tax_amount:                string
     is_trial:                  boolean
     starts_at:                 string
     ends_at:                   string
@@ -42,6 +43,7 @@ export async function getOrCreateSubscriptionInvoiceUrl(
       lsp.name                                                              AS plan_name,
       lsp.tagline                                                           AS plan_tagline,
       lps.amount_paid::TEXT,
+      lps.tax_amount::TEXT,
       lps.is_trial,
       lps.starts_at::TEXT,
       lps.ends_at::TEXT,
@@ -76,12 +78,21 @@ export async function getOrCreateSubscriptionInvoiceUrl(
 
   const addressParts = [row.address_line1, row.city, row.state].filter(Boolean)
 
+  // taxAmount was snapshotted at checkout time (see subscription/checkout
+  // route) — the effective rate is derived from it rather than looked up
+  // live, so the invoice always reflects what was actually charged even if
+  // the admin-configured rate changes later.
+  const amountPaid = parseFloat(row.amount_paid)
+  const taxAmount  = parseFloat(row.tax_amount || '0')
+  const taxableAmount = Math.round((amountPaid - taxAmount) * 100) / 100
+  const gstRate = taxableAmount > 0 ? Math.round((taxAmount / taxableAmount) * 100) : 0
+
   const data: SubscriptionInvoiceData = {
     invoiceNumber,
     invoiceDate:    row.created_at,
     planName:       row.plan_name,
     planTagline:    row.plan_tagline,
-    amountPaid:     parseFloat(row.amount_paid),
+    amountPaid,
     isTrial:        row.is_trial,
     startsAt:       row.starts_at,
     endsAt:         row.ends_at,
@@ -94,6 +105,9 @@ export async function getOrCreateSubscriptionInvoiceUrl(
     providerAddress: addressParts.length ? addressParts.join(', ') : null,
     commissionType:  row.effective_commission_type,
     commissionValue: row.effective_commission_value,
+    taxableAmount,
+    taxAmount,
+    gstRate,
   }
 
   const pdfBuffer = await renderToBuffer(

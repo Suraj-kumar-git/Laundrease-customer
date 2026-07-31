@@ -90,12 +90,31 @@ export interface InvoiceData {
   serviceAccountingCode?: string | null
   serviceDescription?: string | null
 
+  // Service-price GST (the individual laundry provider's own liability —
+  // see supplierGstin above). Always this order's SERVICE-only tax figures,
+  // never combined with feeGst below — they're two different suppliers'
+  // liabilities and must stay visually separate on the Tax Breakdown.
   taxableAmount?: number | null
   taxRate?: number | null
   cgstRate?: number | null
   sgstRate?: number | null
   cgstAmount?: number | null
   sgstAmount?: number | null
+
+  // GST on the platform/convenience fee — Laundrease's own liability, under
+  // Laundrease's own GSTIN, entirely independent of whether this order's
+  // provider is GST-registered. Rendered as its own labeled block in the
+  // Tax Breakdown, never folded into the service-GST figures above.
+  feeGst?: {
+    supplierName:  string
+    supplierGstin: string | null
+    taxableAmount: number
+    taxAmount:     number
+    cgstRate:      number
+    sgstRate:      number
+    cgstAmount:    number
+    sgstAmount:    number
+  } | null
 
   // Signature
   signatureImage?: string | null
@@ -411,6 +430,24 @@ const s = StyleSheet.create({
     fontFamily: 'Helvetica-Bold',
     color: GRAY1,
   },
+  // Sub-header row labeling which supplier/GSTIN a CGST+SGST pair belongs
+  // to — two different tax liabilities (provider vs Laundrease) can appear
+  // in the same table, so each pair needs its own attribution.
+  taxGroupHeader: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: GRAY4,
+    backgroundColor: '#fafafa',
+  },
+  taxGroupHeaderTxt: {
+    fontSize: 6.5,
+    fontFamily: 'Helvetica-Bold',
+    color: GRAY3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
   taxTableRow: {
     flexDirection: 'row',
     paddingHorizontal: 8,
@@ -725,6 +762,20 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docPr
   const sgstRate = data.sgstRate ?? effectiveTaxRate / 2
   const cgstAmount = data.cgstAmount ?? (data.taxAmount > 0 ? data.taxAmount / 2 : 0)
   const sgstAmount = data.sgstAmount ?? (data.taxAmount > 0 ? data.taxAmount / 2 : 0)
+  // Two independent tax liabilities can appear on one order: the provider's
+  // own service-price GST (above) and Laundrease's GST on the platform/
+  // convenience fee (below) — never combined into one figure, since they're
+  // owed by two different suppliers under two different GSTINs.
+  const hasServiceTax = data.taxAmount > 0
+  const hasFeeTax = !!data.feeGst && data.feeGst.taxAmount > 0
+  // Only sum a section's taxable value into the combined "Total Tax" row
+  // when that section actually rendered above — `taxableAmount` on its own
+  // silently defaults to the full subtotal (see line 754) whenever no
+  // explicit value was passed, which is fine as a fallback for a lone
+  // service-tax block but was wrongly leaking a phantom "taxable value" into
+  // the combined total on orders with fee-GST but no service-price GST.
+  const combinedTaxableAmount = (hasServiceTax ? taxableAmount : 0) + (hasFeeTax ? data.feeGst!.taxableAmount : 0)
+  const combinedTaxAmount = data.taxAmount + (data.feeGst?.taxAmount ?? 0)
   const serviceAccountingCode =
     data.serviceAccountingCode ||
     data.items?.find(item => item.sacCode)?.sacCode ||
@@ -996,31 +1047,53 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docPr
               <Text style={[s.taxTableHeaderTxt, s.taxColAmount]}>Tax Amount</Text>
             </View>
 
-            <View style={s.taxTableRow}>
-              <Text style={[s.taxTableTxt, s.taxColDesc]}>CGST</Text>
-              <Text style={[s.taxTableTxt, s.taxColRate]}>
-                {cgstRate}%
-              </Text>
-              <Text style={[s.taxTableTxt, s.taxColTaxable]}>
-                {fmt(taxableAmount)}
-              </Text>
-              <Text style={[s.taxTableTxt, s.taxColAmount]}>
-                {fmt(cgstAmount)}
-              </Text>
-            </View>
+            {/* GST on Services — the provider's own liability, their GSTIN */}
+            {hasServiceTax && (
+              <>
+                <View style={s.taxGroupHeader}>
+                  <Text style={s.taxGroupHeaderTxt}>
+                    GST on Services — Supplier: {data.supplierName || 'Laundrease Services Pvt. Ltd.'}
+                    {' '}(GSTIN: {data.supplierGstin || '27XXXXX0000X1ZX'})
+                  </Text>
+                </View>
+                <View style={s.taxTableRow}>
+                  <Text style={[s.taxTableTxt, s.taxColDesc]}>CGST</Text>
+                  <Text style={[s.taxTableTxt, s.taxColRate]}>{cgstRate}%</Text>
+                  <Text style={[s.taxTableTxt, s.taxColTaxable]}>{fmt(taxableAmount)}</Text>
+                  <Text style={[s.taxTableTxt, s.taxColAmount]}>{fmt(cgstAmount)}</Text>
+                </View>
+                <View style={s.taxTableRow}>
+                  <Text style={[s.taxTableTxt, s.taxColDesc]}>SGST</Text>
+                  <Text style={[s.taxTableTxt, s.taxColRate]}>{sgstRate}%</Text>
+                  <Text style={[s.taxTableTxt, s.taxColTaxable]}>{fmt(taxableAmount)}</Text>
+                  <Text style={[s.taxTableTxt, s.taxColAmount]}>{fmt(sgstAmount)}</Text>
+                </View>
+              </>
+            )}
 
-            <View style={s.taxTableRow}>
-              <Text style={[s.taxTableTxt, s.taxColDesc]}>SGST</Text>
-              <Text style={[s.taxTableTxt, s.taxColRate]}>
-                {sgstRate}%
-              </Text>
-              <Text style={[s.taxTableTxt, s.taxColTaxable]}>
-                {fmt(taxableAmount)}
-              </Text>
-              <Text style={[s.taxTableTxt, s.taxColAmount]}>
-                {fmt(sgstAmount)}
-              </Text>
-            </View>
+            {/* GST on Platform Fee — Laundrease's own liability, own GSTIN */}
+            {hasFeeTax && (
+              <>
+                <View style={s.taxGroupHeader}>
+                  <Text style={s.taxGroupHeaderTxt}>
+                    GST on Platform Fee — Supplier: {data.feeGst!.supplierName}
+                    {data.feeGst!.supplierGstin ? ` (GSTIN: ${data.feeGst!.supplierGstin})` : ''}
+                  </Text>
+                </View>
+                <View style={s.taxTableRow}>
+                  <Text style={[s.taxTableTxt, s.taxColDesc]}>CGST</Text>
+                  <Text style={[s.taxTableTxt, s.taxColRate]}>{data.feeGst!.cgstRate}%</Text>
+                  <Text style={[s.taxTableTxt, s.taxColTaxable]}>{fmt(data.feeGst!.taxableAmount)}</Text>
+                  <Text style={[s.taxTableTxt, s.taxColAmount]}>{fmt(data.feeGst!.cgstAmount)}</Text>
+                </View>
+                <View style={s.taxTableRow}>
+                  <Text style={[s.taxTableTxt, s.taxColDesc]}>SGST</Text>
+                  <Text style={[s.taxTableTxt, s.taxColRate]}>{data.feeGst!.sgstRate}%</Text>
+                  <Text style={[s.taxTableTxt, s.taxColTaxable]}>{fmt(data.feeGst!.taxableAmount)}</Text>
+                  <Text style={[s.taxTableTxt, s.taxColAmount]}>{fmt(data.feeGst!.sgstAmount)}</Text>
+                </View>
+              </>
+            )}
 
             <View style={s.taxTableTotalRow}>
               <Text style={[s.taxTableTotalTxt, s.taxColDesc]}>
@@ -1030,10 +1103,10 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docPr
                 —
               </Text>
               <Text style={[s.taxTableTotalTxt, s.taxColTaxable]}>
-                {fmt(taxableAmount)}
+                {fmt(combinedTaxableAmount)}
               </Text>
               <Text style={[s.taxTableTotalTxt, s.taxColAmount]}>
-                {fmt(data.taxAmount)}
+                {fmt(combinedTaxAmount)}
               </Text>
             </View>
           </View>
