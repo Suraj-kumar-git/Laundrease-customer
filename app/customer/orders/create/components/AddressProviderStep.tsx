@@ -2,6 +2,7 @@
 // app/customer/orders/create/components/AddressProviderStep.tsx
 
 import { useState, useEffect, useRef, useCallback } from 'react'
+import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   MapPin, Home, Briefcase, Building2, Check, Plus,
@@ -19,6 +20,10 @@ interface AddressProviderStepProps {
   // "Providers near you" cards via /customer/orders/create?provider=<id>.
   // Applied once; the user can still switch to any other provider after.
   preferredProviderId?: number | null
+  // The exact address the dashboard was showing that provider for — takes
+  // priority over this step's own "default address" auto-pick, so the two
+  // can never disagree about which address's provider list to use.
+  preferredAddressId?: number | null
   // onComplete also returns prefetched services so Step 2 has zero loading time
   onComplete: (
     address: Address,
@@ -57,6 +62,7 @@ export function AddressProviderStep({
   initialAddress,
   initialProvider,
   preferredProviderId,
+  preferredAddressId,
   onComplete,
 }: AddressProviderStepProps) {
   const [addresses, setAddresses]               = useState<Address[]>([])
@@ -68,6 +74,11 @@ export function AddressProviderStep({
   const [selectedProvider, setSelectedProvider] = useState<LaundryProvider | null>(initialProvider ?? null)
   const [showDropdown, setShowDropdown]         = useState(false)
   const [providerError, setProviderError]       = useState<string | null>(null)
+  // When arriving via a provider deep-link (dashboard's "Create order" card),
+  // skip straight to Services once the default address + that provider are
+  // resolved — don't make the customer see/click through this step at all.
+  // Falls back to the normal picker UI if the provider turns out unavailable.
+  const [autoAdvancing, setAutoAdvancing]       = useState(!!preferredProviderId && !initialProvider)
   // Prefetched services cache: keyed by provider id
   const servicesCache = useRef<Map<number, { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }>>(new Map())
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -83,8 +94,16 @@ export function AddressProviderStep({
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
+  // One-shot guard so a duplicate effect invocation (React Strict Mode's
+  // dev-only double-invoke on mount, in particular) can't fire a second
+  // /api/customer/addresses request and re-run address/provider selection —
+  // which was visibly re-showing step 1 for a moment on the deep-link path.
+  const addressesFetchedRef = useRef(false)
+
   // Load addresses
   useEffect(() => {
+    if (addressesFetchedRef.current) return
+    addressesFetchedRef.current = true
     fetch('/api/customer/addresses', { credentials: 'include' })
       .then(r => r.json())
       .then(json => {
@@ -92,13 +111,21 @@ export function AddressProviderStep({
           const addrs: Address[] = json.data?.addresses ?? json.data ?? []
           setAddresses(addrs)
           if (!selectedAddress) {
-            const def = addrs.find(a => a.is_default) ?? addrs[0]
+            // Prefer the exact address the dashboard was showing (by id) —
+            // only fall back to "default"/first when it wasn't provided or
+            // no longer exists (e.g. deleted since the dashboard loaded).
+            const preferred = preferredAddressId ? addrs.find(a => a.id === preferredAddressId) : undefined
+            const def = preferred ?? addrs.find(a => a.is_default) ?? addrs[0]
             if (def) setSelectedAddress(def)
+            else if (preferredProviderId) setAutoAdvancing(false)
           }
+        } else if (preferredProviderId) {
+          setAutoAdvancing(false)
         }
       })
-      .catch(() => {})
+      .catch(() => { if (preferredProviderId) setAutoAdvancing(false) })
       .finally(() => setLoadingAddresses(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // One-shot flag: the dashboard's preferred provider is applied only to the
@@ -119,16 +146,33 @@ export function AddressProviderStep({
         setProviders(list)
         if (preferredProviderId && !preferredAppliedRef.current) {
           preferredAppliedRef.current = true
-          const match = list.find(p => p.id === preferredProviderId)
+          // Postgres bigint columns (laundry_profiles.id) come back through
+          // the driver as strings, not numbers — a strict === against the
+          // numeric preferredProviderId parsed from the URL silently never
+          // matched, even when the id was right there in the list. Number()
+          // both sides so this works regardless of which type the API returns.
+          const match = list.find(p => Number(p.id) === preferredProviderId)
           if (match) {
             setSelectedProvider(match)
-            prefetchServices(match.id)
+            prefetchServices(match.id).then(() => {
+              const cached = servicesCache.current.get(match.id) ?? {
+                per_kg_services: [], per_unit_products: [],
+              }
+              onComplete(selectedAddress, selectedAddress, match, cached)
+            })
+          } else {
+            // Deep-linked provider isn't available for this address — fall
+            // back to letting the customer pick manually.
+            setAutoAdvancing(false)
           }
         }
         if (list.length === 0)
           setProviderError(`No providers found for pincode ${selectedAddress.postal_code}`)
       })
-      .catch(() => setProviderError('Failed to load providers'))
+      .catch(() => {
+        setProviderError('Failed to load providers')
+        if (preferredProviderId) setAutoAdvancing(false)
+      })
       .finally(() => setLoadingProviders(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedAddress?.postal_code])
@@ -379,9 +423,14 @@ export function AddressProviderStep({
 
               {/* Avatar + name */}
               <div className="mb-3 flex items-start gap-3">
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/80 to-blue-700 text-lg font-bold text-white">
-                  {provider.business_name.charAt(0)}
-                </div>
+                {provider.logo_url ? (
+                  <Image src={provider.logo_url} alt={provider.business_name} width={48} height={48}
+                    className="h-12 w-12 shrink-0 rounded-xl object-cover" />
+                ) : (
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary/80 to-blue-700 text-lg font-bold text-white">
+                    {provider.business_name.charAt(0)}
+                  </div>
+                )}
                 <div className="flex-1 min-w-0 pr-6">
                   <p className="truncate text-sm font-bold text-foreground">
                     {provider.business_name}
@@ -455,6 +504,15 @@ export function AddressProviderStep({
             </motion.div>
           )
         })}
+      </div>
+    )
+  }
+
+  if (autoAdvancing) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-24">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Loading your order…</p>
       </div>
     )
   }

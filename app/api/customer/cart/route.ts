@@ -232,8 +232,15 @@ export async function POST(req: NextRequest) {
         )
       }
 
-      // Replace items only when services are provided (step 2 save)
-      if (body.selected_services && body.selected_services.length > 0) {
+      // Replace items whenever selected_services is explicitly provided at
+      // all — including an empty array. This used to be gated on
+      // `.length > 0`, which meant a save that cleared every item (going
+      // from some selections back down to none) silently left the OLD
+      // cart_items rows in place instead of deleting them, so a later
+      // fetch (resume, cart drawer, header badge) would resurrect items the
+      // customer had already removed. Omitting the field entirely (step 3/4
+      // saves that don't touch items) still leaves cart_items untouched.
+      if (body.selected_services !== undefined) {
         await client.query(`DELETE FROM cart_items WHERE cart_id = $1`, [cartId])
 
         // Per-kg items aren't tied to a specific garment — resolve the

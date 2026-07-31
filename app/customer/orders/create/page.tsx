@@ -196,6 +196,23 @@ function PageContent() {
   // ?provider=<id> — set by the dashboard's "Providers near you" cards to
   // auto-select that provider once step 1's provider list loads.
   const preferredProviderId = Number(searchParams.get('provider')) || null
+  // ?address=<id> — the exact address the dashboard was showing providers
+  // for when the customer clicked. Step 1 independently re-deriving "the
+  // default address" was the actual bug here: if the customer's dashboard
+  // view (or its own default-resolution) ever disagreed with Step 1's own
+  // default pick, the preferred provider — found for the DASHBOARD's
+  // address — could be entirely absent from Step 1's re-fetched provider
+  // list for a DIFFERENT address, silently falling back to the manual
+  // picker. Passing the exact address id removes the guesswork.
+  const preferredAddressId = Number(searchParams.get('address')) || null
+  // ?reorder=<public_id> — set by the dashboard's "Book again" button. Once
+  // Step 1 resolves the same provider (via preferredProviderId above), this
+  // order's items are fetched and pre-selected on the services step instead
+  // of leaving it empty — "book again" that only re-picked the provider and
+  // still made the customer rebuild the whole cart from scratch wasn't
+  // actually saving them anything.
+  const reorderOrderId = searchParams.get('reorder')
+  const reorderAppliedRef = useRef(false)
   const { user, isLoading: authLoading } = useAuth()
   const { toast } = useToast()
   const { clear: clearGuestCart, syncFromServer } = useCart()
@@ -267,6 +284,13 @@ function PageContent() {
 
   // Stored for resuming after modal decision
   const pendingCartData = useRef<any>(null)
+  // One-shot guard: this effect depends on [user, resumeMode], and `user`
+  // can still legitimately flip from null -> the real user object once auth
+  // resolves — but once we've actually run the cart check, a duplicate
+  // invocation (React Strict Mode's dev-only double-invoke of effects, or
+  // any other re-render that doesn't represent a real navigation) must not
+  // re-fetch and re-flash the loading state a second time.
+  const cartCheckedRef = useRef(false)
 
   useEffect(() => {
     if (!authLoading && !user)
@@ -281,6 +305,8 @@ function PageContent() {
   // ---- On mount: check for existing cart ----------------------------------
   useEffect(() => {
     if (!user) return
+    if (cartCheckedRef.current) return
+    cartCheckedRef.current = true
     const checkCart = async () => {
       setCartLoading(true)
       try {
@@ -299,6 +325,22 @@ function PageContent() {
           const restored = cartToFlowState(json.data, items)
           setState(prev => ({ ...prev, ...restored }))
           setCartLoading(false)
+        } else if (preferredProviderId && cart.provider?.id != null && Number(cart.provider.id) === preferredProviderId) {
+          // Deep-linked from the dashboard to the SAME provider already in
+          // this cart — just resume it, no need to ask.
+          const restored = cartToFlowState(json.data, items)
+          setState(prev => ({ ...prev, ...restored }))
+          setCartLoading(false)
+        } else if (preferredProviderId) {
+          // Deep-linked to a DIFFERENT provider (or the stale cart never
+          // got a provider) — the customer's explicit "Create order" click
+          // is a clear, fresh intent that should win over an old/abandoned
+          // cart, not get intercepted by a "resume?" popup. Clear it and
+          // fall through exactly like the no-existing-cart path, so Step 1's
+          // own auto-advance logic (AddressProviderStep) takes it from here.
+          await fetch('/api/customer/cart', { method: 'DELETE', credentials: 'include' })
+          pendingCartData.current = null
+          setCartLoading(false)
         } else {
           // Landed here directly — show popup
           setExistingCartMeta({
@@ -314,7 +356,7 @@ function PageContent() {
       }
     }
     checkCart()
-  }, [user, resumeMode])
+  }, [user, resumeMode, preferredProviderId])
 
   const handleContinueExisting = () => {
     if (!pendingCartData.current) return
@@ -369,10 +411,66 @@ function PageContent() {
     prefetched: { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }
   ) => {
     setPrefetchedServices(prefetched)
-    setState(prev => ({ ...prev, step: 2, pickup_address: address, delivery_address: delivery, selected_provider: provider }))
+
+    // "Book again" reorder seed — fetched (and awaited) BEFORE step flips to
+    // 2, so ServiceSelectionStep mounts fresh with these already present in
+    // its initialSelected prop. It seeds its own selection state once, on
+    // mount, from that prop — updating selected_services after the fact
+    // wouldn't be picked up, so this can't be a fire-and-forget effect.
+    let reorderSeed: SelectedService[] | null = null
+    if (reorderOrderId && !reorderAppliedRef.current) {
+      reorderAppliedRef.current = true
+      try {
+        const res  = await fetch(`/api/customer/orders/${reorderOrderId}`, { credentials: 'include' })
+        const json = await res.json()
+        if (json.success) {
+          reorderSeed = (json.data.items ?? []).map((item: any) => {
+            const isPerKg = item.weight_kg != null
+            return {
+              type:               isPerKg ? 'per_kg' : 'per_unit',
+              service_id:         item.service_id,
+              service_name:       item.service_name,
+              product_type_id:    isPerKg ? null : item.product_type_id,
+              product_type_name:  item.product_type_name ?? '',
+              weight_kg:          isPerKg ? item.weight_kg : 0,
+              quantity:           isPerKg ? 0 : item.quantity,
+              unit_price:         item.unit_price,
+              mrp:                null,
+              is_express:         !!item.is_express,
+              express_multiplier: item.express_multiplier ?? 1,
+              line_total:         item.line_total,
+              icon:               item.icon,
+            } as SelectedService
+          })
+        }
+      } catch {
+        // Reorder seed is a convenience, not a requirement — fall through
+        // to an empty services step the customer fills in manually.
+      }
+    }
+
+    setState(prev => ({
+      ...prev, step: 2, pickup_address: address, delivery_address: delivery, selected_provider: provider,
+      selected_services: reorderSeed && reorderSeed.length > 0 ? reorderSeed : prev.selected_services,
+    }))
     const draftNum = await saveCartStep(2, { providerId: provider.id, addressId: address.id })
     if (draftNum) setState(prev => ({ ...prev, draft_order_number: draftNum }))
-  }, [saveCartStep])
+  }, [saveCartStep, reorderOrderId])
+
+  // Fired (debounced) on every add/remove/quantity change on the services
+  // step, independent of clicking "Continue" — keeps the server cart (and
+  // the header badge, via syncFromServer) truthful to whatever's currently
+  // selected, so a customer who navigates away mid-selection finds it
+  // exactly as they left it, and the badge can't drift from what's saved.
+  const handleSelectionsLiveSave = useCallback(async (services: SelectedService[]) => {
+    setState(prev => ({ ...prev, selected_services: services }))
+    syncFromServer(toCartLineItems(services))
+    const draftNum = await saveCartStep(2, {
+      services, isExpress: services.some(s => s.is_express),
+      providerId: state.selected_provider?.id, addressId: state.pickup_address?.id,
+    })
+    if (draftNum) setState(prev => ({ ...prev, draft_order_number: draftNum }))
+  }, [saveCartStep, state.selected_provider?.id, state.pickup_address?.id, syncFromServer])
 
   const handleStep2Complete = useCallback(async (services: SelectedService[]) => {
     setState(prev => ({ ...prev, step: 3, selected_services: services }))
@@ -454,6 +552,7 @@ function PageContent() {
           wallet_amount:         walletAmount,
           coupon_code:           state.applied_coupon?.code,
           special_instructions:  state.special_instructions,
+          customer_gstin:        state.customer_gstin,
           // Idempotency key — if API already created this order, returns existing
           draft_order_number:    state.draft_order_number,
         }),
@@ -626,6 +725,7 @@ function PageContent() {
                   initialAddress={state.pickup_address}
                   initialProvider={state.selected_provider}
                   preferredProviderId={preferredProviderId}
+                  preferredAddressId={preferredAddressId}
                   onComplete={handleStep1Complete}
                 />
               )}
@@ -634,6 +734,7 @@ function PageContent() {
                   provider={state.selected_provider}
                   initialSelected={state.selected_services}
                   prefetchedServices={prefetchedServices}
+                  onSelectionsChange={handleSelectionsLiveSave}
                   onComplete={handleStep2Complete}
                 />
               )}
@@ -653,6 +754,7 @@ function PageContent() {
                   orderState={state}
                   onCouponApply={coupon => setState(prev => ({ ...prev, applied_coupon: coupon ?? undefined }))}
                   onSpecialInstructions={val => setState(prev => ({ ...prev, special_instructions: val }))}
+                  onCustomerGstin={val => setState(prev => ({ ...prev, customer_gstin: val }))}
                   onExpressToggle={handleExpressToggle}
                   onEditServices={() => setState(prev => ({ ...prev, step: 2 }))}
                   onSubmit={handleSubmitOrder}
@@ -687,10 +789,32 @@ function PageContent() {
     </>
   )
 }
+// Reads the deep-link identity and remounts PageContent whenever it changes.
+// Next.js reuses the same PageContent instance across same-route navigations
+// (dashboard -> create?provider=A -> back -> create?provider=B never actually
+// unmounts anything since it's the same /customer/orders/create route) — but
+// PageContent and AddressProviderStep both guard their one-shot init logic
+// (cart check, address fetch, preferred-provider auto-advance) behind refs
+// that only ever fire once per mount. Without a remount, a SECOND "Create
+// order" click in the same session hits those already-tripped refs and
+// silently skips the auto-advance entirely, leaving the customer stuck
+// manually re-picking address + provider — this key forces a clean remount
+// so every deep-link click gets a fresh run of that logic.
+function PageWithFreshMountPerDeepLink() {
+  const searchParams = useSearchParams()
+  const mountKey = [
+    searchParams.get('provider') ?? '',
+    searchParams.get('address') ?? '',
+    searchParams.get('resume') ?? '',
+    searchParams.get('reorder') ?? '',
+  ].join(':')
+  return <PageContent key={mountKey} />
+}
+
 export default function CreateOrderPage() {
   return (
     <SearchParamProvider>
-      <PageContent />
+      <PageWithFreshMountPerDeepLink />
     </SearchParamProvider>
   )
 }

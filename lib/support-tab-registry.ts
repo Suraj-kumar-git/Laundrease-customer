@@ -48,7 +48,6 @@ export const GRANTABLE_TABS: GrantableTab[] = [
   { key: 'item-protection',       label: 'Item Protection',       group: 'Operations', icon: ShieldCheck,    adminHref: '/admin/item-protection',          supportHref: '/support/item-protection',          builtForSupport: true  },
   { key: 'item-reports',          label: 'Item Reports',          group: 'Operations', icon: ShieldAlert,    adminHref: '/admin/claims',                   supportHref: '/support/claims',                   builtForSupport: true  },
   { key: 'quick-pickup-requests', label: 'Quick Pickup Requests', group: 'Operations', icon: PhoneCall,      adminHref: '/admin/quick-pickup-requests',    supportHref: '/support/quick-pickup-requests',    builtForSupport: true  },
-  { key: 'cash-ledger',           label: 'Cash Ledger',           group: 'Operations', icon: Wallet,         adminHref: null,                              supportHref: '/support/cash-ledger',              builtForSupport: true  },
   { key: 'sac-codes',             label: 'SAC Codes',             group: 'Operations', icon: Tag,            adminHref: null,                              supportHref: '/support/sac-codes',                builtForSupport: true  },
 
   // ── Marketing ───────────────────────────────────────────────────────────

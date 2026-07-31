@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
          u.profile_image, u.email_verified, u.phone_verified,
          u.created_at,
          cp.loyalty_points, cp.total_orders, cp.last_order_at,
-         cp.marketing_opt_in,
+         cp.marketing_opt_in, cp.gstin,
          COALESCE(wa.balance, 0) AS wallet_balance
        FROM users u
        JOIN customer_profiles cp ON cp.user_id = u.id
@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
       total_orders: row.total_orders,
       last_order_at: row.last_order_at,
       marketing_opt_in: row.marketing_opt_in,
+      gstin: row.gstin,
       wallet_balance: Number(row.wallet_balance),
     })
   } catch (error) {
@@ -64,16 +65,19 @@ export async function PUT(req: NextRequest) {
   const userId = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
-  let body: { full_name?: string; phone?: string }
+  let body: { full_name?: string; phone?: string; gstin?: string | null }
   try { body = await req.json() } catch { return errorResponse('Invalid body', 400) }
 
   const full_name = body.full_name?.trim()
   const phone = body.phone?.trim()
+  const gstin = body.gstin?.trim().toUpperCase()
   const errors: Record<string, string> = {}
 
   if (!full_name || full_name.length < 2) errors.full_name = 'Name must be at least 2 characters'
   if (full_name && full_name.length > 255) errors.full_name = 'Name is too long'
   if (phone && !/^\+?[1-9]\d{1,14}$/.test(phone)) errors.phone = 'Invalid phone number format'
+  if (gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(gstin))
+    errors.gstin = 'Enter a valid GST number (e.g. 22AAAAA0000A1Z5)'
 
   if (Object.keys(errors).length > 0) return validationError(errors)
 
@@ -107,7 +111,17 @@ export async function PUT(req: NextRequest) {
       [full_name, phone || null, userId]
     )
 
-    return successResponse({ updated: true, full_name, phone: phone || currentPhone })
+    // gstin lives on customer_profiles, not users — only touched when the
+    // request actually includes the key (so other profile edits that don't
+    // mention it never accidentally clear a saved GSTIN).
+    if (body.gstin !== undefined) {
+      await query(
+        `UPDATE customer_profiles SET gstin = $1, updated_at = NOW() WHERE user_id = $2`,
+        [gstin || null, userId]
+      )
+    }
+
+    return successResponse({ updated: true, full_name, phone: phone || currentPhone, gstin: gstin || null })
   } catch (error) {
     console.error('[PUT /api/customer/profile]', error)
     return serverErrorResponse('Failed to update profile')

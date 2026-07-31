@@ -17,6 +17,11 @@ interface AddressBody {
   state?:         string
   postal_code?:   string
   country_code:   string
+  // Required — the customer address form now only ever produces an address
+  // via a confirmed map pin (see components/common/AddressMapPicker), so
+  // there's no text-only path left to geocode server-side as a fallback.
+  latitude:       number
+  longitude:      number
   instructions?:  string
   contact_name?:  string
   contact_phone?: string
@@ -28,6 +33,11 @@ async function getCustomerProfileId(userId: string): Promise<number | null> {
     `SELECT id FROM customer_profiles WHERE user_id = $1`, [userId]
   )
   return res.rowCount! > 0 ? res.rows[0].id : null
+}
+
+function isValidCoords(lat: unknown, lng: unknown): lat is number {
+  return typeof lat === 'number' && typeof lng === 'number'
+    && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
 }
 
 // POST — create
@@ -42,10 +52,14 @@ export async function POST(req: NextRequest) {
   if (!body.address_line1?.trim()) return errorResponse('Address line 1 is required', 400)
   if (!body.city?.trim())          return errorResponse('City is required', 400)
   if (!body.country_code?.trim())  return errorResponse('Country code is required', 400)
+  if (!isValidCoords(body.latitude, body.longitude))
+    return errorResponse('Please pick a location on the map', 400)
 
   try {
     const profileId = await getCustomerProfileId(userId)
     if (!profileId) return errorResponse('Customer profile not found', 404)
+
+    const { latitude, longitude } = body
 
     const result = await transaction(async (client) => {
       // Check address count (max 10)
@@ -82,8 +96,9 @@ export async function POST(req: NextRequest) {
         `INSERT INTO customer_addresses (
            customer_profile_id, label, tags, address_line1, address_line2,
            landmark, neighborhood, city, state, postal_code, country_code,
-           instructions, contact_name, contact_phone, is_default, position
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+           instructions, contact_name, contact_phone, is_default, position,
+           latitude, longitude
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
          RETURNING *`,
         [
           profileId, body.label, body.tags ?? [], body.address_line1, body.address_line2 ?? null,
@@ -91,6 +106,7 @@ export async function POST(req: NextRequest) {
           body.state ?? null, body.postal_code ?? null, body.country_code,
           body.instructions ?? null, body.contact_name ?? null,
           body.contact_phone ?? null, isDefault, position,
+          latitude, longitude,
         ]
       )
 
@@ -118,10 +134,14 @@ export async function PUT(req: NextRequest) {
   if (!body.label?.trim())         return errorResponse('Label is required', 400)
   if (!body.address_line1?.trim()) return errorResponse('Address line 1 is required', 400)
   if (!body.city?.trim())          return errorResponse('City is required', 400)
+  if (!isValidCoords(body.latitude, body.longitude))
+    return errorResponse('Please pick a location on the map', 400)
 
   try {
     const profileId = await getCustomerProfileId(userId)
     if (!profileId) return errorResponse('Customer profile not found', 404)
+
+    const { latitude, longitude } = body
 
     const result = await transaction(async (client) => {
       // Verify address belongs to this customer
@@ -147,8 +167,8 @@ export async function PUT(req: NextRequest) {
            landmark      = $5, neighborhood  = $6, city           = $7,
            state         = $8, postal_code   = $9, country_code   = $10,
            instructions  = $11, contact_name = $12, contact_phone = $13,
-           is_default    = $14, updated_at   = NOW()
-         WHERE id = $15
+           is_default    = $14, latitude      = $15, longitude    = $16, updated_at = NOW()
+         WHERE id = $17
          RETURNING *`,
         [
           body.label, body.tags ?? [], body.address_line1, body.address_line2 ?? null,
@@ -156,6 +176,7 @@ export async function PUT(req: NextRequest) {
           body.state ?? null, body.postal_code ?? null, body.country_code ?? 'IN',
           body.instructions ?? null, body.contact_name ?? null,
           body.contact_phone ?? null, body.is_default ?? false,
+          latitude, longitude,
           addressId,
         ]
       )
