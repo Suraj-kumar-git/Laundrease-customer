@@ -1,7 +1,7 @@
 // app/api/customer/orders/route.ts
 // GET /api/customer/orders
 // Returns paginated list of customer orders with status, provider, amounts.
-// Query params: ?page=1&limit=10&status=pending
+// Query params: ?page=1&limit=10&status=pending&time_range=30d&payment=cod
 
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
@@ -9,14 +9,20 @@ import {
   successResponse, serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
 
+const TIME_RANGE_DAYS: Record<string, number> = {
+  '30d': 30, '3m': 90, '6m': 180,
+}
+
 export async function GET(req: NextRequest) {
   const userId = req.headers.get('x-user-id')
   if (!userId) return unauthorizedResponse()
 
   const { searchParams } = req.nextUrl
-  const page   = Math.max(1, parseInt(searchParams.get('page')  ?? '1'))
-  const limit  = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') ?? '10')))
-  const status = searchParams.get('status') // optional filter
+  const page       = Math.max(1, parseInt(searchParams.get('page')  ?? '1'))
+  const limit      = Math.min(50, Math.max(1, parseInt(searchParams.get('limit') ?? '10')))
+  const status     = searchParams.get('status') // optional filter
+  const timeRange  = searchParams.get('time_range') // '30d' | '3m' | '6m'
+  const payment    = searchParams.get('payment') // 'cod' | 'online'
   const offset = (page - 1) * limit
 
   try {
@@ -44,6 +50,17 @@ export async function GET(req: NextRequest) {
       params.push(status)
     }
 
+    if (timeRange && TIME_RANGE_DAYS[timeRange]) {
+      conditions.push(`o.created_at >= NOW() - $${pi++}::INTERVAL`)
+      params.push(`${TIME_RANGE_DAYS[timeRange]} days`)
+    }
+
+    if (payment === 'cod') {
+      conditions.push(`o.payment_method ILIKE '%cod%'`)
+    } else if (payment === 'online') {
+      conditions.push(`o.payment_method NOT ILIKE '%cod%'`)
+    }
+
     const where = conditions.join(' AND ')
 
     const [ordersRes, countRes] = await Promise.all([
@@ -55,6 +72,7 @@ export async function GET(req: NextRequest) {
            o.pickup_date,
            o.pickup_time_slot,
            o.delivery_date,
+           o.delivery_time_slot,
            o.is_express,
            o.subtotal,
            o.total_amount,
@@ -95,6 +113,7 @@ export async function GET(req: NextRequest) {
         pickup_date:      r.pickup_date,
         pickup_time_slot: r.pickup_time_slot,
         delivery_date:    r.delivery_date,
+        delivery_time_slot: r.delivery_time_slot,
         is_express:       r.is_express,
         subtotal:         parseFloat(r.subtotal),
         total_amount:     parseFloat(r.total_amount),

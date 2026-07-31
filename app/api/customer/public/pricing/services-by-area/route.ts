@@ -6,6 +6,7 @@ import {
   serverErrorResponse,
 } from '@/lib/api-response'
 import { PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL } from '@/lib/subscription'
+import { getGstRate, applyGst } from '@/lib/gst'
 
 // GET /api/customer/public/pricing/services-by-area
 // Public — no auth required
@@ -41,11 +42,13 @@ export async function GET(req: NextRequest) {
     let providerIds: number[]
     let cityName: string | null
     let selectedProvider: { id: number; name: string } | null = null
+    let gstInclusive = false
+    let gstRate = 0
 
     if (requestedProviderId) {
       // ---- Specific provider requested — skip area lookup ---------
-      const providerRow = await query<{ id: number; city: string; business_name: string }>(
-        `SELECT lp.id, lp.city, lp.business_name FROM laundry_profiles lp
+      const providerRow = await query<{ id: number; city: string; business_name: string; has_gst: boolean; gst_inclusive_pricing: boolean }>(
+        `SELECT lp.id, lp.city, lp.business_name, lp.has_gst, lp.gst_inclusive_pricing FROM laundry_profiles lp
          WHERE lp.id = $1 AND lp.status = 'active' AND lp.is_verified = TRUE
            AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}`,
         [requestedProviderId]
@@ -59,6 +62,11 @@ export async function GET(req: NextRequest) {
       providerIds = [providerRow.rows[0].id]
       cityName = providerRow.rows[0].city
       selectedProvider = { id: providerRow.rows[0].id, name: providerRow.rows[0].business_name }
+      // Same GST overlay app/api/customer/laundry-providers/[id]/services/
+      // route.ts applies — this endpoint resolves the same per-provider
+      // override price, so it must match once a specific provider is picked.
+      gstInclusive = !!(providerRow.rows[0].has_gst && providerRow.rows[0].gst_inclusive_pricing)
+      gstRate = gstInclusive ? await getGstRate() : 0
     } else {
       // ---- Step 1: Find active providers in this area ---------
       const providerQuery = pincode
@@ -233,8 +241,10 @@ export async function GET(req: NextRequest) {
           display_category: p.display_category,
           icon: p.icon,
           sort_order: p.sort_order,
-          unit_price: Number(p.unit_price),
-          mrp: p.mrp != null ? Number(p.mrp) : null,
+          unit_price: gstInclusive ? applyGst(Number(p.unit_price), gstRate)! : Number(p.unit_price),
+          mrp: p.mrp != null
+            ? (gstInclusive ? applyGst(Number(p.mrp), gstRate) : Number(p.mrp))
+            : null,
         })),
       }))
       // Only return services that have at least one priced product type

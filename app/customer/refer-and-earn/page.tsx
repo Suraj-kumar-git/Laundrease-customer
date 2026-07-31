@@ -130,7 +130,7 @@ function AuthenticatedReferral({
   config: ReferralProgramConfig
   data: CustomerReferralData
 }) {
-  const shareText = `Hey! I use Laundrease for my laundry and it's amazing 🧺\nUse my referral code ${data.code} when signing up and get ${config.referee_discount_type === 'percent' ? config.referee_discount_value + '% off' : '₹' + config.referee_discount_value + ' off'} your first order!\nSign up: https://laundrease.in/register?ref=${data.code}`
+  const shareText = `Hey! I use Laundrease for my laundry and it's amazing 🧺\nUse my referral code ${data.code} when signing up and get ${config.referee_discount_type === 'percent' ? config.referee_discount_value + '% off' : '₹' + config.referee_discount_value + ' off'} your first order!\nSign up: ${process.env.NEXT_PUBLIC_CUSTOMER_URL}/register?ref=${data.code}`
 
   const handleShare = async () => {
     if (navigator.share) {

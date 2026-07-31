@@ -432,27 +432,83 @@ const BUBBLES = [
 ]
 
 // ---- Location hook -----------------------------------------------------------
+// Tracks the *actual* browser permission state (via the Permissions API,
+// where supported) rather than inferring it from whether the last
+// getCurrentPosition() call happened to succeed. That distinction matters:
+// a transient GPS timeout/unavailable error isn't a permission problem, and
+// treating it as one made the "Allow location" banner pop up even for users
+// who had already granted access. It also lets us tell a genuine denial
+// (which the browser will never re-prompt for — the site can't force that
+// dialog to reappear once blocked) apart from "not asked yet" (where
+// clicking the button legitimately triggers the native prompt).
+type LocationPermission = 'granted' | 'denied' | 'prompt' | 'unsupported'
+
 function useLocation() {
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null)
-  const [denied, setDenied] = useState(false)
-  const [asking, setAsking] = useState(false)
+  const [coords,     setCoords]     = useState<{ lat: number; lng: number } | null>(null)
+  const [permission, setPermission] = useState<LocationPermission>('prompt')
+  const [asking,     setAsking]     = useState(false)
+
   const request = useCallback(() => {
-    if (!navigator.geolocation) { setDenied(true); return }
+    if (!navigator.geolocation) { setPermission('unsupported'); return }
     setAsking(true)
     navigator.geolocation.getCurrentPosition(
-      pos => { setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }); setDenied(false); setAsking(false) },
-      ()  => { setDenied(true); setAsking(false) },
+      pos => {
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        setPermission('granted')
+        setAsking(false)
+      },
+      err => {
+        setAsking(false)
+        // Only a real permission denial should trigger the "allow access"
+        // banner — a timeout or transient GPS unavailability isn't that,
+        // and there's nothing useful to prompt the user for in that case.
+        if (err.code === err.PERMISSION_DENIED) setPermission('denied')
+      },
       { timeout: 8000 }
     )
   }, [])
-  useEffect(() => { request() }, [request])
-  return { coords, denied, asking, request }
+
+  // Guards the *automatic* initial request so it only ever fires once total,
+  // no matter which branch below triggers it. Without this, React Strict
+  // Mode's dev-only double-invoke of effects — or a browser (e.g. Safari)
+  // where permissions.query() rejects instead of resolving — could call
+  // request() twice, producing two distinct coords objects and making the
+  // provider list fetch (which depends on coords) run and visibly flicker
+  // twice. The manual "Try again" button calls `request` directly and is
+  // unaffected by this guard.
+  const autoRequestedRef = useRef(false)
+  const requestOnce = useCallback(() => {
+    if (autoRequestedRef.current) return
+    autoRequestedRef.current = true
+    request()
+  }, [request])
+
+  useEffect(() => {
+    let cancelled = false
+    if (navigator.permissions?.query) {
+      navigator.permissions.query({ name: 'geolocation' as PermissionName })
+        .then(status => {
+          if (cancelled) return
+          setPermission(status.state as LocationPermission)
+          // Keep in sync if the user changes the permission from browser
+          // settings while this tab stays open — no reload needed.
+          status.onchange = () => { if (!cancelled) setPermission(status.state as LocationPermission) }
+          if (status.state !== 'denied') requestOnce()
+        })
+        .catch(() => { if (!cancelled) requestOnce() })
+    } else {
+      requestOnce()
+    }
+    return () => { cancelled = true }
+  }, [requestOnce])
+
+  return { coords, permission, asking, request }
 }
 
 // ---- Page --------------------------------------------------------------------
 export default function HomePage() {
   const { user } = useAuth()
-  const { coords, denied, asking, request } = useLocation()
+  const { coords, permission, asking, request } = useLocation()
   const [data,    setData]    = useState<HomeData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(false)
@@ -591,13 +647,13 @@ export default function HomePage() {
             title="Laundry Providers Near You"
             sub={data?.location_used ? 'Showing verified providers within 8 km of your location' : 'Top-rated verified laundry partners'}
           />
-          {denied && (
+          {permission === 'denied' && (
             <div className="mx-auto mb-8 flex max-w-lg items-center gap-3 rounded-2xl border border-amber-300/60 bg-amber-50 px-4 py-3.5 sm:px-5 sm:py-4 dark:border-amber-800 dark:bg-amber-950/30">
               <MapPin className="h-5 w-5 shrink-0 text-amber-600" />
               <div className="flex-1 text-sm text-amber-700 dark:text-amber-400">
-                <span className="font-semibold">Allow location</span> to see providers closest to you.
+                <span className="font-semibold">Location access is blocked.</span> Enable it in your browser's site settings, then try again to see providers closest to you.
               </div>
-              <button onClick={request} className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">Allow</button>
+              <button onClick={request} className="shrink-0 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700">Try again</button>
             </div>
           )}
           {(asking || loading) && !data && <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-blue-600 dark:text-blue-400" /></div>}

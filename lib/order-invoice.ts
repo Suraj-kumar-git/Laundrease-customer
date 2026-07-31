@@ -9,6 +9,7 @@ import React from 'react'
 import { query, queryOne } from '@/lib/db'
 import { InvoiceDocument, InvoiceData } from '@/lib/invoice-pdf'
 import { objectExists, uploadBuffer, getSignedDownloadUrl } from '@/lib/s3'
+import { getPlatformGstin } from '@/lib/gst'
 
 const URL_TTL = 15 * 60 // 15 minutes in seconds
 
@@ -36,9 +37,15 @@ export async function getOrCreateOrderInvoiceUrl(
     provider_name:        string | null
     provider_phone:       string | null
     provider_city:        string | null
+    provider_address_line1: string | null
+    provider_address_line2: string | null
+    provider_state:         string | null
+    provider_postal_code:   string | null
+    provider_gst_number:    string | null
     customer_name:        string
     customer_email:       string
     customer_phone:       string | null
+    customer_gstin:       string | null
   }>(
     `SELECT
        o.id, o.order_number, o.status, o.is_express,
@@ -53,9 +60,17 @@ export async function getOrCreateOrderInvoiceUrl(
        lp.business_name  AS provider_name,
        lp.contact_person_phone          AS provider_phone,
        lp.city           AS provider_city,
+       lp.address_line1  AS provider_address_line1,
+       lp.address_line2  AS provider_address_line2,
+       lp.state          AS provider_state,
+       lp.postal_code    AS provider_postal_code,
+       -- Only ever surfaced on the invoice when this order actually carries
+       -- GST (tax_amount > 0) — see the taxAmount > 0 branch below.
+       lp.gst_number     AS provider_gst_number,
        u.full_name       AS customer_name,
        u.email           AS customer_email,
-       u.phone           AS customer_phone
+       u.phone           AS customer_phone,
+       o.customer_gstin  AS customer_gstin
      FROM orders o
      JOIN users u ON u.id = o.customer_id
      LEFT JOIN laundry_profiles lp ON lp.id = o.laundry_profile_id
@@ -98,11 +113,12 @@ export async function getOrCreateOrderInvoiceUrl(
   )
 
   const adjRes = await query<{
-    kind:   string
-    note:   string | null
-    amount: string
+    kind:     string
+    note:     string | null
+    amount:   string
+    metadata: { fee_code?: string; taxable_base?: number } | null
   }>(
-    `SELECT kind, note, amount::text
+    `SELECT kind, note, amount::text, metadata
      FROM order_adjustments
      WHERE order_id = $1
      ORDER BY id`,
@@ -121,6 +137,59 @@ export async function getOrCreateOrderInvoiceUrl(
      ORDER BY id`,
     [orderId]
   )
+
+  const subtotal  = parseFloat(order.subtotal)
+  const taxAmount = parseFloat(order.tax_amount) // service-price GST only (embedded in subtotal)
+  const serviceTaxableAmount = Math.round((subtotal - taxAmount) * 100) / 100
+
+  // Fee-level GST (Part C) — an entirely separate, additive charge on top of
+  // order fees (platform/convenience fee, express surcharge — never delivery
+  // fee), stored as its own order_adjustments row by calculate_order_fees().
+  // This is Laundrease's OWN tax liability, under Laundrease's OWN GSTIN —
+  // legally distinct from the provider's service-price GST above, so it's
+  // never combined into the same CGST/SGST figures; lib/invoice-pdf.tsx
+  // renders it as its own labeled block via the separate feeGst field.
+  const feeGstRow = adjRes.rows.find(r => r.metadata?.fee_code === 'fee_gst')
+  const feeGstAmount = feeGstRow ? parseFloat(feeGstRow.amount) : 0
+  const feeGstTaxableBase = feeGstRow?.metadata?.taxable_base ?? 0
+  // Effective rate derived from the historical snapshot (not looked up
+  // live), so the invoice always reflects what was actually charged even if
+  // the admin-configured rate changes later — same principle used in
+  // lib/subscription-invoice.ts.
+  const feeGstRate = feeGstTaxableBase > 0 ? Math.round((feeGstAmount / feeGstTaxableBase) * 100) : 0
+
+  const feeGstFields = feeGstAmount > 0 ? {
+    feeGst: {
+      supplierName: 'Laundrease Technologies Pvt. Ltd.',
+      supplierGstin: await getPlatformGstin(),
+      taxableAmount: feeGstTaxableBase,
+      taxAmount: feeGstAmount,
+      cgstRate: feeGstRate / 2,
+      sgstRate: feeGstRate / 2,
+      cgstAmount: Math.round((feeGstAmount / 2) * 100) / 100,
+      sgstAmount: Math.round((feeGstAmount / 2) * 100) / 100,
+    },
+  } : {}
+
+  // A GST-inclusive order is legally the individual laundry provider's own
+  // supply (their GSTIN, their liability) — not the platform's — so the
+  // invoice's "Supplier" section shows the provider's own business details
+  // only when this order actually carries SERVICE-price GST (a platform-fee-
+  // only-GST order must not swap in the provider as legal supplier — that
+  // portion of the tax is the platform's own liability). Non-GST orders keep
+  // the existing Laundrease-branded placeholder (InvoiceDocument's defaults)
+  // exactly as before.
+  const gstSupplierFields = taxAmount > 0 ? {
+    supplierName: order.provider_name,
+    supplierAddress: [order.provider_address_line1, order.provider_address_line2, order.provider_city]
+      .filter(Boolean).join(', ') || null,
+    supplierState: order.provider_state,
+    supplierGstin: order.provider_gst_number,
+    // The taxable (pre-GST) value — subtotal here is GST-inclusive, so this
+    // must be passed explicitly or InvoiceDocument would default it to the
+    // full inclusive subtotal and derive the wrong effective tax rate.
+    taxableAmount: serviceTaxableAmount,
+  } : {}
 
   const invoiceData: InvoiceData = {
     useLogo: true,
@@ -142,18 +211,32 @@ export async function getOrCreateOrderInvoiceUrl(
     customerName: order.customer_name,
     customerEmail: order.customer_email,
     customerPhone: order.customer_phone ?? '',
-    subtotal: parseFloat(order.subtotal),
-    taxAmount: parseFloat(order.tax_amount),
+    // Relevant for ITC claims on any GST-carrying order — a B2B customer can
+    // claim back fee-level GST too, not just service-price GST, so this
+    // gates on either tax source rather than the service-only amount.
+    customerGstin: (taxAmount > 0 || feeGstAmount > 0) ? order.customer_gstin : null,
+    subtotal,
+    taxAmount,
     discountAmount: parseFloat(order.discount_amount),
     totalAmount: parseFloat(order.total_amount),
-    items: itemsRes.rows.map(r => ({
-      label: r.label,
-      quantity: r.quantity,
-      weightKg: r.weight_kg != null ? parseFloat(r.weight_kg) : null,
-      unitPrice: parseFloat(r.unit_price),
-      lineTotal: parseFloat(r.line_total),
-      sacCode: r.sac_code,
-    })),
+    ...gstSupplierFields,
+    ...feeGstFields,
+    items: itemsRes.rows.map(r => {
+      // De-scale to the pre-tax (taxable) value when the service price was
+      // GST-inclusive — items must sum to serviceTaxableAmount, the same
+      // figure the Tax Breakdown box shows, never the GST-inclusive stored
+      // price. Fee-level GST never touches item pricing. Non-GST orders
+      // (the majority) pass through unchanged (ratio === 1).
+      const ratio = taxAmount > 0 ? serviceTaxableAmount / subtotal : 1
+      return {
+        label: r.label,
+        quantity: r.quantity,
+        weightKg: r.weight_kg != null ? parseFloat(r.weight_kg) : null,
+        unitPrice: Math.round(parseFloat(r.unit_price) * ratio * 100) / 100,
+        lineTotal: Math.round(parseFloat(r.line_total) * ratio * 100) / 100,
+        sacCode: r.sac_code,
+      }
+    }),
     adjustments: adjRes.rows.map(r => ({
       kind: r.kind,
       note: r.note,

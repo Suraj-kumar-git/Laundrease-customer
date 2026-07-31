@@ -2,11 +2,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import Link from 'next/link'
+import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import {
-  Package, MapPin, Wallet, Gift, Clock, Plus,
+  Package, MapPin, Wallet, Gift, Plus,
   ArrowRight, CheckCircle2, Truck, Star, Calendar,
-  Tag, Loader2, AlertCircle, Sparkles, RefreshCw,
+  Loader2, AlertCircle, Sparkles, RefreshCw,
   ChevronRight, ChevronDown, Copy, Check, Zap,
   Home, Building2, ShoppingBag, Briefcase, Heart,
   X, Award, ArrowUpRight, ArrowDownLeft,
@@ -35,13 +36,14 @@ interface Coupon {
   code: string; name: string; description: string | null; discountType: string
   discountValue: number; maxDiscount: number | null; minOrderAmount: number | null
   expiresAt: string | null; isPersonal: boolean
+  providerId: number | null; providerName: string | null
+  eligible: boolean; ineligibleReason: string | null
 }
 interface DashboardData {
   profile: { fullName: string; email: string; phone: string; profileImage: string | null; loyaltyPoints: number; totalOrders: number; lastOrderAt: string | null }
   addresses: Address[]
   activeOrder: ActiveOrder | null
   wallet: { balance: number; currency: string }
-  coupons: Coupon[]
   statistics: { completedOrders: number; activeOrders: number; totalSpent: number }
 }
 interface LoyaltyLedgerItem {
@@ -488,41 +490,123 @@ function OrderTimeline({ order }: { order: ActiveOrder }) {
   )
 }
 
-// ---- Coupon Card (unchanged) --------------------------------
+// ---- Coupon Card ----------------------------------------------
+// Compact, fixed-width card (a carousel item on mobile, a row item on
+// desktop) — 4 tight lines: code + discount, description, MOV/status,
+// provider badge + copy. The API already excludes anything permanently
+// dead for this customer (expired, fully used, forfeited first-order-only)
+// — everything that reaches here is either usable now or could still
+// become usable this session (e.g. a different provider or a bigger cart).
 
 function CouponCard({ coupon }: { coupon: Coupon }) {
   const [copied, setCopied] = useState(false)
-  const handleCopy = async () => { await navigator.clipboard.writeText(coupon.code); setCopied(true); setTimeout(() => setCopied(false), 2000) }
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    await navigator.clipboard.writeText(coupon.code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
   const discountLabel = coupon.discountType === 'percent' ? `${coupon.discountValue}% OFF` : `₹${coupon.discountValue} OFF`
+
   return (
-    <div className={cn('relative overflow-hidden rounded-xl border p-4 bg-primary/5',
-      coupon.isPersonal ? 'border-primary/30' : 'border-dashed border-border/60 bg-card')}>
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          <div className={cn('mb-1 inline-block rounded-lg px-2.5 py-1 text-sm font-bold bg-primary',
-            coupon.isPersonal ? 'text-primary-foreground' : 'text-background')}>
-            {discountLabel}
-          </div>
-          <p className="text-sm font-semibold text-foreground leading-tight">{coupon.name}</p>
-        </div>
-        {coupon.isPersonal && <span className="shrink-0 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">Yours</span>}
-      </div>
-      {coupon.description && <p className="mb-3 text-xs text-muted-foreground">{coupon.description}</p>}
+    <div className={cn(
+      'flex w-60 shrink-0 snap-start flex-col gap-1.5 rounded-xl border p-3.5',
+      coupon.eligible ? 'border-primary/25 bg-primary/5' : 'border-dashed border-border/50 bg-card opacity-70',
+    )}>
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Tag className="h-3.5 w-3.5 text-muted-foreground" />
-          <code className="text-xs font-mono font-semibold tracking-wider text-foreground">{coupon.code}</code>
-        </div>
+        <code className="truncate text-sm font-bold font-mono tracking-wide text-foreground">{coupon.code}</code>
+        <span className="shrink-0 text-xs font-bold text-primary">{discountLabel}</span>
+      </div>
+      <p className="truncate text-[11px] text-muted-foreground">{coupon.description || coupon.name}</p>
+      <p className={cn('truncate text-[10px]', !coupon.eligible ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-muted-foreground')}>
+        {!coupon.eligible && coupon.ineligibleReason
+          ? coupon.ineligibleReason
+          : coupon.minOrderAmount ? `Min. order ₹${coupon.minOrderAmount}` : 'No minimum order'}
+      </p>
+      <div className="mt-0.5 flex items-center justify-between gap-2">
+        {coupon.providerId != null ? (
+          <span className="truncate rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground">
+            {coupon.providerName ?? 'Provider'}
+          </span>
+        ) : <span />}
         <button onClick={handleCopy}
-          className="flex items-center gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:text-primary">
-          {copied ? <><Check className="h-3 w-3 text-emerald-500" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
+          className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-primary hover:underline">
+          {copied ? <><Check className="h-3 w-3" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
         </button>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-        {coupon.minOrderAmount && <span>Min. order ₹{coupon.minOrderAmount}</span>}
-        {coupon.expiresAt && <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> Valid till {formatDate(coupon.expiresAt)}</span>}
-      </div>
     </div>
+  )
+}
+
+// ---- Active offers --------------------------------------------
+// Same pincode-scoped eligibility endpoint the checkout page's coupon
+// picker uses (/api/customer/coupons/available) — one shared source of
+// truth instead of a second, separately-maintained coupon query, so a
+// provider's coupon can never be visible here but hidden at checkout (or
+// vice versa). Refetches whenever the selected address changes. Rendered
+// as a horizontal scroll-snap row — a carousel on narrow (mobile) viewports,
+// and effectively a single row of cards once the viewport is wide enough
+// to show them all without scrolling (desktop).
+
+function ActiveOffers({ addressId }: { addressId: number | null }) {
+  const [coupons, setCoupons] = useState<Coupon[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    const params = new URLSearchParams({ order_amount: '0' })
+    if (addressId) params.set('address_id', String(addressId))
+    fetch(`/api/customer/coupons/available?${params}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => {
+        if (cancelled || !j.success) return
+        const mapped: Coupon[] = (j.data?.coupons ?? []).map((c: any) => ({
+          code: c.code,
+          name: c.name,
+          description: c.description ?? null,
+          discountType: c.discount_type,
+          discountValue: parseFloat(c.discount_value),
+          maxDiscount: c.max_discount ? parseFloat(c.max_discount) : null,
+          minOrderAmount: c.min_order_amount ? parseFloat(c.min_order_amount) : null,
+          expiresAt: c.expires_at ?? null,
+          isPersonal: !!c.is_personal,
+          providerId: c.provider_id ?? null,
+          providerName: c.provider_name ?? null,
+          eligible: c.eligible,
+          ineligibleReason: c.ineligible_reason ?? null,
+        }))
+        setCoupons(mapped)
+      })
+      .catch(() => { if (!cancelled) setCoupons([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [addressId])
+
+  if (!loading && coupons.length === 0) return null
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
+      className="rounded-2xl border border-border/50 bg-card p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2">
+        <Gift className="h-4 w-4 text-primary" />
+        <h2 className="text-sm font-semibold text-foreground">
+          Your Offers
+          {coupons.length > 0 && (
+            <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{coupons.length}</span>
+          )}
+        </h2>
+      </div>
+      {loading ? (
+        <div className="flex gap-3 overflow-hidden">
+          {[1, 2, 3].map(i => <div key={i} className="h-24 w-60 shrink-0 animate-pulse rounded-xl bg-muted" />)}
+        </div>
+      ) : (
+        <div className="flex gap-3 overflow-x-auto pb-1 snap-x snap-mandatory [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {coupons.map(c => <CouponCard key={c.code} coupon={c} />)}
+        </div>
+      )}
+    </motion.div>
   )
 }
 
@@ -534,10 +618,10 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
 interface NearbyProvider {
   id: number; business_name: string; city: string
   rating: number; rating_count: number; is_verified: boolean
-  distance?: number
+  distance?: number; logo_url?: string | null
 }
 
-function ProvidersNearYou({ postalCode }: { postalCode: string | null }) {
+function ProvidersNearYou({ postalCode, addressId }: { postalCode: string | null; addressId: number | null }) {
   const [providers, setProviders] = useState<NearbyProvider[]>([])
   const [loading,   setLoading]   = useState(false)
 
@@ -571,9 +655,14 @@ function ProvidersNearYou({ postalCode }: { postalCode: string | null }) {
           {providers.map(p => (
             <div key={p.id} className="flex w-52 shrink-0 flex-col rounded-xl border border-border/50 bg-background p-3.5">
               <div className="flex items-start gap-2.5">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary">
-                  {p.business_name.charAt(0)}
-                </div>
+                {p.logo_url ? (
+                  <Image src={p.logo_url} alt={p.business_name} width={36} height={36}
+                    className="h-9 w-9 shrink-0 rounded-lg object-cover" />
+                ) : (
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary">
+                    {p.business_name.charAt(0)}
+                  </div>
+                )}
                 <div className="min-w-0">
                   <p className="line-clamp-2 text-sm font-semibold leading-snug text-foreground">{p.business_name}</p>
                   <p className="truncate text-[11px] text-muted-foreground">{p.city}</p>
@@ -592,7 +681,7 @@ function ProvidersNearYou({ postalCode }: { postalCode: string | null }) {
                   <span className="flex items-center gap-0.5 text-green-600"><ShieldCheck className="h-3 w-3" /> Verified</span>
                 )}
               </div>
-              <Link href={`/customer/orders/create?provider=${p.id}`}
+              <Link href={addressId ? `/customer/orders/create?provider=${p.id}&address=${addressId}` : `/customer/orders/create?provider=${p.id}`}
                 className="mt-3 flex items-center justify-center gap-1.5 rounded-lg bg-primary/10 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground">
                 Create order <ArrowRight className="h-3.5 w-3.5" />
               </Link>
@@ -637,7 +726,14 @@ function BookAgain() {
       const res  = await fetch(`/api/customer/orders/${order.id}`, { credentials: 'include' })
       const json = await res.json()
       const providerId = json.success ? json.data?.provider?.id : null
-      router.push(providerId ? `/customer/orders/create?provider=${providerId}` : '/customer/orders/create')
+      // reorder=<id> lets the create flow re-fetch this same order's items
+      // and pre-select them on the services step — skipping straight there,
+      // same as the provider-card deep link, but with the previous cart
+      // already filled in so the customer edits from a real starting point
+      // instead of an empty one.
+      router.push(providerId
+        ? `/customer/orders/create?provider=${providerId}&reorder=${order.id}`
+        : '/customer/orders/create')
     } catch {
       router.push('/customer/orders/create')
     }
@@ -706,6 +802,65 @@ function PopularServices() {
           </Link>
         ))}
       </div>
+    </motion.div>
+  )
+}
+
+// ---- Refer & Earn sidebar promo ------------------------------
+
+interface ReferralSummary { code: string; total_referrals: number; total_earnings: number }
+
+function ReferralPromo() {
+  const [data,   setData]   = useState<ReferralSummary | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/customer/referral', { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j.success) setData(j.data) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  if (!data) return null
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(data.code)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard unavailable */ }
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+      className="rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-card to-card p-4 shadow-sm">
+      <div className="mb-2.5 flex items-center gap-2">
+        <Gift className="h-4 w-4 text-primary" />
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Refer & Earn</p>
+      </div>
+      <p className="text-sm text-foreground">
+        Invite friends — you both get wallet credit when they place their first order.
+      </p>
+      <div className="mt-3 flex items-center gap-2 rounded-xl border border-dashed border-primary/40 bg-background px-3 py-2">
+        <code className="flex-1 truncate text-sm font-bold tracking-wider text-primary">{data.code}</code>
+        <button type="button" onClick={handleCopy}
+          className="flex shrink-0 items-center gap-1 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary transition-colors hover:bg-primary/20">
+          {copied ? <><Check className="h-3 w-3" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
+        </button>
+      </div>
+      {data.total_referrals > 0 && (
+        <p className="mt-2.5 text-xs text-muted-foreground">
+          <span className="font-semibold text-foreground">{data.total_referrals}</span> friend{data.total_referrals !== 1 ? 's' : ''} joined
+          {' · '}
+          <span className="font-semibold text-foreground">{formatINR(data.total_earnings)}</span> earned
+        </p>
+      )}
+      <Link href="/customer/refer-and-earn"
+        className="mt-3 flex items-center justify-between text-sm font-medium text-primary hover:underline">
+        View details <ChevronRight className="h-4 w-4" />
+      </Link>
     </motion.div>
   )
 }
@@ -783,8 +938,14 @@ function PopularServices() {
 // }
   // ---- Main page ----------------------------------------------
 
+// Remembers the customer's last-picked dashboard address across reloads
+// (and even closing/reopening the app) — until now this always reset to the
+// account default on every visit, which disagreed with whatever the "New
+// Order" button and provider list below it were actually showing.
+const ADDRESS_PREF_KEY = 'laundrease_dashboard_address_id'
+
 export default function CustomerDashboard() {
-  const { user, markUnauthorized } = useAuth()
+  const { markUnauthorized } = useAuth()
   const router   = useRouter()
 
   const [data,              setData]             = useState<DashboardData | null>(null)
@@ -792,6 +953,11 @@ export default function CustomerDashboard() {
   const [refreshing,        setRefreshing]        = useState(false)
   const [error,             setError]            = useState(false)
   const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null)
+
+  function selectAddress(id: number) {
+    setSelectedAddressId(id)
+    try { localStorage.setItem(ADDRESS_PREF_KEY, String(id)) } catch { /* private browsing, etc. */ }
+  }
 
   // Modal state
   const [loyaltyOpen, setLoyaltyOpen] = useState(false)
@@ -812,8 +978,15 @@ export default function CustomerDashboard() {
       setData(json.data)
       setLocalLoyalty(null); setLocalWallet(null)
       if (json.data.addresses?.length > 0) {
+        // Prefer whatever the customer last picked here (if it still exists
+        // among their current addresses) over silently resetting to default.
+        let remembered: number | null = null
+        try {
+          const stored = Number(localStorage.getItem(ADDRESS_PREF_KEY))
+          if (stored && json.data.addresses.some((a: Address) => a.id === stored)) remembered = stored
+        } catch { /* private browsing, etc. */ }
         const def = json.data.addresses.find((a: Address) => a.isDefault)
-        setSelectedAddressId(def?.id ?? json.data.addresses[0].id)
+        setSelectedAddressId(remembered ?? def?.id ?? json.data.addresses[0].id)
       }
     } catch { setError(true) }
     finally { setLoading(false); setRefreshing(false) }
@@ -942,9 +1115,9 @@ export default function CustomerDashboard() {
             {/* ---- Address + New Order — moved up from below to use this space efficiently ---- */}
             <div className="mt-3 flex flex-col gap-2.5 sm:flex-row">
               <div className="flex-1">
-                <AddressDropdown addresses={data.addresses} selectedId={selectedAddressId} onSelect={setSelectedAddressId} />
+                <AddressDropdown addresses={data.addresses} selectedId={selectedAddressId} onSelect={selectAddress} />
               </div>
-              <Link href="/customer/orders/create"
+              <Link href={selectedAddressId ? `/customer/orders/create?address=${selectedAddressId}` : '/customer/orders/create'}
                 className="group flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 sm:py-0">
                 <Plus className="h-4 w-4" /> New Order
               </Link>
@@ -954,7 +1127,7 @@ export default function CustomerDashboard() {
 
         {/* ---- Main content ---- */}
         <div className="container mx-auto px-4 pb-12">
-          <div className="mt-4 grid gap-6 lg:grid-cols-3">
+          <div className="mt-4 grid items-start gap-6 lg:grid-cols-3">
 
             {/* ============ LEFT / MAIN COLUMN ============ */}
             <div className="min-w-0 space-y-6 lg:col-span-2">
@@ -983,7 +1156,7 @@ export default function CustomerDashboard() {
                     </div>
                     <div className="p-5">
                       <OrderTimeline order={data.activeOrder} />
-                      <div className="mt-5 grid grid-cols-2 gap-4 text-sm">
+                      <div className="mt-5 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
                         <div>
                           <p className="mb-1 text-xs text-muted-foreground">Pickup</p>
                           <p className="flex items-center gap-1.5 font-medium text-foreground">
@@ -1047,6 +1220,7 @@ export default function CustomerDashboard() {
               {/* Providers near you — based on the selected address */}
               <ProvidersNearYou
                 postalCode={data.addresses.find(a => a.id === selectedAddressId)?.postalCode ?? null}
+                addressId={selectedAddressId}
               />
 
               {/* Popular services */}
@@ -1062,22 +1236,9 @@ export default function CustomerDashboard() {
                 <WhyLaundrease />
               </motion.div> */}
 
-              {/* Active Offers */}
-              {data.coupons.length > 0 && (
-                <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-                  className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
-                  <div className="mb-4 flex items-center gap-2">
-                    <Gift className="h-4 w-4 text-primary" />
-                    <h2 className="text-sm font-semibold text-foreground">
-                      Your Offers
-                      <span className="ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{data.coupons.length}</span>
-                    </h2>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {data.coupons.map(c => <CouponCard key={c.code} coupon={c} />)}
-                  </div>
-                </motion.div>
-              )}
+              {/* Active Offers — pincode-scoped to the selected address, same
+                  eligibility rules as checkout */}
+              <ActiveOffers addressId={selectedAddressId} />
             </div>
 
             {/* ============ RIGHT / SIDEBAR ============ */}
@@ -1116,65 +1277,11 @@ export default function CustomerDashboard() {
                 </div>
               </motion.div>
 
-              {/* Account summary */}
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-                className="rounded-2xl border border-border/50 bg-card p-4 shadow-sm">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Account</p>
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Total Orders</span>
-                    <span className="font-semibold text-foreground">{data.profile.totalOrders}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Total Spent</span>
-                    <span className="font-semibold text-foreground">{formatINR(data.statistics.totalSpent)}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Loyalty Points</span>
-                    <button type="button" onClick={() => setLoyaltyOpen(true)}
-                      className="flex items-center gap-1.5 font-semibold text-primary hover:underline">
-                      {displayPoints}
-                      {displayPoints >= 100 && (
-                        <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
-                          Redeemable
-                        </span>
-                      )}
-                    </button>
-                  </div>
-                  {data.profile.lastOrderAt && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Last Order</span>
-                      <span className="font-semibold text-foreground">{formatDate(data.profile.lastOrderAt)}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="mt-4 border-t border-border/40 pt-3">
-                  <Link href={`/customer/profile/${user?.id}`}
-                    className="flex items-center justify-between text-sm font-medium text-primary hover:underline">
-                    View Profile <ChevronRight className="h-4 w-4" />
-                  </Link>
-                </div>
-              </motion.div>
-
-              {/* Support */}
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-                className="rounded-2xl border border-border/50 bg-card p-4 shadow-sm">
-                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Support</p>
-                <div className="space-y-1">
-                  {[
-                    { href: '/customer/support',  label: 'My Tickets'    },
-                    { href: '/customer/help-center',       label: 'Help Center'   },
-                    { href: '/customer/safety-center',     label: 'Safety Center' },
-                    { href: '/customer/settings', label: 'Settings'      },
-                  ].map(item => (
-                    <Link key={item.href} href={item.href}>
-                      <div className="flex items-center justify-between rounded-xl px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground">
-                        {item.label} <ChevronRight className="h-3.5 w-3.5 opacity-40" />
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-              </motion.div>
+              {/* Refer & Earn — profile/settings/support are already one tap
+                  away via the header menu and mobile bottom nav, so this
+                  replaces those with something that isn't duplicated
+                  anywhere else on the dashboard. */}
+              <ReferralPromo />
             </div>
           </div>
         </div>

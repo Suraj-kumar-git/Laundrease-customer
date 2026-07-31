@@ -119,62 +119,12 @@ export async function GET(req: NextRequest) {
       ? walletResult.rows[0]
       : { balance: 0, currency: 'INR' }
 
-    // ---- 6. Coupons (global active + user-specific) -----------------
-    // Only returns coupons that are currently usable by this customer:
-    //   - Active and within date range
-    //   - first_order_only: only when user has no non-cancelled paid/COD orders
-    //   - usage_limit_per_user: user has not yet reached the per-user cap
-    //     (cancelled-order redemptions don't count against the limit)
-    const couponsResult = await query(`
-      WITH user_order_status AS (
-        SELECT EXISTS (
-          SELECT 1
-          FROM orders o
-          WHERE o.customer_id = $1
-            AND o.status NOT IN ('cancelled', 'failed', 'rejected')
-            AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')
-        ) AS has_placed_order
-      )
-      SELECT
-        c.code,
-        c.name,
-        c.description,
-        c.discount_type,
-        c.discount_value,
-        c.max_discount,
-        c.min_order_amount,
-        c.usage_limit_per_user,
-        c.first_order_only,
-        c.ends_at
-      FROM coupons c
-      CROSS JOIN user_order_status uos
-      WHERE c.is_active = TRUE
-        AND (c.applicable_to_user IS NULL OR c.applicable_to_user = $1)
-        AND (c.starts_at IS NULL OR c.starts_at <= NOW())
-        AND (c.ends_at   IS NULL OR c.ends_at   >= NOW())
-        -- first_order_only coupons are hidden once the user has a real order in progress
-        AND (
-          COALESCE(c.first_order_only, FALSE) = FALSE
-          OR uos.has_placed_order = FALSE
-        )
-        -- Per-user usage cap: hide coupon if the user has already redeemed it
-        -- (on a non-cancelled order). Cancelled-order redemptions don't count.
-        AND (
-          c.usage_limit_per_user IS NULL
-          OR (
-            SELECT COUNT(*)
-            FROM coupon_redemptions cr
-            LEFT JOIN orders o ON o.id = cr.order_id
-            WHERE cr.coupon_code = c.code
-              AND cr.user_id = $1
-              AND (o.id IS NULL OR o.status NOT IN ('failed', 'cancelled'))
-          ) < c.usage_limit_per_user
-        )
-      ORDER BY c.min_order_amount ASC NULLS FIRST
-      LIMIT 10;
-    `, [userId])
-
     // ---- 7. Statistics ----------------------------------------------
+    // (Coupons used to be computed here too, but that duplicated — and had
+    // drifted from — the pincode-scoped eligibility logic in
+    // /api/customer/coupons/available. The dashboard's "Your Offers" card
+    // now calls that endpoint directly instead of getting a second,
+    // separately-maintained copy of the same query from here.)
     const statsResult = await query(`
       SELECT
         COUNT(*) FILTER (
@@ -246,18 +196,6 @@ export async function GET(req: NextRequest) {
         balance:  parseFloat(wallet.balance) || 0,
         currency: wallet.currency,
       },
-
-      coupons: couponsResult.rows.map(c => ({
-        code:           c.code,
-        name:           c.name,
-        description:    c.description ?? null,
-        discountType:   c.discount_type,
-        discountValue:  parseFloat(c.discount_value),
-        maxDiscount:    c.max_discount ? parseFloat(c.max_discount) : null,
-        minOrderAmount: c.min_order_amount ? parseFloat(c.min_order_amount) : null,
-        expiresAt:      c.ends_at ?? null,
-        isPersonal:     c.applicable_to_user != null,  // personal = targeted to this user specifically
-      })),
 
       statistics: {
         completedOrders: stats.completed_orders || 0,
