@@ -83,11 +83,22 @@ export async function GET(req: NextRequest) {
       [userId, postalCode]
     )
 
-    const result = couponsRes.rows.map(c => {
+    const result = couponsRes.rows.flatMap(c => {
       const minAmt      = c.min_order_amount ? parseFloat(c.min_order_amount) : 0
       const meetsAmount = orderAmount >= minAmt
       const withinLimit = !c.usage_limit_per_user || c.times_used < parseInt(c.usage_limit_per_user)
       const alreadyUsed = c.usage_limit_per_user && c.times_used >= parseInt(c.usage_limit_per_user)
+
+      // Permanently dead for this customer (not just situationally
+      // ineligible) — drop it entirely rather than show it grayed out.
+      // "Situational" ineligibility (min order not met yet, a different
+      // provider currently selected) stays visible since changing the cart
+      // or provider within this same session can flip it back to eligible;
+      // these two cannot — this customer has exhausted every redemption, or
+      // permanently forfeited a first-order-only coupon by already having
+      // ordered from its provider.
+      const permanentlyDead = !!alreadyUsed || (c.first_order_only && c.has_placed_order_scoped)
+      if (permanentlyDead) return []
 
       // BUG 2 FIX: first_order_only coupons are only eligible when the
       // customer has never placed an order with this coupon's own provider
@@ -110,22 +121,18 @@ export async function GET(req: NextRequest) {
         discountDisplay = `₹${c.discount_value} OFF`
       }
 
-      // Human-readable ineligibility reason (for grayed-out display)
+      // Human-readable ineligibility reason (for grayed-out display) — only
+      // the two situational cases reach here; the two permanent ones were
+      // already filtered out above.
       let ineligible_reason: string | null = null
-      if (alreadyUsed) {
-        ineligible_reason = 'Already used'
-      } else if (!providerMatches) {
+      if (!providerMatches) {
         ineligible_reason = `Only valid for orders with ${c.provider_name ?? 'this provider'}`
-      } else if (c.first_order_only && c.has_placed_order_scoped) {
-        ineligible_reason = c.laundry_profile_id
-          ? `First order with ${c.provider_name ?? 'this provider'} only`
-          : 'First order only'
       } else if (!meetsAmount) {
         const needed = minAmt - orderAmount
         ineligible_reason = `Add ₹${Math.ceil(needed)} more to unlock`
       }
 
-      return {
+      return [{
         code:             c.code,
         name:             c.name,
         description:      c.description,
@@ -140,7 +147,7 @@ export async function GET(req: NextRequest) {
         is_personal:      c.is_personal,
         eligible,
         ineligible_reason,
-      }
+      }]
     })
 
     return successResponse({ coupons: result })

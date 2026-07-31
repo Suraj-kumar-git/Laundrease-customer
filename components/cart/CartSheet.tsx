@@ -195,6 +195,12 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
     setPendingRemoval(null)
   }
 
+  // Total pieces, not distinct lines — matches the site-wide header badge's
+  // own convention (cart-provider's itemCount) so the two never disagree.
+  const totalPieces = items.reduce(
+    (sum, item) => item.pricing_model === 'per_unit' ? sum + item.quantity : sum + 1, 0
+  )
+
   // Group items by service
   const grouped = items.reduce<Record<string, CartItem[]>>((acc, item) => {
     acc[item.service_name] = acc[item.service_name] ?? []
@@ -233,9 +239,9 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
               <div className="flex items-center gap-2">
                 <ShoppingCart className="h-5 w-5 text-primary" />
                 <h2 className="font-semibold text-foreground">Your Cart</h2>
-                {items.length > 0 && (
+                {totalPieces > 0 && (
                   <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-                    {items.length}
+                    {totalPieces}
                   </span>
                 )}
               </div>

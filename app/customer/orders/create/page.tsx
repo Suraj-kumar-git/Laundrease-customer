@@ -205,6 +205,14 @@ function PageContent() {
   // list for a DIFFERENT address, silently falling back to the manual
   // picker. Passing the exact address id removes the guesswork.
   const preferredAddressId = Number(searchParams.get('address')) || null
+  // ?reorder=<public_id> — set by the dashboard's "Book again" button. Once
+  // Step 1 resolves the same provider (via preferredProviderId above), this
+  // order's items are fetched and pre-selected on the services step instead
+  // of leaving it empty — "book again" that only re-picked the provider and
+  // still made the customer rebuild the whole cart from scratch wasn't
+  // actually saving them anything.
+  const reorderOrderId = searchParams.get('reorder')
+  const reorderAppliedRef = useRef(false)
   const { user, isLoading: authLoading } = useAuth()
   const { toast } = useToast()
   const { clear: clearGuestCart, syncFromServer } = useCart()
@@ -403,10 +411,66 @@ function PageContent() {
     prefetched: { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }
   ) => {
     setPrefetchedServices(prefetched)
-    setState(prev => ({ ...prev, step: 2, pickup_address: address, delivery_address: delivery, selected_provider: provider }))
+
+    // "Book again" reorder seed — fetched (and awaited) BEFORE step flips to
+    // 2, so ServiceSelectionStep mounts fresh with these already present in
+    // its initialSelected prop. It seeds its own selection state once, on
+    // mount, from that prop — updating selected_services after the fact
+    // wouldn't be picked up, so this can't be a fire-and-forget effect.
+    let reorderSeed: SelectedService[] | null = null
+    if (reorderOrderId && !reorderAppliedRef.current) {
+      reorderAppliedRef.current = true
+      try {
+        const res  = await fetch(`/api/customer/orders/${reorderOrderId}`, { credentials: 'include' })
+        const json = await res.json()
+        if (json.success) {
+          reorderSeed = (json.data.items ?? []).map((item: any) => {
+            const isPerKg = item.weight_kg != null
+            return {
+              type:               isPerKg ? 'per_kg' : 'per_unit',
+              service_id:         item.service_id,
+              service_name:       item.service_name,
+              product_type_id:    isPerKg ? null : item.product_type_id,
+              product_type_name:  item.product_type_name ?? '',
+              weight_kg:          isPerKg ? item.weight_kg : 0,
+              quantity:           isPerKg ? 0 : item.quantity,
+              unit_price:         item.unit_price,
+              mrp:                null,
+              is_express:         !!item.is_express,
+              express_multiplier: item.express_multiplier ?? 1,
+              line_total:         item.line_total,
+              icon:               item.icon,
+            } as SelectedService
+          })
+        }
+      } catch {
+        // Reorder seed is a convenience, not a requirement — fall through
+        // to an empty services step the customer fills in manually.
+      }
+    }
+
+    setState(prev => ({
+      ...prev, step: 2, pickup_address: address, delivery_address: delivery, selected_provider: provider,
+      selected_services: reorderSeed && reorderSeed.length > 0 ? reorderSeed : prev.selected_services,
+    }))
     const draftNum = await saveCartStep(2, { providerId: provider.id, addressId: address.id })
     if (draftNum) setState(prev => ({ ...prev, draft_order_number: draftNum }))
-  }, [saveCartStep])
+  }, [saveCartStep, reorderOrderId])
+
+  // Fired (debounced) on every add/remove/quantity change on the services
+  // step, independent of clicking "Continue" — keeps the server cart (and
+  // the header badge, via syncFromServer) truthful to whatever's currently
+  // selected, so a customer who navigates away mid-selection finds it
+  // exactly as they left it, and the badge can't drift from what's saved.
+  const handleSelectionsLiveSave = useCallback(async (services: SelectedService[]) => {
+    setState(prev => ({ ...prev, selected_services: services }))
+    syncFromServer(toCartLineItems(services))
+    const draftNum = await saveCartStep(2, {
+      services, isExpress: services.some(s => s.is_express),
+      providerId: state.selected_provider?.id, addressId: state.pickup_address?.id,
+    })
+    if (draftNum) setState(prev => ({ ...prev, draft_order_number: draftNum }))
+  }, [saveCartStep, state.selected_provider?.id, state.pickup_address?.id, syncFromServer])
 
   const handleStep2Complete = useCallback(async (services: SelectedService[]) => {
     setState(prev => ({ ...prev, step: 3, selected_services: services }))
@@ -670,6 +734,7 @@ function PageContent() {
                   provider={state.selected_provider}
                   initialSelected={state.selected_services}
                   prefetchedServices={prefetchedServices}
+                  onSelectionsChange={handleSelectionsLiveSave}
                   onComplete={handleStep2Complete}
                 />
               )}
@@ -741,6 +806,7 @@ function PageWithFreshMountPerDeepLink() {
     searchParams.get('provider') ?? '',
     searchParams.get('address') ?? '',
     searchParams.get('resume') ?? '',
+    searchParams.get('reorder') ?? '',
   ].join(':')
   return <PageContent key={mountKey} />
 }
