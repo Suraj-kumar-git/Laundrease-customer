@@ -72,6 +72,7 @@ export async function GET(
          oi.status        AS item_status,
          oi.modification_note,
          oi.modified_at,
+         oi.product_type_id,
          pt.name          AS product_type_name,
          pt.icon,
          s.id             AS service_id,

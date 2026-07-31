@@ -3,7 +3,8 @@
 // Changes from v2: added filter dropdowns (category, service, gender) to per-unit tab.
 // Everything else unchanged — only the UnitTab function and its parent are modified.
 
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback, useContext, createContext } from 'react'
+import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Droplets, Sparkles, Wind, Zap, Scale, Tag,
@@ -16,12 +17,67 @@ import { LaundryProvider, SelectedService } from '../../types'
 import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveProductIconSrc } from '@/lib/product-icons'
 import { BottomSheet } from '@/components/common/BottomSheet'
+import { useCart } from '@/components/cart-provider'
+
+// ---- Fly-to-cart add animation -------------------------------
+// A small, self-contained system: any "Add" button (KgTab, VariantControl)
+// reads triggerFly out of this context and calls it with the button element
+// it was clicked on. Deliberately NOT prop-drilled through the 3-4 levels
+// of nested components between here and there.
+type FlyTrigger = (el: HTMLElement, emoji: string, imgSrc?: string | null) => void
+const FlyTriggerContext = createContext<FlyTrigger>(() => {})
+
+interface FlyItem {
+  id: number
+  x0: number; y0: number   // starting top-left, viewport px
+  dx: number; dy: number   // delta to the cart icon
+  emoji: string
+  imgSrc?: string | null
+}
+const FLY_SIZE = 40
+
+// Portaled straight to document.body — this step lives inside page.tsx's
+// per-step motion.div (animated x on step transitions), and a `position:
+// fixed` descendant of any transformed ancestor is positioned relative to
+// THAT ancestor, not the real viewport. Escaping via portal is what makes
+// the icon actually fly to the header instead of some offset position.
+function FlyToCartLayer({ items, onDone }: { items: FlyItem[]; onDone: (id: number) => void }) {
+  if (typeof document === 'undefined') return null
+  return createPortal(
+    <AnimatePresence>
+      {items.map(f => (
+        <motion.div
+          key={f.id}
+          initial={{ x: 0, y: 0, scale: 1, opacity: 1 }}
+          animate={{ x: f.dx, y: f.dy, scale: 0.25, opacity: 0.5 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.55, ease: 'easeIn' }}
+          onAnimationComplete={() => onDone(f.id)}
+          style={{ position: 'fixed', left: f.x0, top: f.y0, width: FLY_SIZE, height: FLY_SIZE }}
+          className="pointer-events-none z-[200] flex items-center justify-center rounded-xl border border-primary/30 bg-background text-lg shadow-lg"
+        >
+          {f.imgSrc ? (
+            <ProductIcon src={f.imgSrc} fallbackEmoji={f.emoji} alt="" size={30} className="rounded-lg" />
+          ) : (
+            <span>{f.emoji}</span>
+          )}
+        </motion.div>
+      ))}
+    </AnimatePresence>,
+    document.body
+  )
+}
 
 interface ServiceSelectionStepProps {
   provider: LaundryProvider
   initialSelected: SelectedService[]
   prefetchedServices?: { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }
   onComplete: (services: SelectedService[]) => void
+  // Fired (debounced) after every add/remove/quantity change, independent of
+  // the "Continue" button — so the cart is saved as the customer builds it,
+  // not only once they finish this step. Optional so other, non-order-flow
+  // callers of this component aren't forced to wire it up.
+  onSelectionsChange?: (services: SelectedService[]) => void
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -92,6 +148,7 @@ function KgTab({
   isExpressGlobal: boolean
   onChange: (serviceId: number, field: 'weight_kg' | 'remove', value: any) => void
 }) {
+  const triggerFly = useContext(FlyTriggerContext)
   if (services.length === 0)
     return (
       <div className="rounded-xl border border-dashed border-border/50 p-8 text-center">
@@ -150,7 +207,8 @@ function KgTab({
               </p>
 
               {!isSelected ? (
-                <button type="button" onClick={() => onChange(svc.service_id, 'weight_kg', 1)}
+                <button type="button"
+                  onClick={e => { onChange(svc.service_id, 'weight_kg', 1); triggerFly(e.currentTarget, '🧺') }}
                   className="flex h-8 w-full items-center justify-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 text-xs font-semibold text-primary hover:bg-primary hover:text-primary-foreground">
                   <Plus className="h-3.5 w-3.5" /> Add
                 </button>
@@ -213,9 +271,14 @@ function VariantControl({
   compact?: boolean
 }) {
   const key = variantKey(product)
+  const triggerFly = useContext(FlyTriggerContext)
   if (!sel) {
     return (
-      <button type="button" onClick={() => onChange(key, 'quantity', 1, product)}
+      <button type="button"
+        onClick={e => {
+          onChange(key, 'quantity', 1, product)
+          triggerFly(e.currentTarget, product.icon, resolveProductIconSrc(product.product_type_name))
+        }}
         className={cn(
           'flex items-center justify-center gap-1 rounded-lg border border-primary/30 bg-primary/10 font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground',
           compact ? 'h-7 w-full text-[11px]' : 'h-8 px-4 text-xs'
@@ -692,13 +755,34 @@ function UnitTab({
 
 // ---- Main ---------------------------------------------------
 export function ServiceSelectionStep({
-  provider, initialSelected, prefetchedServices, onComplete,
+  provider, initialSelected, prefetchedServices, onComplete, onSelectionsChange,
 }: ServiceSelectionStepProps) {
   const [kgServices,   setKgServices]   = useState<KgService[]>(prefetchedServices?.per_kg_services ?? [])
   const [unitProducts, setUnitProducts] = useState<UnitProduct[]>(prefetchedServices?.per_unit_products ?? [])
   const [loading,      setLoading]      = useState(!prefetchedServices || (prefetchedServices.per_kg_services.length === 0 && prefetchedServices.per_unit_products.length === 0))
   const [error,        setError]        = useState<string | null>(null)
   const [isExpressGlobal, setIsExpressGlobal] = useState(false)
+
+  // Fly-to-cart animation state
+  const { cartIconRef, bumpCartIcon } = useCart()
+  const [flyItems, setFlyItems] = useState<FlyItem[]>([])
+  const flyIdRef = useRef(0)
+  const triggerFly = useCallback<FlyTrigger>((el, emoji, imgSrc) => {
+    const cartEl = cartIconRef.current
+    if (!cartEl) return
+    const fromRect = el.getBoundingClientRect()
+    const toRect   = cartEl.getBoundingClientRect()
+    const x0 = fromRect.left + fromRect.width / 2 - FLY_SIZE / 2
+    const y0 = fromRect.top + fromRect.height / 2 - FLY_SIZE / 2
+    const dx = (toRect.left + toRect.width / 2 - FLY_SIZE / 2) - x0
+    const dy = (toRect.top + toRect.height / 2 - FLY_SIZE / 2) - y0
+    const id = ++flyIdRef.current
+    setFlyItems(prev => [...prev, { id, x0, y0, dx, dy, emoji, imgSrc }])
+  }, [cartIconRef])
+  const handleFlyDone = useCallback((id: number) => {
+    setFlyItems(prev => prev.filter(f => f.id !== id))
+    bumpCartIcon()
+  }, [bumpCartIcon])
 
   const defaultTab = useMemo(
     () => (prefetchedServices?.per_unit_products && prefetchedServices.per_unit_products.length > 0 ? 'per_unit' : 'per_kg') as 'per_kg' | 'per_unit',
@@ -777,9 +861,23 @@ export function ServiceSelectionStep({
     return result
   }
 
-  const selections = buildSelections()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const selections = useMemo(buildSelections, [kgSel, unitSel, isExpressGlobal, kgServices, unitProducts])
   const subtotal   = selections.reduce((s, i) => s + i.line_total, 0)
   const totalItems = kgSel.size + unitSel.size
+
+  // Autosave — debounced so rapid +/- taps don't fire a request per click.
+  // Fires on every settled change (including down to zero items, e.g. the
+  // customer removed everything), independent of the "Continue" button, so
+  // the cart reflects whatever's on screen even if they navigate away
+  // mid-selection instead of only saving once they finish this step.
+  const liveSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!onSelectionsChange) return
+    if (liveSaveTimer.current) clearTimeout(liveSaveTimer.current)
+    liveSaveTimer.current = setTimeout(() => onSelectionsChange(selections), 700)
+    return () => { if (liveSaveTimer.current) clearTimeout(liveSaveTimer.current) }
+  }, [selections, onSelectionsChange])
 
   if (loading) return <div className="flex justify-center py-16"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
   if (error)   return (
@@ -790,6 +888,8 @@ export function ServiceSelectionStep({
   )
 
   return (
+    <FlyTriggerContext.Provider value={triggerFly}>
+    <FlyToCartLayer items={flyItems} onDone={handleFlyDone} />
     <div className="space-y-5">
       {/* Tabs + Express toggle — single compact row */}
       <div className="flex items-center gap-2">
@@ -849,5 +949,6 @@ export function ServiceSelectionStep({
         )}
       </AnimatePresence>
     </div>
+    </FlyTriggerContext.Provider>
   )
 }

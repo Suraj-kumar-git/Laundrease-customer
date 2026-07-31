@@ -513,9 +513,7 @@ export function CheckoutStep({
         </div>
 
         {/* Customer GSTIN — optional, for B2B orders claiming ITC */}
-        {/* TODO: Add GSTIN input back in when the complete setup to validate the Customer GST number is ready. For now, we are 
-        skipping this as we actively verify the tax identity during checkout and programmatically report the transaction details to the government tax portal. */}
-        {/* <div className="rounded-xl border border-border/50 bg-card p-3">
+        <div className="rounded-xl border border-border/50 bg-card p-3">
           <div className="mb-1.5 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <Receipt className="h-3.5 w-3.5 text-primary" />
@@ -546,7 +544,7 @@ export function CheckoutStep({
           ) : (
             <p className="text-sm text-muted-foreground">{gstin || <span className="italic">None</span>}</p>
           )}
-        </div> */}
+        </div>
 
         {/* Price breakdown */}
         <div className="rounded-xl border border-border/50 bg-card p-3">

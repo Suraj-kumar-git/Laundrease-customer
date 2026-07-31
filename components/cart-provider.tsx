@@ -49,6 +49,15 @@ interface CartContextType {
   // is in flight — UI that reads the cart (e.g. CartSheet) should wait for
   // this to settle before treating an empty result as "cart is empty".
   syncing: boolean
+  // Shared target for the "fly to cart" add animation — the header cart
+  // button attaches this ref to itself; any component that wants to animate
+  // an item flying into the cart reads its current bounding rect off it.
+  cartIconRef: React.RefObject<HTMLButtonElement | null>
+  // Increments each time an add animation lands, so the header badge can
+  // play a little pulse in response without the two components needing a
+  // direct reference to each other.
+  bumpSignal: number
+  bumpCartIcon: () => void
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined)
@@ -64,6 +73,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [syncing, setSyncing] = useState(false)
   const hydratedFromStorage = useRef(false)
   const syncedForUser = useRef<string | null>(null)
+  const cartIconRef = useRef<HTMLButtonElement>(null)
+  const [bumpSignal, setBumpSignal] = useState(0)
+  const bumpCartIcon = useCallback(() => setBumpSignal(s => s + 1), [])
 
   // Load local cart once on mount.
   useEffect(() => {
@@ -222,6 +234,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const value: CartContextType = {
     items, itemCount, subtotal, isExpress, toggleExpress,
     addItem, updateItem, removeItem, clear, syncFromServer, placeOrder, placing, syncing,
+    cartIconRef, bumpSignal, bumpCartIcon,
   }
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>

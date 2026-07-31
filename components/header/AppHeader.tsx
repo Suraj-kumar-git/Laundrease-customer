@@ -65,21 +65,41 @@ const NAV_ITEMS_NOT_AUTH: NavItem[] = [
 
 // ---- Cart icon with badge -----------------------------------
 export function CartBadge({ onClick }: { onClick: () => void }) {
-  const { itemCount: count } = useCart()
+  const { itemCount: count, cartIconRef, bumpSignal } = useCart()
+  const [pulsing, setPulsing] = useState(false)
+  const mountedRef = useRef(false)
+
+  // Skip the pulse on initial mount (bumpSignal starts at 0, but this also
+  // guards against a stray 0->0 effect run) — only a genuine increment,
+  // meaning an add animation just landed, should trigger it.
+  useEffect(() => {
+    if (!mountedRef.current) { mountedRef.current = true; return }
+    setPulsing(true)
+    const t = setTimeout(() => setPulsing(false), 350)
+    return () => clearTimeout(t)
+  }, [bumpSignal])
 
   return (
     <button
+      ref={cartIconRef}
       onClick={onClick}
       className="relative flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       aria-label={`Cart${count > 0 ? ` (${count} items)` : ''}`}
     >
-      <ShoppingCart className="h-5 w-5" />
+      <motion.span
+        className="flex"
+        animate={pulsing ? { scale: [1, 1.35, 1] } : { scale: 1 }}
+        transition={{ duration: 0.35 }}
+      >
+        <ShoppingCart className="h-5 w-5" />
+      </motion.span>
       <AnimatePresence>
         {count > 0 && (
           <motion.span
             initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
+            animate={{ scale: pulsing ? [1, 1.4, 1] : 1 }}
             exit={{ scale: 0 }}
+            transition={{ duration: 0.35 }}
             className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground"
           >
             {count > 9 ? '9+' : count}

@@ -6,7 +6,7 @@ import { calculateEstimatedDeliveryDate } from '@/lib/delivery-estimate'
 import { getActiveGateway } from '@/lib/payment'
 import { getMixedLoadProductTypeId } from '@/lib/product-types'
 import { checkProviderOrderEligibility } from '@/lib/subscription'
-import { getGstRate } from '@/lib/gst'
+import { getGstRate, applyGst } from '@/lib/gst'
 import { randomUUID } from 'crypto'
 import {
   successResponse, errorResponse, validationError,
@@ -176,9 +176,78 @@ export async function POST(req: NextRequest) {
       if (customer.status === 'suspended')
         throw new Error('Your account has been suspended. Please contact support.')
 
+      // ---- Server-side price resolution (SECURITY) ---------------------------
+      // Never trust the client's unit_price/line_total — re-derive every line
+      // from the provider's actual catalog (provider override > base price),
+      // the exact same resolution /api/customer/laundry-providers/[id]/services
+      // uses, including the GST-inclusive overlay. Without this, a customer
+      // could submit an arbitrary price for a real order.
+      const gstInclusive = provider.has_gst && provider.gst_inclusive_pricing
+      const gstRate      = gstInclusive ? await getGstRate() : 0
+
+      const resolvedServices: ServiceItem[] = []
+      for (const svc of body.services) {
+        if (svc.type === 'per_kg') {
+          const priceRow = await client.query(
+            `SELECT
+               COALESCE(ps.price_per_kg_override, ps.price_override, s.price_per_kg, s.base_price) AS price,
+               COALESCE(ps.is_express_available_override, s.is_express_available) AS effective_express,
+               COALESCE(ps.express_multiplier_override, s.express_multiplier) AS effective_multiplier
+             FROM provider_services ps
+             JOIN services s ON s.id = ps.service_id
+             WHERE ps.provider_id = $1 AND ps.service_id = $2
+               AND s.category IN ('wash_fold', 'wash_iron')`,
+            [body.laundry_profile_id, svc.service_id]
+          )
+          if (priceRow.rowCount === 0) throw new Error('SERVICE_UNAVAILABLE')
+          const row = priceRow.rows[0]
+          const basePrice = gstInclusive
+            ? applyGst(parseFloat(row.price), gstRate)!
+            : parseFloat(row.price)
+          const multiplier   = parseFloat(row.effective_multiplier)
+          const isExpress    = !!svc.is_express && row.effective_express
+          const weightKg     = svc.weight_kg!
+          const lineTotal    = Math.round(basePrice * (isExpress ? multiplier : 1) * weightKg * 100) / 100
+          resolvedServices.push({
+            ...svc, unit_price: basePrice, line_total: lineTotal,
+            is_express: isExpress, express_multiplier: multiplier,
+          })
+        } else {
+          const priceRow = await client.query(
+            `SELECT
+               COALESCE(ppsp.unit_price, psp.unit_price) AS price,
+               s.is_express_available, s.express_multiplier
+             FROM product_service_prices psp
+             JOIN product_types pt ON pt.id = psp.product_type_id
+             JOIN services s ON s.id = psp.service_id
+             LEFT JOIN provider_product_service_prices ppsp
+               ON ppsp.provider_id = $1 AND ppsp.product_type_id = psp.product_type_id
+                  AND ppsp.service_id = psp.service_id
+             INNER JOIN provider_services ps ON ps.provider_id = $1 AND ps.service_id = psp.service_id
+             WHERE pt.id = $2 AND s.id = $3 AND pt.is_active = TRUE
+               AND s.category NOT IN ('wash_fold', 'wash_iron')
+               AND (ppsp.unit_price IS NOT NULL OR psp.unit_price IS NOT NULL)`,
+            [body.laundry_profile_id, svc.product_type_id, svc.service_id]
+          )
+          if (priceRow.rowCount === 0) throw new Error('SERVICE_UNAVAILABLE')
+          const row = priceRow.rows[0]
+          const basePrice = gstInclusive
+            ? applyGst(parseFloat(row.price), gstRate)!
+            : parseFloat(row.price)
+          const multiplier   = parseFloat(row.express_multiplier)
+          const isExpress    = !!svc.is_express && row.is_express_available
+          const quantity     = svc.quantity!
+          const lineTotal    = Math.round(basePrice * (isExpress ? multiplier : 1) * quantity * 100) / 100
+          resolvedServices.push({
+            ...svc, unit_price: basePrice, line_total: lineTotal,
+            is_express: isExpress, express_multiplier: multiplier,
+          })
+        }
+      }
+
       // ---- Subtotal ---------------------------------------------------------
       const subtotal = Math.round(
-        body.services.reduce((s, svc) => s + svc.line_total, 0) * 100
+        resolvedServices.reduce((s, svc) => s + svc.line_total, 0) * 100
       ) / 100
 
       // ---- Pickup pincode + coordinates --------------------------------------
@@ -378,7 +447,7 @@ export async function POST(req: NextRequest) {
         {
           providerId: body.laundry_profile_id,
           pickupDate: body.pickup_date,
-          items: body.services.map(svc => ({ serviceId: svc.service_id, isExpress: svc.is_express })),
+          items: resolvedServices.map(svc => ({ serviceId: svc.service_id, isExpress: svc.is_express })),
         }
       )
 
@@ -407,10 +476,10 @@ export async function POST(req: NextRequest) {
       // Per-kg items aren't tied to a specific garment — resolve the shared
       // "Regular Laundry (Mixed)" product type once up front rather than
       // hardcoding an id that may not exist in every environment.
-      const hasKgItem = body.services.some(svc => svc.type === 'per_kg')
+      const hasKgItem = resolvedServices.some(svc => svc.type === 'per_kg')
       const mixedLoadProductTypeId = hasKgItem ? await getMixedLoadProductTypeId(client) : null
 
-      for (const svc of body.services) {
+      for (const svc of resolvedServices) {
         const productTypeId = svc.type === 'per_unit' ? (svc.product_type_id ?? 1) : mixedLoadProductTypeId
         const weightKg      = svc.type === 'per_kg'   ? svc.weight_kg              : null
         const quantity      = svc.type === 'per_unit' ? (svc.quantity ?? 1)        : 1
@@ -629,6 +698,7 @@ export async function POST(req: NextRequest) {
     if (error.message === 'SUBSCRIPTION_EXPIRED')        return errorResponse('This provider’s subscription has expired and they cannot accept new orders right now. Please choose another provider.', 400)
     if (error.message === 'ORDER_LIMIT_REACHED')         return errorResponse('This provider has reached their order limit for this billing cycle. Please choose another provider.', 400)
     if (error.message === 'CUSTOMER_NOT_FOUND')          return errorResponse('Customer profile not found', 404)
+    if (error.message === 'SERVICE_UNAVAILABLE')         return errorResponse('One or more selected services are no longer available from this provider. Please review your cart and try again.', 400)
     if (error.message === 'COD_DISABLED')                return errorResponse('Cash on Delivery is not available', 400)
     if (error.message === 'COD_LIMIT_EXCEEDED')          return errorResponse('Order amount exceeds COD limit', 400)
     if (error.message === 'WALLET_NOT_FOUND')            return errorResponse('Wallet not found', 400)

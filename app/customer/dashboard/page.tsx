@@ -5,9 +5,9 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import {
-  Package, MapPin, Wallet, Gift, Clock, Plus,
+  Package, MapPin, Wallet, Gift, Plus,
   ArrowRight, CheckCircle2, Truck, Star, Calendar,
-  Tag, Loader2, AlertCircle, Sparkles, RefreshCw,
+  Loader2, AlertCircle, Sparkles, RefreshCw,
   ChevronRight, ChevronDown, Copy, Check, Zap,
   Home, Building2, ShoppingBag, Briefcase, Heart,
   X, Award, ArrowUpRight, ArrowDownLeft,
@@ -490,52 +490,49 @@ function OrderTimeline({ order }: { order: ActiveOrder }) {
   )
 }
 
-// ---- Coupon Card (unchanged) --------------------------------
+// ---- Coupon Card ----------------------------------------------
+// Compact, fixed-width card (a carousel item on mobile, a row item on
+// desktop) — 4 tight lines: code + discount, description, MOV/status,
+// provider badge + copy. The API already excludes anything permanently
+// dead for this customer (expired, fully used, forfeited first-order-only)
+// — everything that reaches here is either usable now or could still
+// become usable this session (e.g. a different provider or a bigger cart).
 
 function CouponCard({ coupon }: { coupon: Coupon }) {
   const [copied, setCopied] = useState(false)
-  const handleCopy = async () => { await navigator.clipboard.writeText(coupon.code); setCopied(true); setTimeout(() => setCopied(false), 2000) }
+  const handleCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    await navigator.clipboard.writeText(coupon.code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
   const discountLabel = coupon.discountType === 'percent' ? `${coupon.discountValue}% OFF` : `₹${coupon.discountValue} OFF`
+
   return (
-    <div className={cn('relative overflow-hidden rounded-xl border p-4 bg-primary/5',
-      coupon.isPersonal ? 'border-primary/30' : 'border-dashed border-border/60 bg-card',
-      !coupon.eligible && 'opacity-60')}>
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div>
-          <div className={cn('mb-1 inline-block rounded-lg px-2.5 py-1 text-sm font-bold bg-primary',
-            coupon.isPersonal ? 'text-primary-foreground' : 'text-background')}>
-            {discountLabel}
-          </div>
-          <p className="text-sm font-semibold text-foreground leading-tight">{coupon.name}</p>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1">
-          {coupon.isPersonal && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">Yours</span>}
-          {coupon.providerId != null && (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-              {coupon.providerName ?? 'Provider'} only
-            </span>
-          )}
-        </div>
-      </div>
-      {!coupon.eligible && coupon.ineligibleReason && (
-        <p className="mb-3 flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400">
-          <AlertCircle className="h-3.5 w-3.5 shrink-0" /> {coupon.ineligibleReason}
-        </p>
-      )}
-      {coupon.description && <p className="mb-3 text-xs text-muted-foreground">{coupon.description}</p>}
+    <div className={cn(
+      'flex w-60 shrink-0 snap-start flex-col gap-1.5 rounded-xl border p-3.5',
+      coupon.eligible ? 'border-primary/25 bg-primary/5' : 'border-dashed border-border/50 bg-card opacity-70',
+    )}>
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Tag className="h-3.5 w-3.5 text-muted-foreground" />
-          <code className="text-xs font-mono font-semibold tracking-wider text-foreground">{coupon.code}</code>
-        </div>
-        <button onClick={handleCopy}
-          className="flex items-center gap-1 rounded-lg border border-border/50 bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:text-primary">
-          {copied ? <><Check className="h-3 w-3 text-emerald-500" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
-        </button>
+        <code className="truncate text-sm font-bold font-mono tracking-wide text-foreground">{coupon.code}</code>
+        <span className="shrink-0 text-xs font-bold text-primary">{discountLabel}</span>
       </div>
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
-        {coupon.minOrderAmount && <span>Min. order ₹{coupon.minOrderAmount}</span>}
-        {coupon.expiresAt && <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> Valid till {formatDate(coupon.expiresAt)}</span>}
+      <p className="truncate text-[11px] text-muted-foreground">{coupon.description || coupon.name}</p>
+      <p className={cn('truncate text-[10px]', !coupon.eligible ? 'text-amber-600 dark:text-amber-400 font-medium' : 'text-muted-foreground')}>
+        {!coupon.eligible && coupon.ineligibleReason
+          ? coupon.ineligibleReason
+          : coupon.minOrderAmount ? `Min. order ₹${coupon.minOrderAmount}` : 'No minimum order'}
+      </p>
+      <div className="mt-0.5 flex items-center justify-between gap-2">
+        {coupon.providerId != null ? (
+          <span className="truncate rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold text-muted-foreground">
+            {coupon.providerName ?? 'Provider'}
+          </span>
+        ) : <span />}
+        <button onClick={handleCopy}
+          className="flex shrink-0 items-center gap-1 text-[10px] font-medium text-primary hover:underline">
+          {copied ? <><Check className="h-3 w-3" /> Copied</> : <><Copy className="h-3 w-3" /> Copy</>}
+        </button>
       </div>
     </div>
   )
@@ -546,7 +543,10 @@ function CouponCard({ coupon }: { coupon: Coupon }) {
 // picker uses (/api/customer/coupons/available) — one shared source of
 // truth instead of a second, separately-maintained coupon query, so a
 // provider's coupon can never be visible here but hidden at checkout (or
-// vice versa). Refetches whenever the selected address changes.
+// vice versa). Refetches whenever the selected address changes. Rendered
+// as a horizontal scroll-snap row — a carousel on narrow (mobile) viewports,
+// and effectively a single row of cards once the viewport is wide enough
+// to show them all without scrolling (desktop).
 
 function ActiveOffers({ addressId }: { addressId: number | null }) {
   const [coupons, setCoupons] = useState<Coupon[]>([])
@@ -587,8 +587,8 @@ function ActiveOffers({ addressId }: { addressId: number | null }) {
 
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}
-      className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm">
-      <div className="mb-4 flex items-center gap-2">
+      className="rounded-2xl border border-border/50 bg-card p-4 shadow-sm">
+      <div className="mb-3 flex items-center gap-2">
         <Gift className="h-4 w-4 text-primary" />
         <h2 className="text-sm font-semibold text-foreground">
           Your Offers
@@ -598,11 +598,11 @@ function ActiveOffers({ addressId }: { addressId: number | null }) {
         </h2>
       </div>
       {loading ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {[1, 2].map(i => <div key={i} className="h-32 animate-pulse rounded-xl bg-muted" />)}
+        <div className="flex gap-3 overflow-hidden">
+          {[1, 2, 3].map(i => <div key={i} className="h-24 w-60 shrink-0 animate-pulse rounded-xl bg-muted" />)}
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="flex gap-3 overflow-x-auto pb-1 snap-x snap-mandatory [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {coupons.map(c => <CouponCard key={c.code} coupon={c} />)}
         </div>
       )}
@@ -726,7 +726,14 @@ function BookAgain() {
       const res  = await fetch(`/api/customer/orders/${order.id}`, { credentials: 'include' })
       const json = await res.json()
       const providerId = json.success ? json.data?.provider?.id : null
-      router.push(providerId ? `/customer/orders/create?provider=${providerId}` : '/customer/orders/create')
+      // reorder=<id> lets the create flow re-fetch this same order's items
+      // and pre-select them on the services step — skipping straight there,
+      // same as the provider-card deep link, but with the previous cart
+      // already filled in so the customer edits from a real starting point
+      // instead of an empty one.
+      router.push(providerId
+        ? `/customer/orders/create?provider=${providerId}&reorder=${order.id}`
+        : '/customer/orders/create')
     } catch {
       router.push('/customer/orders/create')
     }
@@ -931,6 +938,12 @@ function ReferralPromo() {
 // }
   // ---- Main page ----------------------------------------------
 
+// Remembers the customer's last-picked dashboard address across reloads
+// (and even closing/reopening the app) — until now this always reset to the
+// account default on every visit, which disagreed with whatever the "New
+// Order" button and provider list below it were actually showing.
+const ADDRESS_PREF_KEY = 'laundrease_dashboard_address_id'
+
 export default function CustomerDashboard() {
   const { markUnauthorized } = useAuth()
   const router   = useRouter()
@@ -940,6 +953,11 @@ export default function CustomerDashboard() {
   const [refreshing,        setRefreshing]        = useState(false)
   const [error,             setError]            = useState(false)
   const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null)
+
+  function selectAddress(id: number) {
+    setSelectedAddressId(id)
+    try { localStorage.setItem(ADDRESS_PREF_KEY, String(id)) } catch { /* private browsing, etc. */ }
+  }
 
   // Modal state
   const [loyaltyOpen, setLoyaltyOpen] = useState(false)
@@ -960,8 +978,15 @@ export default function CustomerDashboard() {
       setData(json.data)
       setLocalLoyalty(null); setLocalWallet(null)
       if (json.data.addresses?.length > 0) {
+        // Prefer whatever the customer last picked here (if it still exists
+        // among their current addresses) over silently resetting to default.
+        let remembered: number | null = null
+        try {
+          const stored = Number(localStorage.getItem(ADDRESS_PREF_KEY))
+          if (stored && json.data.addresses.some((a: Address) => a.id === stored)) remembered = stored
+        } catch { /* private browsing, etc. */ }
         const def = json.data.addresses.find((a: Address) => a.isDefault)
-        setSelectedAddressId(def?.id ?? json.data.addresses[0].id)
+        setSelectedAddressId(remembered ?? def?.id ?? json.data.addresses[0].id)
       }
     } catch { setError(true) }
     finally { setLoading(false); setRefreshing(false) }
@@ -1090,9 +1115,9 @@ export default function CustomerDashboard() {
             {/* ---- Address + New Order — moved up from below to use this space efficiently ---- */}
             <div className="mt-3 flex flex-col gap-2.5 sm:flex-row">
               <div className="flex-1">
-                <AddressDropdown addresses={data.addresses} selectedId={selectedAddressId} onSelect={setSelectedAddressId} />
+                <AddressDropdown addresses={data.addresses} selectedId={selectedAddressId} onSelect={selectAddress} />
               </div>
-              <Link href="/customer/orders/create"
+              <Link href={selectedAddressId ? `/customer/orders/create?address=${selectedAddressId}` : '/customer/orders/create'}
                 className="group flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 sm:py-0">
                 <Plus className="h-4 w-4" /> New Order
               </Link>
