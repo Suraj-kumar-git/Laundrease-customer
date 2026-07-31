@@ -317,9 +317,12 @@ export function SchedulePickup({ provider, pickupAddress, onSelect, initialDate,
       )}
 
       {/* Sticky cart bar — always visible; Continue unlocks once date + slot
-          are picked. Same pattern as the services step's summary bar. */}
+          are picked. Same pattern as the services step's summary bar.
+          Offset above the mobile bottom nav (now visible on this page too)
+          so the two never overlap; back to the normal gap on lg+, where
+          the bottom nav doesn't render at all. */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-        className="sticky bottom-4 z-10 rounded-2xl bg-primary p-4 shadow-xl shadow-primary/25">
+        className="sticky bottom-[calc(4rem+1rem+env(safe-area-inset-bottom))] lg:bottom-4 z-10 rounded-2xl bg-primary p-4 shadow-xl shadow-primary/25">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             {selectedDate && selectedSlot ? (

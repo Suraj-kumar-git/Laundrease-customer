@@ -1,7 +1,8 @@
 // app/api/customer/laundry-providers/[id]/services/route.ts
 import { NextRequest } from 'next/server'
-import { query } from '@/lib/db'
+import { query, queryOne } from '@/lib/db'
 import { successResponse, notFoundResponse, serverErrorResponse } from '@/lib/api-response'
+import { getGstRate, applyGst } from '@/lib/gst'
 
 // GET /api/customer/laundry-providers/[id]/services
 // Returns:
@@ -19,11 +20,14 @@ export async function GET(
 
   try {
     // Verify provider exists and is active
-    const providerCheck = await query(
-      `SELECT id FROM laundry_profiles WHERE id = $1 AND status = 'active' AND is_verified = TRUE`,
+    const providerCheck = await queryOne<{ has_gst: boolean; gst_inclusive_pricing: boolean }>(
+      `SELECT has_gst, gst_inclusive_pricing FROM laundry_profiles
+       WHERE id = $1 AND status = 'active' AND is_verified = TRUE`,
       [providerId]
     )
-    if (providerCheck.rowCount === 0) return notFoundResponse('Provider not found or not active')
+    if (!providerCheck) return notFoundResponse('Provider not found or not active')
+    const gstInclusive = providerCheck.has_gst && providerCheck.gst_inclusive_pricing
+    const gstRate = gstInclusive ? await getGstRate() : 0
 
     // ---- Per-kg services ----------------------------------------
     // These are services where pricing is per kg (wash_fold, wash_iron categories)
@@ -98,14 +102,20 @@ export async function GET(
       [providerId]
     )
 
+    // GST-inclusive pricing is a display/compute-time overlay only — it never
+    // touches the stored override/base values, so turning the provider's
+    // toggle off instantly reverts to the exact original numbers. Applied
+    // identically to price and MRP so the discount % stays consistent.
     return successResponse({
       per_kg_services: kgServicesResult.rows.map(r => ({
         service_id: r.service_id,
         service_name: r.service_name,
         category: r.category,
         description: r.description,
-        price_per_kg: parseFloat(r.price_per_kg),
-        mrp_per_kg: r.mrp_per_kg ? parseFloat(r.mrp_per_kg) : null,
+        price_per_kg: gstInclusive ? applyGst(parseFloat(r.price_per_kg), gstRate)! : parseFloat(r.price_per_kg),
+        mrp_per_kg: r.mrp_per_kg
+          ? (gstInclusive ? applyGst(parseFloat(r.mrp_per_kg), gstRate) : parseFloat(r.mrp_per_kg))
+          : null,
         is_express_available: r.effective_express,
         express_multiplier: parseFloat(r.effective_multiplier),
         turnaround_hours: r.effective_turnaround,
@@ -117,8 +127,10 @@ export async function GET(
         icon: r.icon,
         service_id: r.service_id,
         service_name: r.service_name,
-        unit_price: parseFloat(r.unit_price),
-        mrp: r.mrp ? parseFloat(r.mrp) : null,
+        unit_price: gstInclusive ? applyGst(parseFloat(r.unit_price), gstRate)! : parseFloat(r.unit_price),
+        mrp: r.mrp
+          ? (gstInclusive ? applyGst(parseFloat(r.mrp), gstRate) : parseFloat(r.mrp))
+          : null,
         is_express_available: r.is_express_available,
         express_multiplier: parseFloat(r.express_multiplier),
       })),

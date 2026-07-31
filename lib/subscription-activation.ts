@@ -14,6 +14,7 @@ export interface ActivationParams {
   planId:                   number
   offerId:                  number | null
   amount:                   number          // 0 for free/trial
+  taxAmount:                number          // GST portion within `amount`, 0 for free/trial
   isTrial:                  boolean
   commissionTypeOverride:   string | null
   commissionValueOverride:  number | null
@@ -93,19 +94,20 @@ export async function activateSubscription(p: ActivationParams): Promise<Activat
 
   const sub = await queryOne<{ id: number }>(`
     INSERT INTO laundry_provider_subscriptions (
-      provider_id, plan_id, is_trial, amount_paid,
+      provider_id, plan_id, is_trial, amount_paid, tax_amount,
       starts_at, ends_at, status, offer_id,
       commission_type_override, commission_value_override,
       payment_transaction_id, payment_gateway, payment_gateway_order_id,
       auto_renew
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, TRUE
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, TRUE
     ) RETURNING id
   `, [
     p.providerId,
     p.planId,
     p.isTrial,
     p.amount,
+    p.taxAmount,
     startsAt.toISOString(),
     endsAt.toISOString(),
     subStatus,

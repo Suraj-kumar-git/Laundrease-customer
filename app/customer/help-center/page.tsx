@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
 import { HELP_CENTER_FALLBACK } from '@/lib/footer-page-fallbacks'
+import { safeJsonLd } from '@/lib/json-ld'
 import type { PageContentBlock, HeroBody, FaqGroupBody, CardItem } from '@/types/footer-pages'
 import { FaqAccordion } from '@/components/ui/faq-accordion'
 
@@ -82,7 +83,7 @@ export default async function HelpCenterPage() {
       {faqJsonLd.mainEntity.length > 0 && (
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: safeJsonLd(faqJsonLd) }}
         />
       )}
       {/* Hero */}

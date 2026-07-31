@@ -392,6 +392,25 @@ export async function sendAdminNewRegistrationEmail(params: {
   })
 }
 
+// Sent when an already-active provider requests a GSTIN update (new number +
+// re-uploaded certificate) — distinct from the initial-registration email
+// above since it needs its own MSG91 template with different copy.
+export async function sendAdminGstUpdateRequestEmail(params: {
+  to: string; adminName: string; partnerName: string; gstNumber: string; reviewUrl: string
+}): Promise<void> {
+  await sendMsg91TemplateEmail({
+    to: params.to, toName: params.adminName,
+    templateId: getTemplateId('ADMIN_GST_UPDATE_REQUEST_EMAIL_TEMPLATE_ID'),
+    variables: {
+      adminName:  params.adminName,
+      partnerName: params.partnerName,
+      gstNumber:   params.gstNumber,
+      reviewUrl:   params.reviewUrl,
+      logoUrl:     logoUrl,
+    },
+  })
+}
+
 export async function sendPayoutProcessedEmail(params: {
   to: string; name: string; amount: string; periodLabel: string;
   memberType: string; payoutDate: string; payslipUrl: string
