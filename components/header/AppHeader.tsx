@@ -65,21 +65,41 @@ const NAV_ITEMS_NOT_AUTH: NavItem[] = [
 
 // ---- Cart icon with badge -----------------------------------
 export function CartBadge({ onClick }: { onClick: () => void }) {
-  const { itemCount: count } = useCart()
+  const { itemCount: count, cartIconRef, bumpSignal } = useCart()
+  const [pulsing, setPulsing] = useState(false)
+  const mountedRef = useRef(false)
+
+  // Skip the pulse on initial mount (bumpSignal starts at 0, but this also
+  // guards against a stray 0->0 effect run) — only a genuine increment,
+  // meaning an add animation just landed, should trigger it.
+  useEffect(() => {
+    if (!mountedRef.current) { mountedRef.current = true; return }
+    setPulsing(true)
+    const t = setTimeout(() => setPulsing(false), 350)
+    return () => clearTimeout(t)
+  }, [bumpSignal])
 
   return (
     <button
+      ref={cartIconRef}
       onClick={onClick}
       className="relative flex h-9 w-9 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       aria-label={`Cart${count > 0 ? ` (${count} items)` : ''}`}
     >
-      <ShoppingCart className="h-5 w-5" />
+      <motion.span
+        className="flex"
+        animate={pulsing ? { scale: [1, 1.35, 1] } : { scale: 1 }}
+        transition={{ duration: 0.35 }}
+      >
+        <ShoppingCart className="h-5 w-5" />
+      </motion.span>
       <AnimatePresence>
         {count > 0 && (
           <motion.span
             initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
+            animate={{ scale: pulsing ? [1, 1.4, 1] : 1 }}
             exit={{ scale: 0 }}
+            transition={{ duration: 0.35 }}
             className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground"
           >
             {count > 9 ? '9+' : count}
@@ -370,8 +390,14 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -16 }}
               transition={{ duration: 0.2, ease: 'easeOut' }}
-              // top-14 = header height; max-h = viewport minus header; overflow-y-auto for scroll
-              className="fixed left-0 right-0 top-14 z-40 max-h-[calc(100vh-3.5rem)] overflow-y-auto border-b border-border/50 bg-background shadow-xl lg:hidden"
+              // top-14 = header height; max-h = viewport minus header; overflow-y-auto for scroll.
+              // dvh (not vh) — iOS Safari's address bar doesn't shrink 100vh
+              // when visible, so a vh-based max-height can be TALLER than
+              // what's actually on screen: the box never becomes scrollable
+              // (nothing overflows it from the DOM's point of view) even
+              // though the real visible viewport clips the bottom of it —
+              // exactly how Log Out was going missing on iPhone.
+              className="fixed left-0 right-0 top-14 z-40 max-h-[calc(100dvh-3.5rem)] overflow-y-auto border-b border-border/50 bg-background shadow-xl lg:hidden"
             >
               {/* User info banner (logged in) */}
               {user && (
@@ -388,8 +414,10 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
                 </div>
               )}
 
-              {/* Menu items */}
-              <div className="px-3 py-3">
+              {/* Menu items — extra bottom padding clears the fixed
+                  MobileBottomNav bar (h-16 + safe-area) so Log Out is always
+                  reachable by scrolling instead of sitting hidden behind it. */}
+              <div className="px-3 pt-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))]">
                 {user ? (
                   <>
                     {mobileLoggedInItems.map((item, index) => {

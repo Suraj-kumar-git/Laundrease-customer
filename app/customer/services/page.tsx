@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Image from 'next/image'
 import { motion } from 'framer-motion'
 import {
   Star,
@@ -49,6 +50,7 @@ interface DisplayProvider {
   ratingCount: number
   minPriceKg: number | null
   distanceKm: number | null
+  logoUrl: string | null
 }
 
 const ICON_GRADIENTS = [
@@ -99,6 +101,7 @@ export default function ServicesPage() {
           ratingCount: p.rating_count,
           minPriceKg: p.min_price_kg,
           distanceKm: p.distance_km,
+          logoUrl: p.image ?? null,
         })))
       } else {
         setProviders([])
@@ -126,6 +129,7 @@ export default function ServicesPage() {
           ratingCount: p.rating_count,
           minPriceKg: p.min_price_kg,
           distanceKm: null,
+          logoUrl: p.logo_url ?? null,
         })))
       } else {
         setProviders([])
@@ -196,13 +200,23 @@ export default function ServicesPage() {
                     className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm transition-all hover:border-blue-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <h3 className="truncate text-sm font-bold text-gray-900 dark:text-white">{p.name}</h3>
-                        {p.subtitle && (
-                          <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-gray-500 dark:text-gray-400">
-                            <MapPin className="h-3 w-3 shrink-0" /> {p.subtitle}
-                          </p>
+                      <div className="flex min-w-0 items-start gap-2.5">
+                        {p.logoUrl ? (
+                          <Image src={p.logoUrl} alt={p.name} width={36} height={36}
+                            className="h-9 w-9 shrink-0 rounded-lg object-cover" />
+                        ) : (
+                          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-sm font-bold text-white ${ICON_GRADIENTS[i % ICON_GRADIENTS.length]}`}>
+                            {p.name.charAt(0)}
+                          </div>
                         )}
+                        <div className="min-w-0">
+                          <h3 className="truncate text-sm font-bold text-gray-900 dark:text-white">{p.name}</h3>
+                          {p.subtitle && (
+                            <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-gray-500 dark:text-gray-400">
+                              <MapPin className="h-3 w-3 shrink-0" /> {p.subtitle}
+                            </p>
+                          )}
+                        </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
                         <Star className="h-3 w-3 fill-current" /> {p.rating?.toFixed(1) ?? '—'}

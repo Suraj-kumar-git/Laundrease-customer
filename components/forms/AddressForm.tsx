@@ -2,12 +2,12 @@
 // components/forms/AddressForm.tsx
 // Reusable form used by both /customer/addresses/new and /customer/addresses/[id]/edit
 
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Loader2, MapPin, Check } from 'lucide-react'
+import { Loader2, MapPin } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
-import { PlaceAutocompleteInput } from '@/components/common/PlaceAutocompleteInput'
+import { AddressMapPicker, type ResolvedLocation } from '@/components/common/AddressMapPicker'
 
 interface AddressFormProps {
   /** When editing — pass existing address values */
@@ -27,6 +27,8 @@ export interface AddressFormData {
   state:          string
   postal_code:    string
   country_code:   string
+  latitude:       number | null
+  longitude:      number | null
   instructions:   string
   contact_name:   string
   contact_phone:  string
@@ -39,6 +41,7 @@ const TAG_PRESETS = ['Front Gate', 'Evening Delivery', 'Call Before', 'No Bell',
 const EMPTY: AddressFormData = {
   label: '', tags: [], address_line1: '', address_line2: '', landmark: '',
   neighborhood: '', city: '', state: '', postal_code: '', country_code: 'IN',
+  latitude: null, longitude: null,
   instructions: '', contact_name: '', contact_phone: '', is_default: false,
 }
 
@@ -87,38 +90,26 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
   const [errors, setErrors] = useState<Partial<Record<keyof AddressFormData, string>>>({})
   const [saving, setSaving] = useState(false)
   const [customTag, setCustomTag] = useState('')
-  const [pincodeLookup, setPincodeLookup] = useState<'idle' | 'checking' | 'found' | 'not_found'>('idle')
-  const lastLookedUp = useRef<string | null>(null)
 
-  // Auto-fill city/state from the PIN code, debounced — once 6 digits are
-  // entered we already know the city/state, so don't make the customer
-  // type something we can derive.
-  useEffect(() => {
-    const pin = form.postal_code.trim()
-    if (!/^\d{6}$/.test(pin)) {
-      setPincodeLookup('idle')
-      return
-    }
-    if (lastLookedUp.current === pin) return
+  // Every address now requires a confirmed map pin — address_line1/city/
+  // state/postal_code/country_code/latitude/longitude all come from there,
+  // never typed. Editing re-opens the map so an existing pin can be nudged
+  // or reconfirmed, same as adding new.
+  const [step, setStep] = useState<'location' | 'details'>('location')
 
-    setPincodeLookup('checking')
-    const timer = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/customer/public/pincode?pincode=${pin}`)
-        const json = await res.json()
-        lastLookedUp.current = pin
-        if (json.success && json.data?.found) {
-          setPincodeLookup('found')
-          setForm(prev => ({ ...prev, city: json.data.city, state: json.data.state }))
-        } else {
-          setPincodeLookup('not_found')
-        }
-      } catch {
-        setPincodeLookup('not_found')
-      }
-    }, 500)
-    return () => clearTimeout(timer)
-  }, [form.postal_code])
+  function handleLocationConfirmed(loc: ResolvedLocation) {
+    setForm(prev => ({
+      ...prev,
+      address_line1: loc.address_line1,
+      city:          loc.city,
+      state:         loc.state,
+      postal_code:   loc.postal_code,
+      country_code:  loc.country_code,
+      latitude:      loc.latitude,
+      longitude:     loc.longitude,
+    }))
+    setStep('details')
+  }
 
   const set = (field: keyof AddressFormData) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -147,10 +138,11 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
   const computeErrors = (data: AddressFormData): Partial<Record<keyof AddressFormData, string>> => {
     const errs: Partial<Record<keyof AddressFormData, string>> = {}
     if (!data.label.trim())         errs.label         = 'Label is required'
-    if (!data.address_line1.trim()) errs.address_line1  = 'Address line 1 is required'
-    if (!/^\d{6}$/.test(data.postal_code.trim())) errs.postal_code = 'Enter a valid 6-digit PIN code'
-    if (!data.city.trim())          errs.city           = 'City is required'
-    if (!data.country_code.trim())  errs.country_code   = 'Country code is required'
+    // address_line1/city/state/postal_code/country_code/lat/lng all come
+    // from a confirmed map pin (see the 'location' step) — never typed, so
+    // they can't be invalid by the time this form is reachable. Guarded
+    // defensively rather than shown as a normal field error.
+    if (data.latitude == null || data.longitude == null) errs.address_line1 = 'Please pick a location on the map'
     if (!data.contact_name.trim())  errs.contact_name   = 'Contact name is required'
     // Required — the DB rejects an empty contact_phone (the format CHECK
     // constraint doesn't accept '', only NULL or a valid number), which
@@ -178,10 +170,7 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
   const validate = (): boolean => {
     setErrors(liveErrors)
     // Mark everything touched so all remaining errors surface at once
-    setTouched({
-      label: true, address_line1: true, postal_code: true, city: true, country_code: true,
-      contact_name: true, contact_phone: true,
-    })
+    setTouched({ label: true, contact_name: true, contact_phone: true })
     return formValid
   }
 
@@ -212,6 +201,17 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
     } finally {
       setSaving(false)
     }
+  }
+
+  if (step === 'location') {
+    return (
+      <AddressMapPicker
+        initialLat={form.latitude}
+        initialLng={form.longitude}
+        onConfirm={handleLocationConfirmed}
+        onCancel={() => router.push('/customer/addresses')}
+      />
+    )
   }
 
   return (
@@ -247,23 +247,18 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
         </div>
       </Field>
 
-      <Field label="Address Line 1" required error={shownError('address_line1')}>
-        <PlaceAutocompleteInput
-          value={form.address_line1}
-          onChange={v => setForm(prev => ({ ...prev, address_line1: v }))}
-          placeholder="Search building, street or area…"
-          className="mt-1 w-full pl-9 pr-3 py-2 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          types={['geocode']}
-          onAddressComponents={({ address_line1, city, state, postal_code }) => {
-            setForm(prev => ({
-              ...prev,
-              address_line1: address_line1 || prev.address_line1,
-              city:          city          || prev.city,
-              state:         state         || prev.state,
-              postal_code:   postal_code   || prev.postal_code,
-            }))
-          }}
-        />
+      <Field label="Address Line 1" required>
+        <div className="flex items-center gap-2">
+          <Input value={form.address_line1} disabled
+            className="flex-1 disabled:cursor-not-allowed disabled:opacity-70" />
+          <button type="button" onClick={() => setStep('location')}
+            className="shrink-0 text-xs font-medium text-primary hover:underline">
+            Change
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          <MapPin className="mr-1 inline h-3 w-3" /> From your pinned location — tap Change to move the pin.
+        </p>
       </Field>
 
       <Field label="Address Line 2">
@@ -282,32 +277,23 @@ export function AddressForm({ initial, addressId, onSuccess }: AddressFormProps)
         </Field>
       </div>
 
-      {/* PIN code drives the city/state auto-fill below — entering it first
-          means the customer usually never has to type the next two fields. */}
+      {/* PIN code / city / state / country all come from the confirmed map
+          pin above — locked, same reasoning as Address Line 1. */}
       <div className="grid grid-cols-2 gap-3">
-        <Field label="PIN Code" required error={shownError('postal_code')}>
-          <div className="relative">
-            <Input value={form.postal_code} onChange={set('postal_code')} onBlur={touch('postal_code')}
-              placeholder="6-digit PIN" maxLength={6} inputMode="numeric" className="pr-9" />
-            {pincodeLookup === 'checking' && (
-              <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-muted-foreground" />
-            )}
-            {pincodeLookup === 'found' && (
-              <Check className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-emerald-500" />
-            )}
-          </div>
-          {pincodeLookup === 'not_found' && (
-            <p className="mt-1 text-xs text-amber-600">Couldn&apos;t find this PIN code — please enter city/state manually.</p>
-          )}
+        <Field label="PIN Code" required>
+          <Input value={form.postal_code} disabled
+            className="disabled:cursor-not-allowed disabled:opacity-70" />
         </Field>
-        <Field label="City" required error={shownError('city')}>
-          <Input value={form.city} onChange={set('city')} onBlur={touch('city')} placeholder="City" maxLength={100} />
+        <Field label="City" required>
+          <Input value={form.city} disabled
+            className="disabled:cursor-not-allowed disabled:opacity-70" />
         </Field>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="State">
-          <Input value={form.state} onChange={set('state')} placeholder="State" maxLength={100} />
+          <Input value={form.state} disabled
+            className="disabled:cursor-not-allowed disabled:opacity-70" />
         </Field>
         <Field label="Country Code">
           <Input value={form.country_code} disabled

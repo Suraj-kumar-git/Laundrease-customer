@@ -11,6 +11,26 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://laundrease.in'),
   title: 'Laundrease',
   description: 'Laundrease — on-demand laundry pickup and delivery.',
+  icons: {
+    icon: [
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
+    ],
+  },
+  manifest: '/site.webmanifest',
+}
+
+// viewportFit: 'cover' is required for env(safe-area-inset-*) to return
+// anything other than 0 on iOS Safari — without it, any safe-area padding
+// anywhere in the app (e.g. clearing the home-indicator bar) silently does
+// nothing on notched/Dynamic-Island iPhones.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
 }
 
 // viewportFit: 'cover' lets env(safe-area-inset-*) resolve to real values —

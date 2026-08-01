@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
@@ -15,6 +15,16 @@ import { useAuth } from "@/components/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { SearchParamProvider } from "@/components/common/searchParamProvider"
+import { isValidIndianMobile, isValidPersonName, isValidEmail } from "@/lib/validation/india"
+
+// Accepts "+91 98765 43210", "919876543210", "09876543210", or a bare 10-digit
+// number → keeps just the bare 10 digits, which is all the field ever stores.
+function toTenDigits(raw: string): string {
+  const digits = raw.replace(/\D/g, "")
+  if (digits.length > 10 && digits.startsWith("91")) return digits.slice(2, 12)
+  if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1)
+  return digits.slice(0, 10)
+}
 
 // ---- Password strength ---------------------------------------------------
 function passwordStrength(p: string): { score: 0 | 1 | 2 | 3 | 4; label: string; color: string } {
@@ -31,15 +41,21 @@ function passwordStrength(p: string): { score: 0 | 1 | 2 | 3 | 4; label: string;
 // ---- Validation ----------------------------------------------------------
 function validate(f: typeof INITIAL_FORM): Record<string, string> {
   const e: Record<string, string> = {}
-  if (!f.full_name.trim())          e.full_name = "Full name is required"
-  else if (f.full_name.trim().length < 2) e.full_name = "Full name must be at least 2 characters"
+  const name = f.full_name.trim()
+  if (!name)                        e.full_name = "Full name is required"
+  else if (name.length < 2)         e.full_name = "Full name must be at least 2 characters"
+  else if (name.length > 50)        e.full_name = "Full name must be 50 characters or fewer"
+  else if (!isValidPersonName(name)) e.full_name = "Use letters only (spaces, apostrophes, hyphens allowed)"
 
-  if (!f.email)                     e.email = "Email is required"
-  else if (!/\S+@\S+\.\S+/.test(f.email)) e.email = "Enter a valid email address"
+  const email = f.email.trim()
+  if (!email)                       e.email = "Email is required"
+  else if (email.length < 5)        e.email = "Email must be at least 5 characters"
+  else if (email.length > 254)      e.email = "Email must be 254 characters or fewer"
+  else if (!isValidEmail(email))    e.email = "Enter a valid email address"
 
   if (!f.phone)                     e.phone = "Phone number is required"
-  else if (!/^\+?[1-9]\d{9,14}$/.test(f.phone.replace(/\s/g, "")))
-    e.phone = "Enter a valid phone number (e.g. +919876543210)"
+  else if (!isValidIndianMobile(f.phone))
+    e.phone = "Enter a valid 10-digit mobile number starting with 6-9"
 
   if (!f.password)                  e.password = "Password is required"
   else if (f.password.length < 8)  e.password = "Minimum 8 characters"
@@ -62,6 +78,12 @@ const INITIAL_FORM = {
   confirmPassword: "", referral_code: "", agreeTerms: false,
 }
 
+// Top-to-bottom field order — determines which field gets focus when the
+// user submits with multiple fields invalid.
+const FIELD_ORDER = [
+  "full_name", "email", "phone", "password", "confirmPassword", "referral_code", "agreeTerms",
+] as const
+
 const FEATURES = [
   { emoji: "📅", title: "Easy Scheduling",  sub: "Book pickup & delivery at your convenience" },
   { emoji: "📍", title: "Live Tracking",    sub: "Track your laundry every step of the way" },
@@ -80,6 +102,18 @@ function PageContent() {
   const [submitting,  setSubmitting]  = useState(false)
   const [serverError, setServerError] = useState("")
   const [pwdFocused,  setPwdFocused]  = useState(false)
+
+  // One ref per field so a failed submit can jump the user straight to the
+  // first invalid field instead of just disabling the button silently.
+  const fieldRefs = {
+    full_name:       useRef<HTMLInputElement>(null),
+    email:            useRef<HTMLInputElement>(null),
+    phone:            useRef<HTMLInputElement>(null),
+    password:         useRef<HTMLInputElement>(null),
+    confirmPassword:  useRef<HTMLInputElement>(null),
+    referral_code:    useRef<HTMLInputElement>(null),
+    agreeTerms:       useRef<HTMLButtonElement>(null),
+  }
 
   // Referral-code lookup — debounced as the user types, so they see the
   // referrer's name (or why the code doesn't work) before submitting.
@@ -100,13 +134,16 @@ function PageContent() {
           ...prev,
           full_name:     draft.full_name     || prev.full_name,
           email:         draft.email         || prev.email,
-          phone:         draft.phone         || prev.phone,
+          phone:         draft.phone ? toTenDigits(draft.phone) : prev.phone,
           referral_code: draft.referral_code || prev.referral_code,
         }))
       }
     } catch { /* sessionStorage unavailable */ }
 
-    // URL params override the draft (verify page passes email/phone back)
+    // URL params override the draft (verify page passes email/phone back).
+    // phone arrives in full +91XXXXXXXXXX form (that's what's submitted to
+    // the backend and shown to the verify page) — normalize back to the
+    // bare 10 digits this field stores.
     const ref   = searchParams.get("ref")
     const email = searchParams.get("email")
     const phone = searchParams.get("phone")
@@ -114,7 +151,7 @@ function PageContent() {
       ...prev,
       ...(ref   ? { referral_code: ref.toUpperCase() } : {}),
       ...(email ? { email } : {}),
-      ...(phone ? { phone } : {}),
+      ...(phone ? { phone: toTenDigits(phone) } : {}),
     }))
   }, [searchParams])
 
@@ -164,22 +201,33 @@ function PageContent() {
     e.preventDefault()
     setServerError("")
     const errs = validate(form)
-    if (Object.keys(errs).length > 0) { setErrors(errs); return }
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs)
+      const firstInvalid = FIELD_ORDER.find(f => errs[f])
+      if (firstInvalid) {
+        const el = fieldRefs[firstInvalid].current
+        el?.scrollIntoView({ behavior: "smooth", block: "center" })
+        el?.focus()
+      }
+      return
+    }
+
+    const fullPhone = `+91${form.phone}`
 
     setSubmitting(true)
     try {
-      await register(form.full_name.trim(), form.email.trim().toLowerCase(), form.password, form.phone.trim(), form.referral_code.trim() || undefined)
+      await register(form.full_name.trim(), form.email.trim().toLowerCase(), form.password, fullPhone, form.referral_code.trim() || undefined)
       // Save non-sensitive fields so the register form is pre-filled if the
       // user comes back via "Update it here" on the verify page.
       try {
         sessionStorage.setItem("reg_draft", JSON.stringify({
           full_name:     form.full_name.trim(),
           email:         form.email.trim().toLowerCase(),
-          phone:         form.phone.trim(),
+          phone:         fullPhone,
           referral_code: form.referral_code.trim(),
         }))
       } catch { /* sessionStorage unavailable */ }
-      router.push(`/customer/auth/verify?email=${encodeURIComponent(form.email)}&phone=${encodeURIComponent(form.phone)}`)
+      router.push(`/customer/auth/verify?email=${encodeURIComponent(form.email)}&phone=${encodeURIComponent(fullPhone)}`)
     } catch (err: any) {
       setServerError(err.message || "Registration failed")
     } finally {
@@ -213,10 +261,11 @@ function PageContent() {
             <form onSubmit={handleSubmit} noValidate className="space-y-4">
               {/* Full Name */}
               <div className="space-y-1.5">
-                <Label htmlFor="full_name">Full Name</Label>
+                <Label htmlFor="full_name">Full Name <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="full_name" placeholder="Rahul Sharma" autoComplete="name"
+                  <Input id="full_name" ref={fieldRefs.full_name} placeholder="Rahul Sharma" autoComplete="name" required
+                    maxLength={50}
                     className={cn("pl-10", errors.full_name && "border-destructive")}
                     value={form.full_name}
                     onChange={e => set("full_name", e.target.value)}
@@ -227,10 +276,11 @@ function PageContent() {
 
               {/* Email */}
               <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">Email <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="email" type="email" placeholder="name@example.com" autoComplete="email"
+                  <Input id="email" ref={fieldRefs.email} type="email" placeholder="name@example.com" autoComplete="email" required
+                    maxLength={254}
                     className={cn("pl-10", errors.email && "border-destructive")}
                     value={form.email}
                     onChange={e => set("email", e.target.value)}
@@ -241,27 +291,29 @@ function PageContent() {
 
               {/* Phone */}
               <div className="space-y-1.5">
-                <Label htmlFor="phone">Phone Number</Label>
+                <Label htmlFor="phone">Phone Number <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="phone" type="tel" placeholder="+919876543210" autoComplete="tel"
-                    className={cn("pl-10", errors.phone && "border-destructive")}
+                  <span className="absolute left-9 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">+91</span>
+                  <Input id="phone" ref={fieldRefs.phone} type="tel" inputMode="numeric" placeholder="9876543210" autoComplete="tel" required
+                    maxLength={10}
+                    className={cn("pl-16", errors.phone && "border-destructive")}
                     value={form.phone}
-                    onChange={e => set("phone", e.target.value.replace(/[^\d+\s\-]/g, ''))}
+                    onChange={e => set("phone", toTenDigits(e.target.value))}
                     disabled={submitting} />
                 </div>
                 {errors.phone
                   ? <p className="text-xs text-destructive">{errors.phone}</p>
-                  : <p className="text-xs text-muted-foreground">Include country code, e.g. +91</p>
+                  : <p className="text-xs text-muted-foreground">10-digit mobile number, no country code needed</p>
                 }
               </div>
 
               {/* Password */}
               <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">Password <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="password" type={showPwd ? "text" : "password"} placeholder="••••••••"
+                  <Input id="password" ref={fieldRefs.password} type={showPwd ? "text" : "password"} placeholder="••••••••"
                     autoComplete="new-password"
                     className={cn("pl-10 pr-10", errors.password && "border-destructive")}
                     value={form.password}
@@ -302,10 +354,10 @@ function PageContent() {
 
               {/* Confirm Password */}
               <div className="space-y-1.5">
-                <Label htmlFor="confirmPassword">Confirm Password</Label>
+                <Label htmlFor="confirmPassword">Confirm Password <span className="text-destructive">*</span></Label>
                 <div className="relative">
                   <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                  <Input id="confirmPassword" type={showPwd ? "text" : "password"} placeholder="••••••••"
+                  <Input id="confirmPassword" ref={fieldRefs.confirmPassword} type={showPwd ? "text" : "password"} placeholder="••••••••"
                     autoComplete="new-password"
                     className={cn("pl-10", errors.confirmPassword && "border-destructive",
                       !errors.confirmPassword && form.confirmPassword && form.password === form.confirmPassword && "border-emerald-500"
@@ -328,7 +380,7 @@ function PageContent() {
                   <span className="text-xs font-normal text-muted-foreground">(optional)</span>
                 </Label>
                 <div className="relative">
-                  <Input id="referral_code" placeholder="LDR-XXXXXXX"
+                  <Input id="referral_code" ref={fieldRefs.referral_code} placeholder="LDR-XXXXXXX"
                     className={cn("font-mono tracking-widest uppercase pr-9",
                       errors.referral_code || referralCheck.status === "invalid" ? "border-destructive" :
                       referralCheck.status === "valid" ? "border-emerald-500 bg-emerald-500/5" :
@@ -365,7 +417,7 @@ function PageContent() {
 
               {/* Terms */}
               <div className="flex items-start gap-3 pt-1">
-                <Checkbox id="agreeTerms" checked={form.agreeTerms}
+                <Checkbox id="agreeTerms" ref={fieldRefs.agreeTerms} checked={form.agreeTerms}
                   onCheckedChange={v => set("agreeTerms", !!v)}
                   disabled={submitting}
                   className={errors.agreeTerms ? "border-destructive" : ""} />

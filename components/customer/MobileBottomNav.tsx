@@ -3,8 +3,10 @@
 // Fixed bottom navigation for the customer app on mobile (hidden on lg+).
 // Rendered from app/customer/layout.tsx. Self-hides when:
 //  - the user isn't logged in (marketing pages keep the plain header/footer)
-//  - inside flows that have their own bottom UI or shouldn't be escaped
-//    mid-way (order create, checkout, payment result, auth pages)
+//  - inside flows that shouldn't be escaped mid-way (payment result, auth)
+// Stays visible through the order-create flow — its own sticky cart-bar
+// CTAs (ServiceSelectionStep, SchedulePickup) are offset above this bar so
+// the two never overlap.
 // A spacer div keeps page content (incl. the footer) clear of the fixed bar.
 
 import Link from 'next/link'
@@ -14,7 +16,6 @@ import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
 
 const HIDDEN_PREFIXES = [
-  '/customer/orders/create',
   '/customer/orders/payment',
   '/customer/checkout',
   '/customer/auth',

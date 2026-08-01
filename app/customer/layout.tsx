@@ -4,6 +4,7 @@ import { Inter } from "next/font/google"
 import Link from "next/link"
 import { Bell, Menu, Search, ShoppingCart, MapPin } from "lucide-react"
 import { query } from "@/lib/db"
+import { safeJsonLd } from "@/lib/json-ld"
 import { BrandLogo } from "@/components/brand-logo"
 
 import { Button } from "@/components/ui/button"
@@ -149,7 +150,7 @@ export default async function RootLayout({
     <div className={inter.className}>
         <script
           type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }}
+          dangerouslySetInnerHTML={{ __html: safeJsonLd(organizationJsonLd) }}
         />
         {/* If using the below script then the loadScript is not required in checkoutStep.tsx file */}
         {/* <Script
