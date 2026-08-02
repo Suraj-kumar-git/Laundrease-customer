@@ -71,19 +71,19 @@ function ProfileAvatar({
 // ---- Editable field -----------------------------------------
 function EditableField({
   label, value, name, type = 'text', readonly = false,
-  icon: Icon, error, placeholder, onChange,
+  icon: Icon, error, placeholder, onChange, maxLength,
 }: {
   label: string; value: string; name: string; type?: string
   readonly?: boolean; icon: React.ComponentType<{ className?: string }>
   error?: string; placeholder?: string
-  onChange?: (val: string) => void
+  onChange?: (val: string) => void; maxLength?: number
 }) {
   return (
     <div>
       <label className="mb-1.5 block text-sm font-medium text-foreground">{label}</label>
       <div className="relative">
         <Icon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input type={type} value={value} readOnly={readonly}
+        <input type={type} value={value} readOnly={readonly} maxLength={maxLength}
           placeholder={placeholder}
           onChange={(e) => onChange?.(e.target.value)}
           className={cn(
@@ -397,10 +397,14 @@ export default function ProfilePage() {
                 <div>
                   <EditableField label="Phone Number" name="phone" icon={Phone}
                     value={editing ? editData.phone : (profile.phone ?? '')}
-                    placeholder="+919876543210"
+                    placeholder="+919876543210" maxLength={13}
                     readonly={!editing || profile.phone_verified}
                     error={editErrors.phone}
-                    onChange={(v) => { setEditData((p) => ({ ...p, phone: v })); setEditErrors((p) => { const n = { ...p }; delete n.phone; return n }) }} />
+                    onChange={(v) => {
+                      const filtered = v.replace(/[^\d+]/g, '')
+                      setEditData((p) => ({ ...p, phone: filtered }))
+                      setEditErrors((p) => { const n = { ...p }; delete n.phone; return n })
+                    }} />
                   {profile.phone_verified && (
                     <p className="mt-1 text-xs text-muted-foreground">Phone number is verified and cannot be changed here. Contact support if you need to update it.</p>
                   )}

@@ -36,6 +36,13 @@ interface AddressMapPickerProps {
   initialLng?: number | null
   onConfirm:   (location: ResolvedLocation) => void
   onCancel:    () => void
+  // Customer addresses must fall inside an already-serviceable area — off by
+  // default is wrong for a laundry/delivery partner pinning their OWN
+  // business location, since that pin is often what CREATES coverage for an
+  // area rather than needing to already sit inside it. Set false to skip the
+  // serviceability check/gate entirely.
+  requireServiceable?: boolean
+  title?: string
 }
 
 function parseAddressComponents(components: any[]) {
@@ -59,7 +66,9 @@ function parseAddressComponents(components: any[]) {
   }
 }
 
-export function AddressMapPicker({ initialLat, initialLng, onConfirm, onCancel }: AddressMapPickerProps) {
+export function AddressMapPicker({
+  initialLat, initialLng, onConfirm, onCancel, requireServiceable = true, title = 'Pin your exact location',
+}: AddressMapPickerProps) {
   const mapDivRef     = useRef<HTMLDivElement>(null)
   const mapRef        = useRef<any>(null)
   const geocoder      = useRef<any>(null)
@@ -126,7 +135,7 @@ export function AddressMapPicker({ initialLat, initialLng, onConfirm, onCancel }
           ...parsed,
           formatted_address: result.formatted_address,
         })
-        checkServiceability(parsed.postal_code)
+        if (requireServiceable) checkServiceability(parsed.postal_code)
       }
     )
   }
@@ -241,7 +250,7 @@ export function AddressMapPicker({ initialLat, initialLng, onConfirm, onCancel }
           className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground">
           <ArrowLeft className="h-4 w-4" /> Cancel
         </button>
-        <p className="text-sm font-medium text-foreground">Pin your exact location</p>
+        <p className="text-sm font-medium text-foreground">{title}</p>
       </div>
 
       {mapsError ? (
@@ -311,7 +320,7 @@ export function AddressMapPicker({ initialLat, initialLng, onConfirm, onCancel }
                 <p className="flex items-start gap-2 text-sm text-foreground">
                   <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" /> {resolved.formatted_address}
                 </p>
-                {checkingService ? (
+                {!requireServiceable ? null : checkingService ? (
                   <p className="flex items-center gap-2 text-xs text-muted-foreground">
                     <Loader2 className="h-3 w-3 animate-spin" /> Checking if we deliver here…
                   </p>
@@ -332,8 +341,9 @@ export function AddressMapPicker({ initialLat, initialLng, onConfirm, onCancel }
             )}
           </div>
 
-          <button type="button" onClick={() => resolved && serviceable && onConfirm(resolved)}
-            disabled={!resolved || resolving || checkingService || serviceable !== true}
+          <button type="button"
+            onClick={() => resolved && (!requireServiceable || serviceable) && onConfirm(resolved)}
+            disabled={!resolved || resolving || (requireServiceable && (checkingService || serviceable !== true))}
             className="mt-3 w-full rounded-xl bg-primary py-3 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50">
             Confirm this location
           </button>

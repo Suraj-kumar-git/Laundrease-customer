@@ -15,16 +15,7 @@ import { useAuth } from "@/components/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { SearchParamProvider } from "@/components/common/searchParamProvider"
-import { isValidIndianMobile, isValidPersonName, isValidEmail } from "@/lib/validation/india"
-
-// Accepts "+91 98765 43210", "919876543210", "09876543210", or a bare 10-digit
-// number → keeps just the bare 10 digits, which is all the field ever stores.
-function toTenDigits(raw: string): string {
-  const digits = raw.replace(/\D/g, "")
-  if (digits.length > 10 && digits.startsWith("91")) return digits.slice(2, 12)
-  if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1)
-  return digits.slice(0, 10)
-}
+import { isValidIndianMobile, isValidPersonName, isValidEmail, toTenDigits } from "@/lib/validation/india"
 
 // ---- Password strength ---------------------------------------------------
 function passwordStrength(p: string): { score: 0 | 1 | 2 | 3 | 4; label: string; color: string } {
