@@ -7,10 +7,11 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   MapPin, Home, Briefcase, Building2, Check, Plus,
   Store, Star, Users, Clock, ShieldCheck, ArrowRight,
-  Loader2, ChevronDown,
+  Loader2, ChevronDown, Truck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Address, KgService, LaundryProvider, UnitProduct } from '@/types/order-types'
+import { Address, KgService, LaundryProvider, UnitProduct, DeliveryFeePreview } from '@/types/order-types'
+import { formatDistance } from '@/lib/format-distance'
 
 // ---- Types --------------------------------------------------
 interface AddressProviderStepProps {
@@ -54,6 +55,34 @@ function RatingBadge({ rating, count }: { rating: number; count: number }) {
         ({count.toLocaleString('en-IN')} ratings)
       </span>
     </div>
+  )
+}
+
+// Deliberately never phrases the 'fee' state as "free above X" — beyond the
+// provider's free-delivery radius, a large order can't buy back the extra
+// distance (see scripts/48-fix-delivery-fee-below-mov-surcharge.sql), so the
+// copy here stays honest about the fee instead of repeating that bug
+// client-side. `preview.amount` is a safe upper bound (see deriveFeePreview
+// in the search route), not necessarily the exact final charge.
+function DeliveryFeeBadge({ preview }: { preview: DeliveryFeePreview }) {
+  if (preview.state === 'free') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
+        <Truck className="h-3 w-3" /> Free delivery
+      </span>
+    )
+  }
+  if (preview.state === 'free_above') {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-700 dark:bg-blue-950/40 dark:text-blue-400">
+        <Truck className="h-3 w-3" /> Free above ₹{preview.free_above_amount}
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+      <Truck className="h-3 w-3" /> ₹{preview.amount} delivery
+    </span>
   )
 }
 
@@ -139,7 +168,12 @@ export function AddressProviderStep({
     setLoadingProviders(true)
     setProviderError(null)
     setSelectedProvider(null)
-    fetch(`/api/customer/laundry-providers/search?location=${selectedAddress.postal_code}`)
+    const params = new URLSearchParams({ location: selectedAddress.postal_code })
+    if (selectedAddress.latitude != null && selectedAddress.longitude != null) {
+      params.set('lat', String(selectedAddress.latitude))
+      params.set('lng', String(selectedAddress.longitude))
+    }
+    fetch(`/api/customer/laundry-providers/search?${params}`)
       .then(r => r.json())
       .then(json => {
         const list: LaundryProvider[] = json.success ? (json.data?.providers ?? []) : []
@@ -175,7 +209,7 @@ export function AddressProviderStep({
       })
       .finally(() => setLoadingProviders(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedAddress?.postal_code])
+  }, [selectedAddress?.postal_code, selectedAddress?.latitude, selectedAddress?.longitude])
 
   // Prefetch services when a provider is selected
   const prefetchServices = useCallback(async (providerId: number) => {
@@ -446,6 +480,20 @@ export function AddressProviderStep({
 
               {/* Rating */}
               <RatingBadge rating={provider.rating} count={provider.rating_count} />
+
+              {/* Distance + delivery-fee preview — only once the selected
+                  address has been geocoded and the server could compute a
+                  real distance to this provider. */}
+              {(provider.distance_km != null || provider.delivery_fee_preview) && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {provider.distance_km != null && (
+                    <span className="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground">
+                      <MapPin className="h-3 w-3" /> {formatDistance(provider.distance_km)}
+                    </span>
+                  )}
+                  {provider.delivery_fee_preview && <DeliveryFeeBadge preview={provider.delivery_fee_preview} />}
+                </div>
+              )}
 
               {/* Services */}
               {provider.services_offered && provider.services_offered.length > 0 && (

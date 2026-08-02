@@ -1,7 +1,7 @@
 'use client'
 // app/customer/page.tsx
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import {
   ArrowRight, ShieldCheck, ShieldAlert, Zap, Droplets, Calendar,
@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
 import { formatStat } from '@/lib/format-stat'
+import { formatDistance } from '@/lib/format-distance'
+import { useCustomerLocation } from '@/lib/use-customer-location'
 
 // ---- Types -------------------------------------------------------------------
 interface Provider {
@@ -33,11 +35,6 @@ interface HomeData {
 }
 
 // ---- Helpers -----------------------------------------------------------------
-function formatDistance(km: number | null): string {
-  if (km === null) return ''
-  if (km < 1) return `${Math.round(km * 1000)}m away`
-  return `${km.toFixed(1)} km away`
-}
 function formatPrice(p: number | null): string {
   if (!p) return ''
   return `₹${Math.round(p)}/kg`
@@ -431,84 +428,10 @@ const BUBBLES = [
   { w: 8,  h: 8,  top: 55, left: 70, dur: 5,   delay: 3.5 },
 ]
 
-// ---- Location hook -----------------------------------------------------------
-// Tracks the *actual* browser permission state (via the Permissions API,
-// where supported) rather than inferring it from whether the last
-// getCurrentPosition() call happened to succeed. That distinction matters:
-// a transient GPS timeout/unavailable error isn't a permission problem, and
-// treating it as one made the "Allow location" banner pop up even for users
-// who had already granted access. It also lets us tell a genuine denial
-// (which the browser will never re-prompt for — the site can't force that
-// dialog to reappear once blocked) apart from "not asked yet" (where
-// clicking the button legitimately triggers the native prompt).
-type LocationPermission = 'granted' | 'denied' | 'prompt' | 'unsupported'
-
-function useLocation() {
-  const [coords,     setCoords]     = useState<{ lat: number; lng: number } | null>(null)
-  const [permission, setPermission] = useState<LocationPermission>('prompt')
-  const [asking,     setAsking]     = useState(false)
-
-  const request = useCallback(() => {
-    if (!navigator.geolocation) { setPermission('unsupported'); return }
-    setAsking(true)
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-        setPermission('granted')
-        setAsking(false)
-      },
-      err => {
-        setAsking(false)
-        // Only a real permission denial should trigger the "allow access"
-        // banner — a timeout or transient GPS unavailability isn't that,
-        // and there's nothing useful to prompt the user for in that case.
-        if (err.code === err.PERMISSION_DENIED) setPermission('denied')
-      },
-      { timeout: 8000 }
-    )
-  }, [])
-
-  // Guards the *automatic* initial request so it only ever fires once total,
-  // no matter which branch below triggers it. Without this, React Strict
-  // Mode's dev-only double-invoke of effects — or a browser (e.g. Safari)
-  // where permissions.query() rejects instead of resolving — could call
-  // request() twice, producing two distinct coords objects and making the
-  // provider list fetch (which depends on coords) run and visibly flicker
-  // twice. The manual "Try again" button calls `request` directly and is
-  // unaffected by this guard.
-  const autoRequestedRef = useRef(false)
-  const requestOnce = useCallback(() => {
-    if (autoRequestedRef.current) return
-    autoRequestedRef.current = true
-    request()
-  }, [request])
-
-  useEffect(() => {
-    let cancelled = false
-    if (navigator.permissions?.query) {
-      navigator.permissions.query({ name: 'geolocation' as PermissionName })
-        .then(status => {
-          if (cancelled) return
-          setPermission(status.state as LocationPermission)
-          // Keep in sync if the user changes the permission from browser
-          // settings while this tab stays open — no reload needed.
-          status.onchange = () => { if (!cancelled) setPermission(status.state as LocationPermission) }
-          if (status.state !== 'denied') requestOnce()
-        })
-        .catch(() => { if (!cancelled) requestOnce() })
-    } else {
-      requestOnce()
-    }
-    return () => { cancelled = true }
-  }, [requestOnce])
-
-  return { coords, permission, asking, request }
-}
-
 // ---- Page --------------------------------------------------------------------
 export default function HomePage() {
   const { user } = useAuth()
-  const { coords, permission, asking, request } = useLocation()
+  const { coords, permission, asking, request } = useCustomerLocation()
   const [data,    setData]    = useState<HomeData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(false)
