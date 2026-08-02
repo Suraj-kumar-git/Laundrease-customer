@@ -16,12 +16,16 @@ import {
 import { useAuth } from '@/components/auth-provider'
 import { cn } from '@/lib/utils'
 import { getPreferredAddressId, setPreferredAddressId } from '@/lib/dashboard-address-pref'
+import { formatDistance } from '@/lib/format-distance'
+import { useCustomerLocation } from '@/lib/use-customer-location'
+import { DeliveryFeePreview } from '@/types/order-types'
 
 // ---- Types --------------------------------------------------
 
 interface Address {
   id: number; label: string; addressLine1: string; addressLine2: string | null
   landmark: string | null; city: string; state: string; postalCode: string
+  latitude: number | null; longitude: number | null
   isDefault: boolean; contactName: string | null; contactPhone: string | null
   instructions: string | null
 }
@@ -633,33 +637,87 @@ function ActiveOffers({ addressId }: { addressId: number | null }) {
 }
 
 // ---- Providers near you -------------------------------------
-// Horizontal scroll of provider cards for the selected address's pincode —
-// same public search endpoint the order flow's step 1 uses. "Create order"
-// deep-links into the flow with that provider pre-selected (?provider=).
+// Horizontal scroll of provider cards. When the customer has a selected
+// address, providers are for that address's pincode with real distance +
+// delivery-fee preview from that pickup point (same search endpoint the
+// order flow's step 1 uses). When they have no saved address at all, falls
+// back to the customer's live geolocation — same distance-only behavior as
+// the public landing page (no fee preview: there's no committed pickup
+// point yet to compute a real fee against). "Create order" deep-links into
+// the flow with that provider pre-selected (?provider=).
 
 interface NearbyProvider {
   id: number; business_name: string; city: string
   rating: number; rating_count: number; is_verified: boolean
-  distance?: number; logo_url?: string | null
+  distance_km?: number | null; logo_url?: string | null
+  delivery_fee_preview?: DeliveryFeePreview | null
 }
 
-function ProvidersNearYou({ postalCode, addressId }: { postalCode: string | null; addressId: number | null }) {
+function DeliveryFeePill({ preview }: { preview: DeliveryFeePreview }) {
+  // Same 3-state, non-misleading copy as AddressProviderStep.tsx's
+  // DeliveryFeeBadge — never phrases the 'fee' state as "free above X" (see
+  // scripts/48-fix-delivery-fee-below-mov-surcharge.sql for why that's wrong).
+  if (preview.state === 'free') {
+    return <span className="flex items-center gap-0.5 font-medium text-emerald-600 dark:text-emerald-400"><Truck className="h-3 w-3" /> Free delivery</span>
+  }
+  if (preview.state === 'free_above') {
+    return <span className="flex items-center gap-0.5 font-medium text-blue-600 dark:text-blue-400"><Truck className="h-3 w-3" /> Free above ₹{preview.free_above_amount}</span>
+  }
+  return <span className="flex items-center gap-0.5"><Truck className="h-3 w-3" /> ₹{preview.amount} delivery</span>
+}
+
+function ProvidersNearYou({ address }: { address: Address | null }) {
   const [providers, setProviders] = useState<NearbyProvider[]>([])
   const [loading,   setLoading]   = useState(false)
+  // Only auto-requests geolocation when there's no saved address to key off
+  // instead — a registered customer with an address on file is never
+  // prompted for browser location permission just for this widget.
+  const { coords } = useCustomerLocation(address === null)
 
   useEffect(() => {
-    if (!postalCode) { setProviders([]); return }
     let cancelled = false
-    setLoading(true)
-    fetch(`/api/customer/laundry-providers/search?location=${postalCode}`)
-      .then(r => r.json())
-      .then(j => { if (!cancelled) setProviders(j.success ? (j.data?.providers ?? []) : []) })
-      .catch(() => { if (!cancelled) setProviders([]) })
-      .finally(() => { if (!cancelled) setLoading(false) })
-    return () => { cancelled = true }
-  }, [postalCode])
 
-  if (!postalCode || (!loading && providers.length === 0)) return null
+    if (address?.postalCode) {
+      setLoading(true)
+      const params = new URLSearchParams({ location: address.postalCode })
+      if (address.latitude != null && address.longitude != null) {
+        params.set('lat', String(address.latitude))
+        params.set('lng', String(address.longitude))
+      }
+      fetch(`/api/customer/laundry-providers/search?${params}`)
+        .then(r => r.json())
+        .then(j => { if (!cancelled) setProviders(j.success ? (j.data?.providers ?? []) : []) })
+        .catch(() => { if (!cancelled) setProviders([]) })
+        .finally(() => { if (!cancelled) setLoading(false) })
+    } else if (address === null && coords) {
+      // No saved address at all — same public, distance-only endpoint the
+      // landing page uses. Field names differ (name/image vs.
+      // business_name/logo_url) and every row is implicitly verified
+      // already (the route's WHERE already filters is_verified = TRUE).
+      setLoading(true)
+      const params = new URLSearchParams({ lat: String(coords.lat), lng: String(coords.lng), limit: '8' })
+      fetch(`/api/customer/public/home-data?${params}`)
+        .then(r => r.json())
+        .then(j => {
+          if (cancelled) return
+          const list: any[] = j.success ? (j.data?.providers ?? []) : []
+          setProviders(list.map(p => ({
+            id: p.id, business_name: p.name, city: p.city,
+            rating: p.rating, rating_count: p.rating_count, is_verified: true,
+            distance_km: p.distance_km, logo_url: p.image,
+            delivery_fee_preview: null,
+          })))
+        })
+        .catch(() => { if (!cancelled) setProviders([]) })
+        .finally(() => { if (!cancelled) setLoading(false) })
+    } else {
+      setProviders([])
+    }
+
+    return () => { cancelled = true }
+  }, [address?.postalCode, address?.latitude, address?.longitude, address, coords])
+
+  if (!loading && providers.length === 0) return null
 
   return (
     <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
@@ -698,12 +756,17 @@ function ProvidersNearYou({ postalCode, addressId }: { postalCode: string | null
                     {p.rating_count > 0 && <span className="font-normal text-muted-foreground">({p.rating_count})</span>}
                   </span>
                 )}
-                {p.distance != null && <span>{Number(p.distance).toFixed(1)} km</span>}
+                {p.distance_km != null && <span>{formatDistance(p.distance_km)}</span>}
                 {p.is_verified && (
                   <span className="flex items-center gap-0.5 text-green-600"><ShieldCheck className="h-3 w-3" /> Verified</span>
                 )}
               </div>
-              <Link href={addressId ? `/customer/orders/create?provider=${p.id}&address=${addressId}` : `/customer/orders/create?provider=${p.id}`}
+              {p.delivery_fee_preview && (
+                <div className="mt-1 text-[11px] text-muted-foreground">
+                  <DeliveryFeePill preview={p.delivery_fee_preview} />
+                </div>
+              )}
+              <Link href={address?.id ? `/customer/orders/create?provider=${p.id}&address=${address.id}` : `/customer/orders/create?provider=${p.id}`}
                 className="mt-3 flex items-center justify-center gap-1.5 rounded-lg bg-primary/10 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground">
                 Create order <ArrowRight className="h-3.5 w-3.5" />
               </Link>
@@ -1238,10 +1301,10 @@ export default function CustomerDashboard() {
                 )}
               </motion.div>
 
-              {/* Providers near you — based on the selected address */}
+              {/* Providers near you — based on the selected address, or the
+                  customer's live location if they have none saved */}
               <ProvidersNearYou
-                postalCode={data.addresses.find(a => a.id === selectedAddressId)?.postalCode ?? null}
-                addressId={selectedAddressId}
+                address={data.addresses.find(a => a.id === selectedAddressId) ?? null}
               />
 
               {/* Popular services */}

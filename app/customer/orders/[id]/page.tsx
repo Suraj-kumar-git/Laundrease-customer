@@ -1109,7 +1109,9 @@ export default function OrderDetailPage() {
                 <p className="text-sm text-red-700/90 dark:text-red-400/90">
                   {order.payment_status === 'refunded'
                     ? `₹${order.total_amount.toLocaleString('en-IN')} has been credited to your Laundrease wallet. `
-                    : ''}
+                    : order.payment_status === 'refund_processing'
+                      ? `Your refund of ₹${order.total_amount.toLocaleString('en-IN')} has been initiated to your original payment method (5–7 business days). `
+                      : ''}
                   Please place a new order and we&apos;ll match you with another laundry provider.
                 </p>
                 <Link

@@ -5,10 +5,14 @@ import { successResponse, errorResponse, serverErrorResponse } from '@/lib/api-r
 import { PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL } from '@/lib/subscription'
 import { resolveProfileImageUrl } from '@/lib/s3'
 import { getGstRate, applyGst } from '@/lib/gst'
+import { DeliveryFeePreview } from '@/types/order-types'
 
 // GET /api/customer/laundry-providers/search
-// Query params: ?location=411045 (pincode or city)
-// Returns providers serving that area with rating_count
+// Query params: ?location=411045 (pincode or city), optional &lat=&lng=
+// Returns providers serving that area with rating_count. When lat/lng are
+// given (the customer's selected pickup address, or their live geolocation),
+// each provider also gets distance_km and a delivery_fee_preview — see
+// deriveFeePreview() below for how that's derived without a real subtotal.
 
 const SHORT_TO_FULL: Record<string, string> = {
   sun: 'sunday', mon: 'monday', tue: 'tuesday', wed: 'wednesday',
@@ -54,11 +58,40 @@ const NORMALIZED_HOURS_SUBQUERY = `(
   WHERE provider_id = lp.id
 ) AS normalized_hours`
 
+// Derives the 3-state delivery-fee badge from two calculate_order_fees()
+// calls (never re-deriving the MOV/radius logic here) — see
+// scripts/48-fix-delivery-fee-below-mov-surcharge.sql for what these
+// amounts actually encode. `low` = fee at subtotal 0 (MOV definitely not
+// met — the provider's flat below-MOV fee, beyond the free radius), `high`
+// = fee at the smallest subtotal that guarantees the MOV is met (the
+// distance-only surcharge, beyond the free radius). These are now two
+// independent tiers, NOT a monotonic floor/ceiling — a provider's flat fee
+// and per-km surcharge are set independently, so `high` can be either
+// smaller or larger than `low`. For the 'fee' state we report
+// max(low, high): a safe upper bound that never understates what the
+// customer might actually be charged, whichever tier they end up in.
+function deriveFeePreview(low: string | null, high: string | null, freeAbove: string | null): DeliveryFeePreview | null {
+  if (low == null || high == null) return null // delivery_fee code inactive — nothing to show
+  const lowN = parseFloat(low), highN = parseFloat(high)
+  if (highN === 0 && lowN === 0) return { state: 'free', amount: 0, free_above_amount: null }
+  if (highN === 0) return { state: 'free_above', amount: lowN, free_above_amount: freeAbove != null ? parseFloat(freeAbove) : null }
+  return { state: 'fee', amount: Math.max(lowN, highN), free_above_amount: null }
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
   const location = searchParams.get('location')?.trim()
+  const latStr = searchParams.get('lat')
+  const lngStr = searchParams.get('lng')
 
   if (!location) return errorResponse('location query param required', 400)
+
+  const lat = latStr ? parseFloat(latStr) : null
+  const lng = lngStr ? parseFloat(lngStr) : null
+  const hasLocation = lat !== null && lng !== null
+    && !isNaN(lat) && !isNaN(lng)
+    && lat >= -90 && lat <= 90
+    && lng >= -180 && lng <= 180
 
   try {
     const isPincode = /^\d{5,6}$/.test(location)
@@ -70,6 +103,31 @@ export async function GET(req: NextRequest) {
       WHERE ps.provider_id = lp.id
         AND s.price_per_kg IS NOT NULL
     )`
+
+    // $2/$3 (lat/lng) only ever appear in the SQL text when hasLocation is
+    // true, kept in exact sync with the params array built below.
+    const distanceKmExpr = `ROUND(haversine_km($2, $3, lp.latitude, lp.longitude)::numeric, 1)`
+
+    const distanceSelectCol = hasLocation ? `${distanceKmExpr} AS distance_km,` : `NULL::numeric AS distance_km,`
+
+    const feeSelectCols = hasLocation ? `
+             fee_low.amount  AS delivery_fee_low,
+             fee_high.amount AS delivery_fee_high,
+             COALESCE(lp.free_delivery_above_override, cfg.free_above_amount) AS free_above_amount,` : ''
+
+    const feeJoinsSQL = hasLocation ? `
+           LEFT JOIN order_fee_config cfg ON cfg.code = 'delivery_fee' AND cfg.is_active = TRUE
+           LEFT JOIN LATERAL (
+             SELECT (elem->>'amount')::numeric AS amount
+             FROM jsonb_array_elements(calculate_order_fees(0, FALSE, ${distanceKmExpr}, lp.id)) elem
+             WHERE elem->>'code' = 'delivery_fee'
+           ) fee_low ON TRUE
+           LEFT JOIN LATERAL (
+             SELECT (elem->>'amount')::numeric AS amount
+             FROM jsonb_array_elements(
+               calculate_order_fees(COALESCE(lp.free_delivery_above_override, cfg.free_above_amount, 0) + 1, FALSE, ${distanceKmExpr}, lp.id)
+             ) elem WHERE elem->>'code' = 'delivery_fee'
+           ) fee_high ON TRUE` : ''
 
     const result = await query(
       isPincode
@@ -91,8 +149,10 @@ export async function GET(req: NextRequest) {
              lp.has_gst,
              lp.gst_inclusive_pricing,
              ${minPriceKgExpr} AS min_price_kg,
+             ${distanceSelectCol}${feeSelectCols}
              ${NORMALIZED_HOURS_SUBQUERY}
            FROM laundry_profiles lp
+           ${feeJoinsSQL}
            WHERE lp.status = 'active'
              AND lp.is_verified = TRUE
              AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}
@@ -109,14 +169,18 @@ export async function GET(req: NextRequest) {
              lp.certifications, lp.services_offered, lp.operating_hours, lp.is_verified,
              lp.logo_url,
              ${minPriceKgExpr} AS min_price_kg,
+             ${distanceSelectCol}${feeSelectCols}
              ${NORMALIZED_HOURS_SUBQUERY}
            FROM laundry_profiles lp
+           ${feeJoinsSQL}
            WHERE lp.status = 'active'
              AND lp.is_verified = TRUE
              AND ${PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL}
              AND lp.city ILIKE $1
            ORDER BY lp.rating DESC, lp.business_name ASC`,
-      [isPincode ? location : `%${location}%`]
+      hasLocation
+        ? [isPincode ? location : `%${location}%`, lat, lng]
+        : [isPincode ? location : `%${location}%`]
     )
 
     // Teaser price shown before a customer opens a provider — must match
@@ -145,6 +209,8 @@ export async function GET(req: NextRequest) {
         ? (gstInclusive ? applyGst(parseFloat(r.min_price_kg), gstRate) : parseFloat(r.min_price_kg))
         : null,
       logo_url: await resolveProfileImageUrl(r.logo_url),
+      distance_km: r.distance_km != null ? parseFloat(r.distance_km) : null,
+      delivery_fee_preview: hasLocation ? deriveFeePreview(r.delivery_fee_low, r.delivery_fee_high, r.free_above_amount) : null,
       }
     }))
 
@@ -154,88 +220,3 @@ export async function GET(req: NextRequest) {
     return serverErrorResponse('Failed to fetch providers')
   }
 }
-
-// Determine if this is a postal code search (numeric) or location search (text)
-// const isPostalCodeSearch = /^\d+$/.test(searchTerm)
-
-// let sql: string
-// let params: any[]
-
-// if (isPostalCodeSearch && postal_code) {
-//   // Optimized query for postal code search (used in Create Order flow)
-//   // This is more specific and faster for exact postal code matching
-//   sql = `
-//     SELECT DISTINCT
-//       lp.id,
-//       lp.user_id,
-//       lp.business_name,
-//       lp.business_address,
-//       lp.service_area,
-//       lp.capacity,
-//       lp.operating_hours,
-//       lp.certifications,
-//       lp.services_offered,
-//       lp.rating,
-//       lp.created_at,
-//       u.email as contact_email,
-//       u.phone as contact_phone,
-//       u.status as provider_status
-//     FROM laundry_profiles lp
-//     INNER JOIN provider_service_areas psa
-//       ON psa.provider_id = lp.id
-//     INNER JOIN users u
-//       ON u.id = lp.user_id
-//     WHERE psa.postal_code = $1
-//       AND u.status = 'active'
-//       AND u.deleted_at IS NULL
-//     ORDER BY lp.rating DESC, lp.business_name ASC
-//     LIMIT 50
-//   `
-//   params = [searchTerm]
-// } else {
-//   // Flexible search query (existing functionality)
-//   // Searches by postal code, city, area name, or any location text
-//   sql = `
-//     SELECT
-//       lp.id,
-//       lp.user_id,
-//       lp.business_name,
-//       lp.business_address,
-//       lp.service_area,
-//       lp.capacity,
-//       lp.operating_hours,
-//       lp.certifications,
-//       lp.services_offered,
-//       lp.rating,
-//       lp.created_at,
-//       u.email as contact_email,
-//       u.phone as contact_phone,
-//       u.status as provider_status
-//     FROM laundry_profiles lp
-//     INNER JOIN users u ON lp.user_id = u.id
-//     WHERE
-//       u.status = 'active'
-//       AND u.deleted_at IS NULL
-//       AND (
-//         -- Search in business address
-//         lp.business_address ILIKE '%' || $1 || '%'
-//         -- Search in service area
-//         OR lp.service_area ILIKE '%' || $1 || '%'
-//         -- Search in business name
-//         OR lp.business_name ILIKE '%' || $1 || '%'
-//         -- Search in provider service areas table
-//         OR EXISTS (
-//           SELECT 1 FROM provider_service_areas psa
-//           WHERE psa.provider_id = lp.id
-//           AND (
-//             psa.postal_code = $1
-//             OR psa.city ILIKE '%' || $1 || '%'
-//             OR psa.state ILIKE '%' || $1 || '%'
-//           )
-//         )
-//       )
-//     ORDER BY lp.rating DESC, lp.created_at DESC
-//     LIMIT 50
-//   `
-//   params = [searchTerm]
-// }

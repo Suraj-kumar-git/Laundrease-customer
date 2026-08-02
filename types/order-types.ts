@@ -26,6 +26,17 @@ export interface Address {
 }
 
 // ---- Provider -----------------------------------------------
+
+// Delivery-fee preview shown on a provider card, before any items are
+// selected (no subtotal known yet) — derived server-side from two
+// calculate_order_fees() calls (worst-case and MOV-met subtotals). See
+// app/api/customer/laundry-providers/search/route.ts.
+export interface DeliveryFeePreview {
+  state: 'free' | 'free_above' | 'fee'
+  amount: number | null            // 0 for 'free'; low-subtotal fee for 'free_above' (subtitle use); guaranteed min fee for 'fee'
+  free_above_amount: number | null // populated only for 'free_above'
+}
+
 export interface LaundryProvider {
   id: number
   user_id: number
@@ -40,7 +51,8 @@ export interface LaundryProvider {
   certifications: string[]
   services_offered: string[]
   rating: number
-  distance?: number // calculated on frontend
+  distance_km?: number | null // server-calculated, from the customer's selected address
+  delivery_fee_preview?: DeliveryFeePreview | null
   estimated_delivery_time?: string // calculated based on turnaround
   is_verified: boolean
   logo_url?: string | null
