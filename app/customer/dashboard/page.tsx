@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/components/auth-provider'
 import { cn } from '@/lib/utils'
+import { getPreferredAddressId, setPreferredAddressId } from '@/lib/dashboard-address-pref'
 
 // ---- Types --------------------------------------------------
 
@@ -354,8 +355,12 @@ function WalletModal({ open, onClose, balance }: { open: boolean; onClose: () =>
 
 // ---- Address Dropdown (unchanged from page.txt) -------------
 
-function AddressDropdown({ addresses, selectedId, onSelect }: {
+function AddressDropdown({ addresses, selectedId, onSelect, compact }: {
   addresses: Address[]; selectedId: number | null; onSelect: (id: number) => void
+  // Minimal single-line trigger (icon + label + truncated address + chevron,
+  // no card border) for the mobile compact header bar, where it shares a row
+  // with the loyalty/wallet pills. The dropdown popup itself is unchanged.
+  compact?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -368,7 +373,12 @@ function AddressDropdown({ addresses, selectedId, onSelect }: {
   }, [])
 
   if (!selected) {
-    return (
+    return compact ? (
+      <Link href="/customer/addresses/new"
+        className="flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-primary">
+        <Plus className="h-3.5 w-3.5 shrink-0" /> Add address
+      </Link>
+    ) : (
       <Link href="/customer/addresses/new"
         className="flex items-center gap-3 rounded-2xl border border-dashed border-border/60 p-4 text-sm text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary">
         <Plus className="h-4 w-4" /> Add your first address
@@ -378,6 +388,17 @@ function AddressDropdown({ addresses, selectedId, onSelect }: {
 
   return (
     <div ref={ref} className="relative">
+      {compact ? (
+        <button onClick={() => setOpen(v => !v)}
+          className="flex w-full items-center gap-1.5 text-left">
+          <AddressIcon label={selected.label} className="h-4 w-4 shrink-0 text-primary" />
+          <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+            <span className="font-semibold">{selected.label}</span>
+            <span className="text-muted-foreground"> · {selected.addressLine1}</span>
+          </span>
+          <ChevronDown className={cn('h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200', open && 'rotate-180')} />
+        </button>
+      ) : (
       <button onClick={() => setOpen(v => !v)}
         className={cn('flex w-full items-start gap-3 rounded-2xl border bg-card p-4 text-left transition-all',
           open ? 'border-primary/40 shadow-sm' : 'border-border/50 hover:border-border')}>
@@ -395,6 +416,7 @@ function AddressDropdown({ addresses, selectedId, onSelect }: {
         </div>
         <ChevronDown className={cn('mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200', open && 'rotate-180')} />
       </button>
+      )}
       <AnimatePresence>
         {open && (
           <motion.div initial={{ opacity: 0, y: -6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -693,77 +715,6 @@ function ProvidersNearYou({ postalCode, addressId }: { postalCode: string | null
   )
 }
 
-// ---- Book again ---------------------------------------------
-// Last delivered order with a one-tap path back into the order flow with the
-// same provider pre-selected. Provider id isn't in the list API's payload, so
-// it's fetched lazily from the order-detail endpoint on tap — both are
-// existing endpoints, nothing server-side changed.
-
-interface LastOrder {
-  id: string; order_number: string; created_at: string
-  item_count: number; total_amount: number; provider_name: string | null
-}
-
-function BookAgain() {
-  const router = useRouter()
-  const [order,      setOrder]      = useState<LastOrder | null>(null)
-  const [navigating, setNavigating] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/customer/orders?status=delivered&limit=1', { credentials: 'include' })
-      .then(r => r.json())
-      .then(j => { if (!cancelled && j.success && j.data.orders?.length > 0) setOrder(j.data.orders[0]) })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [])
-
-  if (!order) return null
-
-  const handleBookAgain = async () => {
-    setNavigating(true)
-    try {
-      const res  = await fetch(`/api/customer/orders/${order.id}`, { credentials: 'include' })
-      const json = await res.json()
-      const providerId = json.success ? json.data?.provider?.id : null
-      // reorder=<id> lets the create flow re-fetch this same order's items
-      // and pre-select them on the services step — skipping straight there,
-      // same as the provider-card deep link, but with the previous cart
-      // already filled in so the customer edits from a real starting point
-      // instead of an empty one.
-      router.push(providerId
-        ? `/customer/orders/create?provider=${providerId}&reorder=${order.id}`
-        : '/customer/orders/create')
-    } catch {
-      router.push('/customer/orders/create')
-    }
-  }
-
-  return (
-    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.22 }}
-      className="flex items-center justify-between gap-3 rounded-2xl border border-border/50 bg-card p-4 shadow-sm">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <RefreshCw className="h-5 w-5" />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground">Book again</p>
-          <p className="truncate text-xs text-muted-foreground">
-            {order.item_count} item{order.item_count !== 1 ? 's' : ''}
-            {order.provider_name && ` with ${order.provider_name}`}
-            {' · '}{formatINR(order.total_amount)}
-          </p>
-        </div>
-      </div>
-      <button type="button" onClick={handleBookAgain} disabled={navigating}
-        className="flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 disabled:opacity-60">
-        {navigating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ArrowRight className="h-3.5 w-3.5" />}
-        Book again
-      </button>
-    </motion.div>
-  )
-}
-
 // ---- Popular services ---------------------------------------
 // Admin-ordered services (public catalog endpoint) as quick entry points
 // into the order flow.
@@ -936,13 +887,116 @@ function ReferralPromo() {
 //     </div>
 //   )
 // }
-  // ---- Main page ----------------------------------------------
 
-// Remembers the customer's last-picked dashboard address across reloads
-// (and even closing/reopening the app) — until now this always reset to the
-// account default on every visit, which disagreed with whatever the "New
-// Order" button and provider list below it were actually showing.
-const ADDRESS_PREF_KEY = 'laundrease_dashboard_address_id'
+// ---- Active Order card ---------------------------------------
+// Collapses to a compact header on mobile (status, Express badge, provider
+// name in place of the order number, and a Track Order button) so it stops
+// eating the first screenful — expands to the full timeline/dates/total on
+// tap. Always shown in full on sm+ (desktop pass comes later); the
+// grid-rows/[block+sm:*] classes below do that purely in CSS so there's no
+// per-breakpoint markup duplication.
+
+function ActiveOrderCard({ order, statusMeta }: {
+  order: ActiveOrder; statusMeta: { label: string; color: string } | null
+}) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm">
+      <button type="button" onClick={() => setExpanded(v => !v)}
+        className="flex w-full items-center justify-between gap-3 border-b border-border/50 bg-muted/30 px-5 py-4 text-left sm:pointer-events-none">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-foreground">Active Order</h2>
+            {order.isExpress && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-400">
+                <Zap className="h-3 w-3" /> Express
+              </span>
+            )}
+          </div>
+          {/* Expanded (mobile) / sm+: order number, matching the detail below it. */}
+          <p className={cn('mt-0.5 truncate text-xs text-muted-foreground', expanded ? 'block' : 'hidden', 'sm:block')}>
+            #{order.orderNumber}
+          </p>
+          {/* Collapsed (mobile only): provider name instead. */}
+          <p className={cn('mt-0.5 truncate text-xs text-muted-foreground', expanded ? 'hidden' : 'block', 'sm:hidden')}>
+            {order.laundryName ?? `#${order.orderNumber}`}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className={cn('rounded-full px-3 py-1 text-xs font-semibold', statusMeta?.color)}>
+            {statusMeta?.label}
+          </span>
+          <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform sm:hidden', expanded && 'rotate-180')} />
+        </div>
+      </button>
+
+      {/* Collapsed-only (mobile) Track Order — the one action that stays
+          reachable without expanding. sm+ keeps its single Track Order
+          button further down, inside the always-visible detail. */}
+      {!expanded && (
+        <div className="px-5 py-3 sm:hidden">
+          <Link href={`/customer/orders/${order.id}`}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90">
+            Track Order <ArrowRight className="h-4 w-4" />
+          </Link>
+        </div>
+      )}
+
+      <div className={cn('grid transition-[grid-template-rows] duration-300 ease-in-out',
+        expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]', 'sm:grid-rows-[1fr]')}>
+        <div className="overflow-hidden">
+          <div className="p-5">
+            <OrderTimeline order={order} />
+            <div className="mt-5 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+              <div>
+                <p className="mb-1 text-xs text-muted-foreground">Pickup</p>
+                <p className="flex items-center gap-1.5 font-medium text-foreground">
+                  <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                  {formatDate(order.pickupDate)}
+                  {order.pickupTimeSlot && <span className="text-muted-foreground">· {order.pickupTimeSlot}</span>}
+                </p>
+              </div>
+              {order.deliveryDate && (
+                <div>
+                  <p className="mb-1 text-xs text-muted-foreground">Expected Delivery</p>
+                  <p className="flex items-center gap-1.5 font-medium text-foreground">
+                    <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                    {formatDate(order.deliveryDate)}
+                    {order.deliveryTimeSlot && <span className="text-muted-foreground">· {order.deliveryTimeSlot}</span>}
+                  </p>
+                </div>
+              )}
+            </div>
+            {order.laundryName && (
+              <div className="mt-4 flex items-center gap-3 rounded-xl bg-muted/40 px-4 py-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary">
+                  {order.laundryName.charAt(0)}
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Processing at</p>
+                  <p className="text-sm font-semibold text-foreground">{order.laundryName}</p>
+                </div>
+              </div>
+            )}
+            <div className="mt-5 flex items-center justify-between border-t border-border/40 pt-4">
+              <div>
+                <p className="text-xs text-muted-foreground">Order Total</p>
+                <p className="text-xl font-bold text-foreground">{formatINR(order.totalAmount)}</p>
+              </div>
+              <Link href={`/customer/orders/${order.id}`}
+                className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 hover:shadow-md">
+                Track Order <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+  // ---- Main page ----------------------------------------------
 
 export default function CustomerDashboard() {
   const { markUnauthorized } = useAuth()
@@ -956,7 +1010,7 @@ export default function CustomerDashboard() {
 
   function selectAddress(id: number) {
     setSelectedAddressId(id)
-    try { localStorage.setItem(ADDRESS_PREF_KEY, String(id)) } catch { /* private browsing, etc. */ }
+    setPreferredAddressId(id)
   }
 
   // Modal state
@@ -980,11 +1034,8 @@ export default function CustomerDashboard() {
       if (json.data.addresses?.length > 0) {
         // Prefer whatever the customer last picked here (if it still exists
         // among their current addresses) over silently resetting to default.
-        let remembered: number | null = null
-        try {
-          const stored = Number(localStorage.getItem(ADDRESS_PREF_KEY))
-          if (stored && json.data.addresses.some((a: Address) => a.id === stored)) remembered = stored
-        } catch { /* private browsing, etc. */ }
+        const stored = getPreferredAddressId()
+        const remembered = stored && json.data.addresses.some((a: Address) => a.id === stored) ? stored : null
         const def = json.data.addresses.find((a: Address) => a.isDefault)
         setSelectedAddressId(remembered ?? def?.id ?? json.data.addresses[0].id)
       }
@@ -1089,8 +1140,11 @@ export default function CustomerDashboard() {
               </button>
             </div>
 
-            {/* ---- Stat pills — one horizontal strip on mobile, grid on sm+ ---- */}
-            <div className="mt-4 flex gap-2.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-4 sm:overflow-visible">
+            {/* ---- Stat pills — sm+ only. On mobile, Loyalty/Wallet move into
+                the compact address bar below and Active/Completed counts are
+                dropped entirely (already one tap away via the bottom nav's
+                Orders tab) to keep the first screenful tight. ---- */}
+            <div className="mt-4 hidden gap-2.5 sm:grid sm:grid-cols-4">
               {statPills.map((stat, i) => (
                 <motion.button
                   key={stat.label}
@@ -1099,7 +1153,7 @@ export default function CustomerDashboard() {
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.06 }}
-                  className="flex min-w-[8.5rem] shrink-0 items-center gap-2.5 rounded-xl border border-border/50 bg-card px-3 py-2 transition-all hover:border-primary/30 hover:bg-muted/40 active:scale-95 text-left cursor-pointer sm:min-w-0 sm:shrink"
+                  className="flex min-w-0 shrink items-center gap-2.5 rounded-xl border border-border/50 bg-card px-3 py-2 transition-all hover:border-primary/30 hover:bg-muted/40 active:scale-95 text-left cursor-pointer"
                 >
                   <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                     <stat.icon className="h-4 w-4 text-primary" />
@@ -1112,8 +1166,8 @@ export default function CustomerDashboard() {
               ))}
             </div>
 
-            {/* ---- Address + New Order — moved up from below to use this space efficiently ---- */}
-            <div className="mt-3 flex flex-col gap-2.5 sm:flex-row">
+            {/* ---- Address + New Order — sm+ only (unchanged) ---- */}
+            <div className="mt-3 hidden gap-2.5 sm:flex">
               <div className="flex-1">
                 <AddressDropdown addresses={data.addresses} selectedId={selectedAddressId} onSelect={selectAddress} />
               </div>
@@ -1122,12 +1176,45 @@ export default function CustomerDashboard() {
                 <Plus className="h-4 w-4" /> New Order
               </Link>
             </div>
+
+            {/* ---- Mobile-only compact bar: address + loyalty + wallet, all
+                in one row (no New Order button — the bottom nav already has
+                one) — mirrors the quick-commerce pattern of address left,
+                quick-glance pills right. ---- */}
+            <div className="mt-4 flex items-center gap-2 sm:hidden">
+              <div className="min-w-0 flex-1">
+                <AddressDropdown addresses={data.addresses} selectedId={selectedAddressId} onSelect={selectAddress} compact />
+              </div>
+              <button type="button" onClick={() => setLoyaltyOpen(true)}
+                className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/50 bg-card px-2.5 py-1.5 transition-transform active:scale-95">
+                <motion.span
+                  animate={{ rotateY: [0, 360] }}
+                  transition={{ repeat: Infinity, duration: 2.5, ease: 'linear' }}
+                  className="text-sm leading-none"
+                  style={{ display: 'inline-block' }}
+                >
+                  🪙
+                </motion.span>
+                <span className="text-xs font-bold text-foreground">{displayPoints}</span>
+              </button>
+              <button type="button" onClick={() => setWalletOpen(true)}
+                className="flex shrink-0 items-center gap-1.5 rounded-full border border-border/50 bg-card px-2.5 py-1.5 transition-transform active:scale-95">
+                <motion.span
+                  animate={{ scale: [1, 1.15, 1] }}
+                  transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+                  style={{ display: 'inline-block' }}
+                >
+                  <Wallet className="h-4 w-4 text-primary" />
+                </motion.span>
+                <span className="text-xs font-bold text-foreground">{formatINR(displayWallet)}</span>
+              </button>
+            </div>
           </div>
         </div>
 
         {/* ---- Main content ---- */}
         <div className="container mx-auto px-4 pb-12">
-          <div className="mt-4 grid items-start gap-6 lg:grid-cols-3">
+          <div className="mt-4 grid gap-6 lg:grid-cols-3">
 
             {/* ============ LEFT / MAIN COLUMN ============ */}
             <div className="min-w-0 space-y-6 lg:col-span-2">
@@ -1135,70 +1222,7 @@ export default function CustomerDashboard() {
               {/* Active Order */}
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
                 {data.activeOrder ? (
-                  <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm">
-                    <div className="border-b border-border/50 bg-muted/30 px-5 py-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h2 className="text-sm font-semibold text-foreground">Active Order</h2>
-                            {data.activeOrder.isExpress && (
-                              <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                                <Zap className="h-3 w-3" /> Express
-                              </span>
-                            )}
-                          </div>
-                          <p className="mt-0.5 text-xs text-muted-foreground">#{data.activeOrder.orderNumber}</p>
-                        </div>
-                        <span className={cn('rounded-full px-3 py-1 text-xs font-semibold', statusMeta?.color)}>
-                          {statusMeta?.label}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="p-5">
-                      <OrderTimeline order={data.activeOrder} />
-                      <div className="mt-5 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
-                        <div>
-                          <p className="mb-1 text-xs text-muted-foreground">Pickup</p>
-                          <p className="flex items-center gap-1.5 font-medium text-foreground">
-                            <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                            {formatDate(data.activeOrder.pickupDate)}
-                            {data.activeOrder.pickupTimeSlot && <span className="text-muted-foreground">· {data.activeOrder.pickupTimeSlot}</span>}
-                          </p>
-                        </div>
-                        {data.activeOrder.deliveryDate && (
-                          <div>
-                            <p className="mb-1 text-xs text-muted-foreground">Expected Delivery</p>
-                            <p className="flex items-center gap-1.5 font-medium text-foreground">
-                              <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                              {formatDate(data.activeOrder.deliveryDate)}
-                              {data.activeOrder.deliveryTimeSlot && <span className="text-muted-foreground">· {data.activeOrder.deliveryTimeSlot}</span>}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                      {data.activeOrder.laundryName && (
-                        <div className="mt-4 flex items-center gap-3 rounded-xl bg-muted/40 px-4 py-3">
-                          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary">
-                            {data.activeOrder.laundryName.charAt(0)}
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground">Processing at</p>
-                            <p className="text-sm font-semibold text-foreground">{data.activeOrder.laundryName}</p>
-                          </div>
-                        </div>
-                      )}
-                      <div className="mt-5 flex items-center justify-between border-t border-border/40 pt-4">
-                        <div>
-                          <p className="text-xs text-muted-foreground">Order Total</p>
-                          <p className="text-xl font-bold text-foreground">{formatINR(data.activeOrder.totalAmount)}</p>
-                        </div>
-                        <Link href={`/customer/orders/${data.activeOrder.id}`}
-                          className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 hover:shadow-md">
-                          Track Order <ArrowRight className="h-4 w-4" />
-                        </Link>
-                      </div>
-                    </div>
-                  </div>
+                  <ActiveOrderCard order={data.activeOrder} statusMeta={statusMeta} />
                 ) : (
                   <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-primary/30 bg-primary/5 px-6 py-10 text-center">
                     <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -1213,9 +1237,6 @@ export default function CustomerDashboard() {
                   </div>
                 )}
               </motion.div>
-
-              {/* Book again — last delivered order */}
-              <BookAgain />
 
               {/* Providers near you — based on the selected address */}
               <ProvidersNearYou
@@ -1242,7 +1263,13 @@ export default function CustomerDashboard() {
             </div>
 
             {/* ============ RIGHT / SIDEBAR ============ */}
-            <div className="min-w-0 space-y-5">
+            {/* Outer wrapper gets stretched by the grid to match the left
+                column's (usually taller) height — that's what gives the
+                inner sticky wrapper room to actually stick instead of
+                trailing off into empty space once its own short content
+                runs out while the left column keeps going. */}
+            <div className="min-w-0">
+            <div className="space-y-5 lg:sticky lg:top-20">
 
               {/* Quick links — desktop only; on mobile the bottom nav and the
                   new Book-again/providers/services sections cover these */}
@@ -1282,6 +1309,7 @@ export default function CustomerDashboard() {
                   replaces those with something that isn't duplicated
                   anywhere else on the dashboard. */}
               <ReferralPromo />
+            </div>
             </div>
           </div>
         </div>
