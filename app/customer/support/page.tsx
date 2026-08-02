@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
+import { useTicketChat } from '@/lib/use-ticket-chat'
 import { SearchParamProvider } from '@/components/common/searchParamProvider'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -386,11 +387,17 @@ function TicketDetailModal({ ticket, onClose, onReplied }: {
 
   useEffect(() => { load().finally(() => setLoading(false)) }, [load])
 
-  // Light polling for new agent replies while the conversation is open.
-  useEffect(() => {
-    const interval = setInterval(() => { load() }, 15000)
-    return () => clearInterval(interval)
-  }, [load])
+  // Live chat sync (poll for new replies + agent typing indicator) — replaces
+  // the old bespoke 15s setInterval with the shared cross-role hook.
+  const { typingLabel, notifyTyping } = useTicketChat<Comment>({
+    pollUrl:        `/api/customer/support/${ticket.id}/poll`,
+    typingUrl:      `/api/customer/support/${ticket.id}/typing`,
+    comments:       detail?.comments ?? [],
+    onNewComments:  fresh => setDetail(d => d ? { ...d, comments: [...d.comments, ...fresh] } : d),
+    onStatusChange: status => setDetail(d => d ? { ...d, ticket: { ...d.ticket, status } } : d),
+    mode:           'reporter',
+    enabled:        !loading && !!detail,
+  })
 
   // Jump to the latest activity on initial load and whenever a new comment
   // actually arrives (own reply or a poll picking up an agent reply) —
@@ -590,11 +597,21 @@ function TicketDetailModal({ ticket, onClose, onReplied }: {
 
       {!loading && detail && !isTerminal && (
         <div className="shrink-0 space-y-2 border-t border-border/50 px-5 py-4">
+          {typingLabel && (
+            <p className="text-xs text-muted-foreground italic flex items-center gap-1.5">
+              <span className="flex gap-0.5">
+                <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.3s]"/>
+                <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce [animation-delay:-0.15s]"/>
+                <span className="w-1 h-1 rounded-full bg-muted-foreground animate-bounce"/>
+              </span>
+              {typingLabel}
+            </p>
+          )}
           {replyError && <p className="text-xs text-destructive">{replyError}</p>}
           {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
           <div className="flex gap-2">
             <textarea rows={2} value={replyText}
-              onChange={e => setReplyText(e.target.value)}
+              onChange={e => { setReplyText(e.target.value); notifyTyping() }}
               onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) sendReply() }}
               placeholder="Add a reply… (Ctrl+Enter to send)"
               className={`flex-1 ${TEXTAREA}`} />
