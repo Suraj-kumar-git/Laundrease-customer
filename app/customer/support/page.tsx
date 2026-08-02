@@ -373,6 +373,10 @@ function TicketDetailModal({ ticket, onClose, onReplied }: {
   const [replyText,    setReplyText]    = useState('')
   const [replySending, setReplySending] = useState(false)
   const [replyError,   setReplyError]   = useState('')
+  const [uploadingFile, setUploadingFile] = useState(false)
+  const [uploadError,   setUploadError]   = useState('')
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const replyFileRef = useRef<HTMLInputElement>(null)
 
   const load = useCallback(() => {
     return fetch(`/api/customer/support/${ticket.id}`, { credentials: 'include' })
@@ -387,6 +391,47 @@ function TicketDetailModal({ ticket, onClose, onReplied }: {
     const interval = setInterval(() => { load() }, 15000)
     return () => clearInterval(interval)
   }, [load])
+
+  // Jump to the latest activity on initial load and whenever a new comment
+  // actually arrives (own reply or a poll picking up an agent reply) —
+  // keyed on the comment count rather than the `detail` object itself, so a
+  // poll tick with no new comments doesn't yank someone back down after
+  // they've scrolled up to read earlier messages.
+  const commentCount = detail?.comments.length ?? 0
+  useEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+  }, [commentCount])
+
+  // Attaching a file is independent of sending a text reply — an agent may
+  // ask for a photo mid-conversation, so this must work on its own rather
+  // than only being available when the ticket was first raised. Uploads
+  // immediately (reusing the same upload endpoint ticket creation uses,
+  // which already accepts an existing ticket_id) and refreshes the thread
+  // so the new attachment shows up right away.
+  async function handleReplyFiles(fileList: FileList | null) {
+    if (!fileList || fileList.length === 0) return
+    setUploadError('')
+    const filesArr = Array.from(fileList)
+    const currentCount = detail?.attachments.length ?? 0
+    if (currentCount + filesArr.length > 5) { setUploadError('Maximum 5 attachments per ticket.'); return }
+    for (const f of filesArr) {
+      if (!ALLOWED_TYPES.includes(f.type)) { setUploadError(`"${f.name}" is not an allowed file type.`); return }
+      if (f.size > MAX_FILE_SIZE)          { setUploadError(`"${f.name}" exceeds the 10 MB limit.`); return }
+    }
+    setUploadingFile(true)
+    try {
+      for (const file of filesArr) {
+        const fd = new FormData()
+        fd.append('file', file)
+        fd.append('ticket_id', String(ticket.id))
+        const res  = await fetch('/api/customer/support/upload', { method: 'POST', body: fd, credentials: 'include' })
+        const json = await res.json()
+        if (!json.success) { setUploadError(json.error || 'Upload failed'); break }
+      }
+      await load()
+    } catch { setUploadError('Upload failed') }
+    finally { setUploadingFile(false) }
+  }
 
   async function sendReply() {
     if (!replyText.trim()) return
@@ -440,7 +485,7 @@ function TicketDetailModal({ ticket, onClose, onReplied }: {
       </div>
 
       {/* Body */}
-      <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+      <div ref={bodyRef} className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
         {loading ? (
           <div className="flex h-32 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin text-primary" />
@@ -546,16 +591,26 @@ function TicketDetailModal({ ticket, onClose, onReplied }: {
       {!loading && detail && !isTerminal && (
         <div className="shrink-0 space-y-2 border-t border-border/50 px-5 py-4">
           {replyError && <p className="text-xs text-destructive">{replyError}</p>}
+          {uploadError && <p className="text-xs text-destructive">{uploadError}</p>}
           <div className="flex gap-2">
             <textarea rows={2} value={replyText}
               onChange={e => setReplyText(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) sendReply() }}
               placeholder="Add a reply… (Ctrl+Enter to send)"
               className={`flex-1 ${TEXTAREA}`} />
-            <button onClick={sendReply} disabled={replySending || !replyText.trim()}
-              className="shrink-0 rounded-xl bg-primary px-3 py-2 text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50">
-              {replySending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-            </button>
+            <div className="flex shrink-0 flex-col gap-2">
+              <input ref={replyFileRef} type="file" multiple accept={ALLOWED_TYPES.join(',')} className="hidden"
+                onChange={e => { handleReplyFiles(e.target.files); e.target.value = '' }} />
+              <button type="button" onClick={() => replyFileRef.current?.click()} disabled={uploadingFile}
+                title="Attach a file"
+                className="rounded-xl border border-border/60 p-2 text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground disabled:opacity-50">
+                {uploadingFile ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
+              </button>
+              <button onClick={sendReply} disabled={replySending || !replyText.trim()}
+                className="rounded-xl bg-primary px-3 py-2 text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50">
+                {replySending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              </button>
+            </div>
           </div>
         </div>
       )}
