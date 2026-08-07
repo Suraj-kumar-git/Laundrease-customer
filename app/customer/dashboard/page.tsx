@@ -47,7 +47,7 @@ interface Coupon {
 interface DashboardData {
   profile: { fullName: string; email: string; phone: string; profileImage: string | null; loyaltyPoints: number; totalOrders: number; lastOrderAt: string | null }
   addresses: Address[]
-  activeOrder: ActiveOrder | null
+  activeOrders: ActiveOrder[]
   wallet: { balance: number; currency: string }
   statistics: { completedOrders: number; activeOrders: number; totalSpent: number }
 }
@@ -83,6 +83,24 @@ const STATUS_TO_STEP: Record<string, number> = {
   ready_for_delivery: 4, ready: 4,
   out_for_delivery: 5,
   delivered: 6,
+}
+
+// Progress rank used to order the dashboard's active-order carousel: higher
+// means closer to completion, so the carousel leads with whatever is nearest
+// the customer's door and leaves not-yet-confirmed orders last.
+// Deliberately finer-grained than STATUS_TO_STEP above — that one coarsens
+// several distinct statuses onto a single visual timeline step, which would
+// make e.g. out_for_pickup and assigned_for_pickup sort as equals here.
+const ACTIVE_STATUS_RANK: Record<string, number> = {
+  pending: 0,
+  confirmed: 1,
+  assigned_for_pickup: 2,
+  out_for_pickup: 3,
+  picked_up: 4,
+  at_laundry: 5,
+  processing: 6,
+  ready: 7, ready_for_delivery: 7,
+  out_for_delivery: 8,
 }
 
 const STATUS_META: Record<string, { label: string; color: string }> = {
@@ -959,10 +977,9 @@ function ReferralPromo() {
 // grid-rows/[block+sm:*] classes below do that purely in CSS so there's no
 // per-breakpoint markup duplication.
 
-function ActiveOrderCard({ order, statusMeta }: {
-  order: ActiveOrder; statusMeta: { label: string; color: string } | null
-}) {
+function ActiveOrderCard({ order }: { order: ActiveOrder }) {
   const [expanded, setExpanded] = useState(false)
+  const statusMeta = STATUS_META[order.status] ?? STATUS_META.pending
 
   return (
     <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm">
@@ -1159,7 +1176,16 @@ export default function CustomerDashboard() {
   }
 
   const firstName    = data.profile.fullName.split(' ')[0]
-  const statusMeta   = data.activeOrder ? (STATUS_META[data.activeOrder.status] ?? STATUS_META.pending) : null
+
+  // Carousel order: nearest completion first (out for delivery leads),
+  // not-yet-confirmed last. Within the same stage the longest-waiting order
+  // comes first, since it's the one next in line to move.
+  const sortedActiveOrders = [...data.activeOrders].sort((a, b) => {
+    const byStage = (ACTIVE_STATUS_RANK[b.status] ?? -1) - (ACTIVE_STATUS_RANK[a.status] ?? -1)
+    if (byStage !== 0) return byStage
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  })
+
   const displayPoints = localLoyalty ?? data.profile.loyaltyPoints
   const displayWallet = localWallet  ?? data.wallet.balance
 
@@ -1282,11 +1308,13 @@ export default function CustomerDashboard() {
             {/* ============ LEFT / MAIN COLUMN ============ */}
             <div className="min-w-0 space-y-6 lg:col-span-2">
 
-              {/* Active Order */}
+              {/* Active Orders — a single order renders full-width as before;
+                  2+ becomes a horizontal-scroll carousel (same overflow-x
+                  pattern as "Providers near you" below), each card keeping
+                  its own accordion so it can expand right here on the
+                  dashboard without navigating away. */}
               <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
-                {data.activeOrder ? (
-                  <ActiveOrderCard order={data.activeOrder} statusMeta={statusMeta} />
-                ) : (
+                {sortedActiveOrders.length === 0 ? (
                   <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-primary/30 bg-primary/5 px-6 py-10 text-center">
                     <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
                       <ShoppingBag className="h-8 w-8" />
@@ -1297,6 +1325,16 @@ export default function CustomerDashboard() {
                       className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90">
                       <Plus className="h-4 w-4" /> Place New Order
                     </Link>
+                  </div>
+                ) : sortedActiveOrders.length === 1 ? (
+                  <ActiveOrderCard order={sortedActiveOrders[0]} />
+                ) : (
+                  <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                    {sortedActiveOrders.map(order => (
+                      <div key={order.id} className="w-[85vw] max-w-sm shrink-0 snap-center sm:w-96">
+                        <ActiveOrderCard order={order} />
+                      </div>
+                    ))}
                   </div>
                 )}
               </motion.div>
