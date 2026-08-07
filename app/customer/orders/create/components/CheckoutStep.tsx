@@ -161,14 +161,18 @@ export function CheckoutStep({
       .then(r => r.json()).then(j => { if (j.success) setGatewayInfo(j.data) }).catch(() => {})
       .finally(() => setGatewayLoading(false))
 
-    // Pre-fill GSTIN from the saved profile, unless this checkout already has
-    // one set (e.g. navigating back to this step after entering it).
-    if (!orderState.customer_gstin) {
-      fetch('/api/customer/profile', { credentials: 'include' })
-        .then(r => r.json())
-        .then(j => { if (j.success && j.data.gstin) { setGstin(j.data.gstin); onCustomerGstin(j.data.gstin) } })
-        .catch(() => {})
-    }
+    // GSTIN-on-checkout is disabled for now (UI commented out below) — see
+    // that comment for why. Keeping this prefill active while the field is
+    // hidden would silently attach a saved GSTIN to orders without the
+    // customer ever seeing/confirming it, so it's commented out too.
+    // // Pre-fill GSTIN from the saved profile, unless this checkout already
+    // // has one set (e.g. navigating back to this step after entering it).
+    // if (!orderState.customer_gstin) {
+    //   fetch('/api/customer/profile', { credentials: 'include' })
+    //     .then(r => r.json())
+    //     .then(j => { if (j.success && j.data.gstin) { setGstin(j.data.gstin); onCustomerGstin(j.data.gstin) } })
+    //     .catch(() => {})
+    // }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Provider availability (re-check on checkout mount) -------
@@ -512,7 +516,10 @@ export function CheckoutStep({
           )}
         </div>
 
-        {/* Customer GSTIN — optional, for B2B orders claiming ITC */}
+        {/* Customer GSTIN — parked for later. Commented out (not deleted) so
+            it's a quick re-enable when this is ready to ship; the matching
+            auto-prefill effect further up is commented out for the same
+            reason.
         <div className="rounded-xl border border-border/50 bg-card p-3">
           <div className="mb-1.5 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
@@ -545,6 +552,7 @@ export function CheckoutStep({
             <p className="text-sm text-muted-foreground">{gstin || <span className="italic">None</span>}</p>
           )}
         </div>
+        */}
 
         {/* Price breakdown */}
         <div className="rounded-xl border border-border/50 bg-card p-3">
