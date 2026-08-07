@@ -143,6 +143,11 @@ function formatINR(amount: number) {
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
 }
+// Day + month only — used on the compact order cards, where the year would
+// push the pickup/delivery row onto a second line on narrow cards.
+function formatShortDate(d: string) {
+  return new Date(d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+}
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
@@ -970,63 +975,91 @@ function ReferralPromo() {
 // }
 
 // ---- Active Order card ---------------------------------------
-// Collapses to a compact header on mobile (status, Express badge, provider
-// name in place of the order number, and a Track Order button) so it stops
-// eating the first screenful — expands to the full timeline/dates/total on
-// tap. Always shown in full on sm+ (desktop pass comes later); the
-// grid-rows/[block+sm:*] classes below do that purely in CSS so there's no
-// per-breakpoint markup duplication.
+// One fixed-shape summary card at every breakpoint: header (order no.,
+// express, status), a slim progress bar, the two key dates, then total +
+// Track pinned to the bottom. Everything variable is single-line and
+// truncated — including Express, which is an icon rather than a text pill,
+// so an express order can never render taller than a normal one and the
+// cards in a row all line up exactly.
+//
+// Below lg the card is an accordion: tapping the header unfolds the full
+// timeline and slot details in place. From lg the accordion is dropped and
+// the whole card becomes a link to the order page — implemented as a
+// stretched overlay anchor so the mobile toggle button underneath still
+// works below lg, where the overlay isn't rendered at all.
 
 function ActiveOrderCard({ order }: { order: ActiveOrder }) {
   const [expanded, setExpanded] = useState(false)
   const statusMeta = STATUS_META[order.status] ?? STATUS_META.pending
+  const stepIndex  = STATUS_TO_STEP[order.status] ?? 0
+  // The pill already names where the order *is*, so the progress line names
+  // what it's waiting on next instead of repeating the same thing coarser.
+  const nextStep   = ORDER_STEPS[stepIndex + 1]
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm">
+    <div className="relative flex h-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-card shadow-sm transition-all lg:hover:border-primary/40 lg:hover:shadow-md">
+      {/* Desktop: the card itself is the link to the order detail page. */}
+      <Link href={`/customer/orders/${order.id}`} aria-label={`Open order ${order.orderNumber}`}
+        className="absolute inset-0 z-10 hidden lg:block" />
+
       <button type="button" onClick={() => setExpanded(v => !v)}
-        className="flex w-full items-center justify-between gap-3 border-b border-border/50 bg-muted/30 px-5 py-4 text-left sm:pointer-events-none">
+        className="flex w-full items-center justify-between gap-2 border-b border-border/50 bg-muted/30 px-4 py-3 text-left lg:pointer-events-none">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold text-foreground">Active Order</h2>
+          <div className="flex items-center gap-1.5">
+            <h2 className="truncate text-sm font-semibold text-foreground">#{order.orderNumber}</h2>
             {order.isExpress && (
-              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                <Zap className="h-3 w-3" /> Express
+              <span title="Express order"
+                className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-600 dark:bg-amber-950 dark:text-amber-400">
+                <Zap className="h-2.5 w-2.5 fill-current" />
               </span>
             )}
           </div>
-          {/* Expanded (mobile) / sm+: order number, matching the detail below it. */}
-          <p className={cn('mt-0.5 truncate text-xs text-muted-foreground', expanded ? 'block' : 'hidden', 'sm:block')}>
-            #{order.orderNumber}
-          </p>
-          {/* Collapsed (mobile only): provider name instead. */}
-          <p className={cn('mt-0.5 truncate text-xs text-muted-foreground', expanded ? 'hidden' : 'block', 'sm:hidden')}>
-            {order.laundryName ?? `#${order.orderNumber}`}
+          <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            {order.laundryName ?? 'Awaiting provider'}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className={cn('rounded-full px-3 py-1 text-xs font-semibold', statusMeta?.color)}>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className={cn('whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold', statusMeta?.color)}>
             {statusMeta?.label}
           </span>
-          <ChevronDown className={cn('h-4 w-4 text-muted-foreground transition-transform sm:hidden', expanded && 'rotate-180')} />
+          <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform lg:hidden', expanded && 'rotate-180')} />
         </div>
       </button>
 
-      {/* Collapsed-only (mobile) Track Order — the one action that stays
-          reachable without expanding. sm+ keeps its single Track Order
-          button further down, inside the always-visible detail. */}
-      {!expanded && (
-        <div className="px-5 py-3 sm:hidden">
-          <Link href={`/customer/orders/${order.id}`}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-2.5 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90">
-            Track Order <ArrowRight className="h-4 w-4" />
-          </Link>
+      {/* Always-visible summary — the whole card body on lg+ */}
+      <div className="space-y-3 px-4 py-3">
+        <div>
+          <div className="mb-1.5 flex items-baseline justify-between gap-2 text-[11px]">
+            <span className="truncate font-medium text-foreground">
+              {nextStep ? `Next: ${nextStep.label}` : (statusMeta?.label ?? '')}
+            </span>
+            <span className="shrink-0 text-muted-foreground">{stepIndex + 1}/{ORDER_STEPS.length}</span>
+          </div>
+          <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary transition-all duration-700"
+              style={{ width: `${Math.max(6, (stepIndex / (ORDER_STEPS.length - 1)) * 100)}%` }} />
+          </div>
         </div>
-      )}
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <span className="flex min-w-0 items-center gap-1">
+            <Calendar className="h-3 w-3 shrink-0" />
+            <span className="truncate">Pickup {formatShortDate(order.pickupDate)}</span>
+          </span>
+          {order.deliveryDate && (
+            <span className="flex min-w-0 items-center gap-1">
+              <Truck className="h-3 w-3 shrink-0" />
+              <span className="truncate">Delivery {formatShortDate(order.deliveryDate)}</span>
+            </span>
+          )}
+        </div>
+      </div>
 
-      <div className={cn('grid transition-[grid-template-rows] duration-300 ease-in-out',
-        expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]', 'sm:grid-rows-[1fr]')}>
+      {/* Full detail — mobile accordion only. On lg the card links out to the
+          order page instead of unfolding here. */}
+      <div className={cn('grid transition-[grid-template-rows] duration-300 ease-in-out lg:hidden',
+        expanded ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]')}>
         <div className="overflow-hidden">
-          <div className="p-5">
+          <div className="border-t border-border/40 p-4">
             <OrderTimeline order={order} />
             <div className="mt-5 grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
               <div>
@@ -1048,31 +1081,95 @@ function ActiveOrderCard({ order }: { order: ActiveOrder }) {
                 </div>
               )}
             </div>
-            {order.laundryName && (
-              <div className="mt-4 flex items-center gap-3 rounded-xl bg-muted/40 px-4 py-3">
-                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-sm font-bold text-primary">
-                  {order.laundryName.charAt(0)}
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Processing at</p>
-                  <p className="text-sm font-semibold text-foreground">{order.laundryName}</p>
-                </div>
-              </div>
-            )}
-            <div className="mt-5 flex items-center justify-between border-t border-border/40 pt-4">
-              <div>
-                <p className="text-xs text-muted-foreground">Order Total</p>
-                <p className="text-xl font-bold text-foreground">{formatINR(order.totalAmount)}</p>
-              </div>
-              <Link href={`/customer/orders/${order.id}`}
-                className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 hover:shadow-md">
-                Track Order <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
           </div>
         </div>
       </div>
+
+      {/* Total + action — mt-auto pins this to the bottom edge so cards of
+          differing content height still line their footers up. */}
+      <div className="mt-auto flex items-center justify-between gap-2 border-t border-border/40 px-4 py-3">
+        <div className="min-w-0">
+          <p className="text-[10px] text-muted-foreground">Order Total</p>
+          <p className="truncate text-base font-bold text-foreground">{formatINR(order.totalAmount)}</p>
+        </div>
+        {/* Above the desktop overlay link so it stays independently clickable */}
+        <Link href={`/customer/orders/${order.id}`}
+          className="relative z-20 inline-flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90 hover:shadow-md">
+          Track Order <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
     </div>
+  )
+}
+
+// ---- Active orders section -----------------------------------
+// Mobile: a snap carousel, one card per screen, with dot indicators — vertical
+// space is the scarce resource there. lg+: the same cards as a full-width
+// auto-fill grid, so every active order is visible at once and nothing is
+// clipped by the sidebar. Identical DOM at both breakpoints; the flex→grid
+// switch is pure CSS.
+
+function ActiveOrdersSection({ orders }: { orders: ActiveOrder[] }) {
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [activeIdx, setActiveIdx] = useState(0)
+
+  // Which card is currently parked at the scroller's left edge. Measured from
+  // the DOM rather than tracked as an index because the cards are sized in vw
+  // and the user can free-scroll between snap points.
+  const syncActiveIdx = useCallback(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    let best = 0
+    let bestDist = Infinity
+    Array.from(el.children).forEach((child, i) => {
+      const dist = Math.abs((child as HTMLElement).offsetLeft - el.scrollLeft)
+      if (dist < bestDist) { bestDist = dist; best = i }
+    })
+    setActiveIdx(best)
+  }, [])
+
+  const scrollToIndex = (i: number) => {
+    const el   = scrollerRef.current
+    const card = el?.children[i] as HTMLElement | undefined
+    if (el && card) el.scrollTo({ left: card.offsetLeft, behavior: 'smooth' })
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+          <Package className="h-4 w-4 text-primary" />
+          Active Orders
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">{orders.length}</span>
+        </h2>
+        <Link href="/customer/orders"
+          className="flex shrink-0 items-center gap-0.5 text-xs font-medium text-primary hover:underline">
+          View all <ChevronRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
+
+      {/* `relative` matters: it makes this element the offsetParent, so each
+          card's offsetLeft is directly comparable to the scroller's scrollLeft. */}
+      <div ref={scrollerRef} onScroll={syncActiveIdx}
+        className="relative flex snap-x snap-mandatory items-start gap-4 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:grid-cols-[repeat(auto-fill,minmax(20rem,1fr))] lg:items-stretch lg:overflow-visible lg:pb-0">
+        {orders.map(order => (
+          <div key={order.id} className="w-[85vw] max-w-sm shrink-0 snap-center sm:w-[22rem] lg:w-auto lg:max-w-none">
+            <ActiveOrderCard order={order} />
+          </div>
+        ))}
+      </div>
+
+      {orders.length > 1 && (
+        <div className="mt-3 flex items-center justify-center gap-1.5 lg:hidden">
+          {orders.map((order, i) => (
+            <button key={order.id} type="button" onClick={() => scrollToIndex(i)}
+              aria-label={`Show order ${i + 1} of ${orders.length}`}
+              className={cn('h-1.5 rounded-full transition-all',
+                i === activeIdx ? 'w-5 bg-primary' : 'w-1.5 bg-border')} />
+          ))}
+        </div>
+      )}
+    </motion.div>
   )
 }
 
@@ -1143,11 +1240,16 @@ export default function CustomerDashboard() {
             </div>
           </div>
         </div>
-        <div className="container mx-auto px-4 pb-12">
-          <div className="mt-4 grid animate-pulse gap-6 lg:grid-cols-3">
+        <div className="container mx-auto animate-pulse px-4 pb-12">
+          {/* Active orders row — full width, mirroring the real layout */}
+          <div className="mt-4 grid gap-4 lg:grid-cols-[repeat(auto-fill,minmax(20rem,1fr))]">
+            <div className="h-48 rounded-2xl bg-muted" />
+            <div className="hidden h-48 rounded-2xl bg-muted lg:block" />
+            <div className="hidden h-48 rounded-2xl bg-muted lg:block" />
+          </div>
+          <div className="mt-6 grid gap-6 lg:grid-cols-3">
             <div className="space-y-6 lg:col-span-2">
-              <div className="h-72 rounded-2xl bg-muted" />
-              <div className="h-20 rounded-2xl bg-muted" />
+              <div className="h-56 rounded-2xl bg-muted" />
               <div className="h-44 rounded-2xl bg-muted" />
             </div>
             <div className="hidden space-y-5 lg:block">
@@ -1303,41 +1405,36 @@ export default function CustomerDashboard() {
 
         {/* ---- Main content ---- */}
         <div className="container mx-auto px-4 pb-12">
-          <div className="mt-4 grid gap-6 lg:grid-cols-3">
+
+          {/* Active Orders — deliberately outside the two-column grid below.
+              Inside the 2/3 column the carousel was clipped by the sidebar
+              (cards read as "hidden behind" Quick Access), and it was also
+              the single tallest thing in that column, which is what left the
+              sidebar trailing off into a large empty gap. Full-width it fits
+              every order on one screen and evens the two columns out. */}
+          <div className="mt-4">
+            {sortedActiveOrders.length === 0 ? (
+              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+                className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-primary/30 bg-primary/5 px-6 py-10 text-center">
+                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <ShoppingBag className="h-8 w-8" />
+                </div>
+                <h3 className="mb-1 font-semibold text-foreground">No Active Orders</h3>
+                <p className="mb-5 text-sm text-muted-foreground">Place a laundry order and track it right here.</p>
+                <Link href="/customer/orders/create"
+                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90">
+                  <Plus className="h-4 w-4" /> Place New Order
+                </Link>
+              </motion.div>
+            ) : (
+              <ActiveOrdersSection orders={sortedActiveOrders} />
+            )}
+          </div>
+
+          <div className="mt-6 grid gap-6 lg:grid-cols-3">
 
             {/* ============ LEFT / MAIN COLUMN ============ */}
             <div className="min-w-0 space-y-6 lg:col-span-2">
-
-              {/* Active Orders — a single order renders full-width as before;
-                  2+ becomes a horizontal-scroll carousel (same overflow-x
-                  pattern as "Providers near you" below), each card keeping
-                  its own accordion so it can expand right here on the
-                  dashboard without navigating away. */}
-              <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
-                {sortedActiveOrders.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-primary/30 bg-primary/5 px-6 py-10 text-center">
-                    <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
-                      <ShoppingBag className="h-8 w-8" />
-                    </div>
-                    <h3 className="mb-1 font-semibold text-foreground">No Active Orders</h3>
-                    <p className="mb-5 text-sm text-muted-foreground">Place a laundry order and track it right here.</p>
-                    <Link href="/customer/orders/create"
-                      className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-sm shadow-primary/20 transition-all hover:bg-primary/90">
-                      <Plus className="h-4 w-4" /> Place New Order
-                    </Link>
-                  </div>
-                ) : sortedActiveOrders.length === 1 ? (
-                  <ActiveOrderCard order={sortedActiveOrders[0]} />
-                ) : (
-                  <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                    {sortedActiveOrders.map(order => (
-                      <div key={order.id} className="w-[85vw] max-w-sm shrink-0 snap-center sm:w-96">
-                        <ActiveOrderCard order={order} />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </motion.div>
 
               {/* Providers near you — based on the selected address, or the
                   customer's live location if they have none saved */}
