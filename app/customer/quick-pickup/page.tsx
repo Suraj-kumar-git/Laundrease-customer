@@ -326,7 +326,7 @@ function FindProviderTab() {
           <input
             type="text"
             value={query}
-            onChange={(e) => { setQuery(e.target.value); setError(null) }}
+            onChange={(e) => { setQuery(e.target.value); setError(null); setProviders(null); setCovered(null) }}
             onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             placeholder="Enter pincode or area/city name"
             className={cn(

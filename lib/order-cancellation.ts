@@ -6,11 +6,11 @@
 // these two functions instead of inlining the transaction.
 
 import { transaction, queryOne } from '@/lib/db'
-import { getRefundBreakdown, initiateOriginalMethodRefund } from '@/lib/payment/refund'
+import { getCancellationRefund, initiateOriginalMethodRefund } from '@/lib/payment/refund'
 import { sendOrderCancelledEmail, sendProviderOrderCancelledEmail } from '@/lib/notifications/email'
 import { isNotificationEnabled } from '@/lib/notifications/preferences'
 import { sendPushToUser } from '@/lib/push-notifications'
-import { CANCELLABLE_STATUSES } from '@/lib/order-status'
+import { CANCELLABLE_STATUSES, PICKUP_DONE_STATUSES } from '@/lib/order-status'
 
 export const AUTO_CANCEL_REASON_NOTE = 'Order automatically cancelled after 3 reschedules — pickup could not be completed on the scheduled date after multiple attempts'
 
@@ -46,6 +46,7 @@ export async function cancelOrderTransaction(params: CancelOrderTxParams): Promi
   return transaction(async (client) => {
     const orderRes = await client.query(
       `SELECT o.id, o.public_id::TEXT AS public_id, o.order_number, o.status,
+              o.total_amount::TEXT AS total_amount,
               o.customer_id::TEXT AS customer_id, o.laundry_profile_id::TEXT AS laundry_profile_id,
               cu.email AS customer_email, cu.full_name AS customer_name,
               pu.email AS provider_email, lp.business_name AS provider_name
@@ -61,11 +62,13 @@ export async function cancelOrderTransaction(params: CancelOrderTxParams): Promi
     const order = orderRes.rows[0]
     if (!CANCELLABLE_STATUSES.has(order.status)) throw new Error('NOT_CANCELLABLE')
 
-    // What was actually captured, by source. Covers partially-paid orders
-    // (wallet+COD, wallet+online) whose payment_status never reached 'paid'
-    // but whose wallet slice was debited at checkout.
-    const { walletPaid, gatewayPaid, totalRefundable } = await getRefundBreakdown(
-      (text, p) => client.query(text, p), order.id
+    // What was actually captured, by source, net of non-refundable order
+    // fees. Covers partially-paid orders (wallet+COD, wallet+online) whose
+    // payment_status never reached 'paid' but whose wallet slice was
+    // debited at checkout.
+    const { walletPaid, gatewayPaid, totalRefundable } = await getCancellationRefund(
+      (text, p) => client.query(text, p), order.id,
+      parseFloat(order.total_amount), !PICKUP_DONE_STATUSES.has(order.status)
     )
     const refundToOriginal = params.refundMethod === 'original' && gatewayPaid > 0
 

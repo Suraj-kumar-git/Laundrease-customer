@@ -212,6 +212,11 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const mobileMenuRef = useRef<HTMLDivElement>(null)
 
+  // Screens can suppress the cart button while mounted — today only the order
+  // flow's checkout step does (see cart-provider). Driven by state rather than
+  // pathname because it's step-scoped, not route-scoped.
+  const { cartIconHidden } = useCart()
+
   // Close mobile menu on route change
   useEffect(() => { setMobileMenuOpen(false) }, [pathname])
 
@@ -330,8 +335,9 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
           <div className="flex items-center gap-1">
             <ThemeToggle />
 
-            {/* Cart — visible to guests too, since items can be added before signing in */}
-            <CartBadge onClick={onCartClick} />
+            {/* Cart — visible to guests too, since items can be added before
+                signing in. Suppressed only where a screen asks for it. */}
+            {!cartIconHidden && <CartBadge onClick={onCartClick} />}
 
             {/* Desktop: user menu or login CTA */}
             <div className="hidden lg:flex items-center gap-2">

@@ -47,6 +47,65 @@ export async function getRefundBreakdown(
   return { walletPaid, gatewayPaid, totalRefundable: walletPaid + gatewayPaid }
 }
 
+// Cancellation/rejection refunds must never include order-level fees
+// (delivery fee, platform/convenience fee, express surcharge, GST on those
+// fees) — only the subtotal (which already carries GST on subtotal, folded
+// in at order-create time) and net of any coupon discount. Fees are stored
+// as order_adjustments rows: kind='delivery_fee', kind='express_fee'
+// (express_surcharge), and kind='other' (convenience_fee + fee_gst — see
+// feeCodeToKind() in orders/create/route.ts). Coupon rows (kind='coupon',
+// negative amount) are deliberately excluded from this sum — that's already
+// netted into orders.total_amount, not a fee to strip back out.
+//
+// Delivery fee is the one exception that isn't always excluded: if the
+// order is cancelled before the delivery partner has actually picked it up
+// (deliveryFeeRefundable = true), no delivery work happened yet, so it
+// refunds along with the subtotal. Once picked up, it's kept like every
+// other fee.
+//
+// Reuses getRefundBreakdown()'s totalRefundable as the starting point (what
+// was actually captured — COD's uncollected portion was never charged, so
+// there's nothing there to exclude from), then caps it at
+// (total_amount - excluded fees). When a split payment (wallet+gateway) has
+// to shrink, both legs shrink by the same proportion — there's no reliable
+// way to know which leg "paid for" the fee portion, so treating every
+// captured rupee as an equal mix of subtotal-and-fees is the fairest
+// available assumption.
+export async function getCancellationRefund(
+  runQuery: QueryFn,
+  orderId: number | string,
+  totalAmount: number,
+  deliveryFeeRefundable: boolean
+): Promise<RefundBreakdown & { excludedFees: number }> {
+  const breakdown = await getRefundBreakdown(runQuery, orderId)
+
+  const feeRes = await runQuery(
+    `SELECT COALESCE(SUM(amount) FILTER (
+       WHERE kind IN ('express_fee', 'other') OR (kind = 'delivery_fee' AND NOT $2::BOOLEAN)
+     ), 0)::TEXT AS excluded
+     FROM order_adjustments
+     WHERE order_id = $1`,
+    [orderId, deliveryFeeRefundable]
+  )
+  const excludedFees   = parseFloat(feeRes.rows[0]?.excluded || '0')
+  const refundableCap  = Math.max(0, Math.round((totalAmount - excludedFees) * 100) / 100)
+
+  if (breakdown.totalRefundable <= refundableCap) {
+    // Nothing captured beyond the refundable cap (e.g. a COD-inclusive order
+    // whose captured wallet/online slice never reached the fee portion) —
+    // refund everything that was captured, unchanged.
+    return { ...breakdown, excludedFees: 0 }
+  }
+
+  const ratio       = refundableCap / breakdown.totalRefundable
+  const walletPaid  = Math.round(breakdown.walletPaid * ratio * 100) / 100
+  const gatewayPaid = Math.round((refundableCap - walletPaid) * 100) / 100
+  return {
+    walletPaid, gatewayPaid, totalRefundable: walletPaid + gatewayPaid,
+    excludedFees: Math.round((breakdown.totalRefundable - refundableCap) * 100) / 100,
+  }
+}
+
 export async function initiateOriginalMethodRefund(params: {
   orderId: number
   amount: number

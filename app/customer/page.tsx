@@ -1,7 +1,7 @@
 'use client'
 // app/customer/page.tsx
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import Link from 'next/link'
 import {
   ArrowRight, ShieldCheck, ShieldAlert, Zap, Droplets, Calendar,
@@ -41,146 +41,158 @@ function formatPrice(p: number | null): string {
 }
 
 // ---- Carousel ----------------------------------------------------------------
-// Infinite clone-based carousel with swipe support.
-// Clone layout: [last, ...real, first] — visual index 1 = real[0].
-// After sliding into a clone we silently snap back to the real counterpart.
+// Native CSS scroll-snap, same approach as the customer dashboard's
+// active-orders carousel: the cards are plain DOM elements, the browser owns
+// the scrolling (and therefore the swipe/fling physics), and the active dot is
+// MEASURED from real scroll position rather than tracked as an index.
+//
+// This replaces a clone-based translateX carousel that could desync three
+// different ways, all of which ended in cards vanishing:
+//   1. It rendered only ONE clone at each end ([last, ...real, first]) while
+//      showing up to THREE columns, so at the final slide the third column had
+//      no card to render — a visible gap where a provider should be.
+//   2. Its silent "jump back to the real card" hung off onTransitionEnd, which
+//      never fires while the tab is backgrounded, and ALSO fires spuriously
+//      when a card's own hover transition bubbles up to the track.
+//   3. The auto-advance timer incremented the index unconditionally, whether
+//      or not either of the above had run.
+// Once the index outran the clones the track translated past every card and
+// the section went completely blank. None of that state exists here.
+//
+// Auto-rotates one card every ROTATE_MS and rewinds to the first card at the
+// end. Any manual navigation (arrow, dot, swipe, trackpad) suspends rotation
+// for RESUME_MS; hovering suspends it for as long as the pointer is inside.
+const ROTATE_MS = 2000
+const RESUME_MS = 5000
+
 function Carousel({ children, className }: { children: React.ReactNode[]; className?: string }) {
   const count = children.length
 
   const [cols, setCols] = useState(3)
-  const colsRef = useRef(3)
   useEffect(() => {
-    const update = () => {
-      const c = window.innerWidth < 640 ? 1 : window.innerWidth < 1024 ? 2 : 3
-      setCols(c); colsRef.current = c
-    }
+    const update = () => setCols(window.innerWidth < 640 ? 1 : window.innerWidth < 1024 ? 2 : 3)
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
   }, [])
 
-  const [visual,  setVisual]  = useState(1)
-  const [realIdx, setRealIdx] = useState(0)
-  const [animate, setAnimate] = useState(true)
-  const pausedRef   = useRef(false)
-  const countRef    = useRef(count)
-  const touchStartX = useRef<number | null>(null)
-  const touchStartY = useRef<number | null>(null)
-  useEffect(() => { countRef.current = count }, [count])
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [activeIdx, setActiveIdx] = useState(0)
+  // Mirrors activeIdx for the rotation timer, so the interval can read the
+  // current position without being torn down and rebuilt on every scroll.
+  const activeIdxRef = useRef(0)
 
-  const cloned = count > 0 ? [children[count - 1], ...children, children[0]] : []
+  const hoveredRef  = useRef(false)
+  const resumeAtRef = useRef(0)
 
-  const onTransitionEnd = () => {
-    if (visual === count + 1) {
-      setAnimate(false); setVisual(1); setRealIdx(0)
-    } else if (visual === 0) {
-      setAnimate(false); setVisual(count); setRealIdx(count - 1)
-    }
-  }
+  // Highest index that can actually park at the scroller's left edge. Past
+  // this the scroller is already at max scroll and further scrollTo calls get
+  // clamped — so it doubles as the last reachable position, i.e. the dot count.
+  const maxIdx = Math.max(0, count - cols)
 
-  useEffect(() => {
-    if (!animate) {
-      const t = requestAnimationFrame(() => setAnimate(true))
-      return () => cancelAnimationFrame(t)
-    }
-  }, [animate])
-
-  const go   = (v: number, r: number) => { setAnimate(true); setVisual(v); setRealIdx(r) }
-  const prev = () => go(visual - 1, (realIdx - 1 + count) % count)
-  const next = () => go(visual + 1, (realIdx + 1) % count)
-  const dot  = (i: number) => go(i + 1, i)
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX
-    touchStartY.current = e.touches[0].clientY
-    pausedRef.current = true
-  }
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null || touchStartY.current === null) return
-    const dx = e.changedTouches[0].clientX - touchStartX.current
-    const dy = e.changedTouches[0].clientY - touchStartY.current
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      dx < 0 ? next() : prev()
-    }
-    touchStartX.current = null
-    touchStartY.current = null
-    setTimeout(() => { pausedRef.current = false }, 1200)
-  }
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (pausedRef.current) return
-      setAnimate(true)
-      setVisual(v => v + 1)
-      setRealIdx(r => (r + 1) % countRef.current)
-    }, 4500)
-    return () => clearInterval(id)
+  const syncActiveIdx = useCallback(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    let best = 0
+    let bestDist = Infinity
+    Array.from(el.children).forEach((child, i) => {
+      const dist = Math.abs((child as HTMLElement).offsetLeft - el.scrollLeft)
+      if (dist < bestDist) { bestDist = dist; best = i }
+    })
+    activeIdxRef.current = best
+    setActiveIdx(best)
   }, [])
+
+  const scrollToIndex = useCallback((i: number) => {
+    const el   = scrollerRef.current
+    const card = el?.children[i] as HTMLElement | undefined
+    if (el && card) el.scrollTo({ left: card.offsetLeft, behavior: 'smooth' })
+  }, [])
+
+  // Hold auto-rotation off for a beat so the carousel doesn't slide out from
+  // under someone who just interacted with it.
+  const suspend = () => { resumeAtRef.current = Date.now() + RESUME_MS }
+  const manualGo = (i: number) => {
+    suspend()
+    scrollToIndex(Math.max(0, Math.min(i, maxIdx)))
+  }
+
+  useEffect(() => {
+    if (maxIdx === 0) return
+    const id = setInterval(() => {
+      if (hoveredRef.current || Date.now() < resumeAtRef.current) return
+      const at = activeIdxRef.current
+      scrollToIndex(at >= maxIdx ? 0 : at + 1)
+    }, ROTATE_MS)
+    return () => clearInterval(id)
+  }, [maxIdx, scrollToIndex])
 
   if (count === 0) return null
 
-  const pct = 100 / cols
-  const tx  = -(visual * pct)
+  const pct    = 100 / cols
+  // Everything fits on screen at this breakpoint — nothing to navigate, so the
+  // arrows and dots would be inert controls.
+  const hasNav = maxIdx > 0
 
   return (
     <div
       className={cn('relative', className)}
-      onMouseEnter={() => { pausedRef.current = true }}
-      onMouseLeave={() => { pausedRef.current = false }}
+      onMouseEnter={() => { hoveredRef.current = true }}
+      onMouseLeave={() => { hoveredRef.current = false }}
     >
+      {/* `relative` matters: it makes this element the offsetParent, so each
+          card's offsetLeft is directly comparable to the scroller's scrollLeft. */}
       <div
-        className="overflow-hidden"
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
+        ref={scrollerRef}
+        onScroll={syncActiveIdx}
+        onPointerDown={suspend}
+        onTouchStart={suspend}
+        onWheel={suspend}
+        className="relative flex snap-x snap-mandatory overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        <div
-          className="flex"
-          style={{
-            transform:  `translateX(${tx}%)`,
-            transition: animate ? 'transform 480ms cubic-bezier(0.25, 0.46, 0.45, 0.94)' : 'none',
-            willChange: 'transform',
-          }}
-          onTransitionEnd={onTransitionEnd}
-        >
-          {cloned.map((child, i) => (
-            <div key={i} style={{ width: `${pct}%`, flexShrink: 0 }} className="px-2">
-              {child}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Desktop arrows */}
-      <button onClick={prev} aria-label="Previous"
-        className="absolute -left-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-card border border-border shadow-md hover:bg-muted transition-colors z-10">
-        <ChevronLeft className="h-5 w-5 text-foreground" />
-      </button>
-      <button onClick={next} aria-label="Next"
-        className="absolute -right-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-card border border-border shadow-md hover:bg-muted transition-colors z-10">
-        <ChevronRight className="h-5 w-5 text-foreground" />
-      </button>
-
-      {/* Mobile: swipe hint arrows */}
-      <div className="mt-5 flex justify-center gap-3 md:hidden">
-        <button onClick={prev} aria-label="Previous"
-          className="h-9 w-9 flex items-center justify-center rounded-full bg-card border border-border shadow-sm active:scale-95 transition-transform">
-          <ChevronLeft className="h-4 w-4 text-foreground" />
-        </button>
-        <button onClick={next} aria-label="Next"
-          className="h-9 w-9 flex items-center justify-center rounded-full bg-card border border-border shadow-sm active:scale-95 transition-transform">
-          <ChevronRight className="h-4 w-4 text-foreground" />
-        </button>
-      </div>
-
-      {/* Dots */}
-      <div className="mt-3 flex justify-center gap-2">
-        {children.map((_, i) => (
-          <button key={i} onClick={() => dot(i)} aria-label={`Go to slide ${i + 1}`}
-            className={cn('h-2 rounded-full transition-all duration-300',
-              i === realIdx ? 'w-6 bg-blue-600' : 'w-2 bg-muted-foreground/30 hover:bg-muted-foreground/60'
-            )} />
+        {children.map((child, i) => (
+          <div key={i} style={{ width: `${pct}%`, flexShrink: 0 }} className="snap-start px-2">
+            {child}
+          </div>
         ))}
       </div>
+
+      {hasNav && (
+        <>
+          {/* Desktop arrows */}
+          <button onClick={() => manualGo(activeIdxRef.current - 1)} aria-label="Previous"
+            className="absolute -left-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-card border border-border shadow-md hover:bg-muted transition-colors z-10">
+            <ChevronLeft className="h-5 w-5 text-foreground" />
+          </button>
+          <button onClick={() => manualGo(activeIdxRef.current + 1)} aria-label="Next"
+            className="absolute -right-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-card border border-border shadow-md hover:bg-muted transition-colors z-10">
+            <ChevronRight className="h-5 w-5 text-foreground" />
+          </button>
+
+          {/* Mobile: swipe hint arrows */}
+          <div className="mt-5 flex justify-center gap-3 md:hidden">
+            <button onClick={() => manualGo(activeIdxRef.current - 1)} aria-label="Previous"
+              className="h-9 w-9 flex items-center justify-center rounded-full bg-card border border-border shadow-sm active:scale-95 transition-transform">
+              <ChevronLeft className="h-4 w-4 text-foreground" />
+            </button>
+            <button onClick={() => manualGo(activeIdxRef.current + 1)} aria-label="Next"
+              className="h-9 w-9 flex items-center justify-center rounded-full bg-card border border-border shadow-sm active:scale-95 transition-transform">
+              <ChevronRight className="h-4 w-4 text-foreground" />
+            </button>
+          </div>
+
+          {/* Dots — one per reachable scroll position, not per card: with 3
+              columns visible, 6 cards only have 4 distinct positions. */}
+          <div className="mt-3 flex justify-center gap-2">
+            {Array.from({ length: maxIdx + 1 }).map((_, i) => (
+              <button key={i} onClick={() => manualGo(i)} aria-label={`Go to slide ${i + 1}`}
+                className={cn('h-2 rounded-full transition-all duration-300',
+                  i === activeIdx ? 'w-6 bg-blue-600' : 'w-2 bg-muted-foreground/30 hover:bg-muted-foreground/60'
+                )} />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
