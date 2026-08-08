@@ -58,6 +58,13 @@ interface CartContextType {
   // direct reference to each other.
   bumpSignal: number
   bumpCartIcon: () => void
+  // Lets a screen suppress the header cart button while it's mounted. Used by
+  // the order flow's checkout step: the drawer edits the SERVER cart, while
+  // checkout renders (and submits) its own React state, so editing there
+  // silently diverged the two — the removed item stayed on screen and was
+  // still ordered. Every other step keeps the cart.
+  cartIconHidden: boolean
+  setCartIconHidden: (hidden: boolean) => void
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined)
@@ -76,6 +83,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const cartIconRef = useRef<HTMLButtonElement>(null)
   const [bumpSignal, setBumpSignal] = useState(0)
   const bumpCartIcon = useCallback(() => setBumpSignal(s => s + 1), [])
+  const [cartIconHidden, setCartIconHidden] = useState(false)
 
   // Load local cart once on mount.
   useEffect(() => {
@@ -235,6 +243,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     items, itemCount, subtotal, isExpress, toggleExpress,
     addItem, updateItem, removeItem, clear, syncFromServer, placeOrder, placing, syncing,
     cartIconRef, bumpSignal, bumpCartIcon,
+    cartIconHidden, setCartIconHidden,
   }
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>

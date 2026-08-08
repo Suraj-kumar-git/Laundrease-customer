@@ -6,6 +6,7 @@ import {
   Shield, ChevronDown, ChevronUp, AlertCircle, Zap, Edit3, Lock, Truck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useCart } from '@/components/cart-provider'
 import type { SelectedService } from '../../types'
 import { AppliedCoupon, GatewayInfo, OrderFlowState } from '@/types/order-types'
 import { ProductIcon } from '@/components/customer/ProductIcon'
@@ -48,6 +49,18 @@ export function CheckoutStep({
 }: CheckoutStepProps) {
   const currentIsExpress    = orderState.selected_services.some(s => s.is_express)
   const hasAnyExpressCapable= orderState.selected_services.some(s => s.express_multiplier > 1)
+
+  // Hide the header cart button for as long as this step is on screen. The
+  // drawer edits the SERVER cart, but this screen renders — and submits — the
+  // flow's own React state, so an edit made there wouldn't show up here and
+  // the removed item would still be ordered. "Edit services" below is the
+  // way to change the order at this point. Restored on unmount, so every
+  // other step of the flow keeps its cart icon.
+  const { setCartIconHidden } = useCart()
+  useEffect(() => {
+    setCartIconHidden(true)
+    return () => setCartIconHidden(false)
+  }, [setCartIconHidden])
 
   const subtotal = useMemo(
     () => orderState.selected_services.reduce((s, i) => s + i.line_total, 0),
@@ -965,7 +978,7 @@ export function CheckoutStep({
 
         <p className="text-center text-xs text-muted-foreground">
           By placing this order, you agree to our{' '}
-          <a href="/terms-of-service" className="text-primary hover:underline">Terms of Service</a>
+          <a href="/customer/terms-of-service" className="text-primary hover:underline">Terms of Service</a>
         </p>
       </div>
     </div>

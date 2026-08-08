@@ -143,8 +143,11 @@ export default function ServicesPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
-      {/* Hero — compact */}
-      <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 to-blue-600 px-4 py-10 sm:py-12">
+      {/* Hero — compact. No overflow-hidden here (unlike the rounded "Why
+          Choose Us" box below) — this section isn't rounded, so it was only
+          clipping the area-search dropdown's suggestions against the hero's
+          bottom edge. */}
+      <div className="relative bg-gradient-to-r from-blue-600 to-blue-600 px-4 py-10 sm:py-12">
         <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
 
         <motion.div
