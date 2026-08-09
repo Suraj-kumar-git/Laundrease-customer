@@ -61,7 +61,18 @@ export async function POST(req: NextRequest) {
     )
     const providerId = cartRow.rows[0]?.provider_id ?? null
 
-    // Fetch updated fee breakdown from DB function
+    // Fetch updated fee breakdown from DB function.
+    //
+    // Live config (no snapshot) is correct here — this is a CART preview, not
+    // a committed order, so there's nothing frozen yet; the snapshot is taken
+    // at checkout.
+    //
+    // KNOWN GAP: distance is NULL because this route works off the cart and
+    // has no selected delivery address yet, so the free-radius / per-km branch
+    // can't run and the delivery fee shown here may differ from the one on the
+    // checkout page (/api/customer/orders/fees passes the real distance). This
+    // only affects the previewed number — the amount actually charged is
+    // computed at order creation, which does pass the real distance.
     const feesResult = await query(
       `SELECT calculate_order_fees($1, $2, NULL, $3) AS fees`,
       [newSubtotal, body.is_express, providerId]
