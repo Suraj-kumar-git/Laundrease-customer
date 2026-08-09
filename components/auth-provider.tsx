@@ -130,6 +130,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // logging back in as a genuine guest later) would be treated as already
     // synced and their pending local cart would never get pushed to the server.
     localStorage.removeItem("laundrease_cart_synced_user_v1")
+    // And the local cart mirror itself (see CART_STORAGE_KEY in
+    // lib/cart-store.ts) — this used to survive logout, so the header cart
+    // icon kept showing a signed-out visitor items from the previous
+    // account's session. This ONLY clears the client-side localStorage
+    // mirror; the server-side cart in the DB (GET/POST /api/customer/cart)
+    // is untouched and reloads normally the next time this account logs in.
+    localStorage.removeItem("laundrease_cart_v1")
     setUser(null)
   }, [])
 
