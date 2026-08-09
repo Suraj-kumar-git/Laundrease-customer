@@ -458,8 +458,14 @@ export async function POST(req: NextRequest) {
            pickup_date, pickup_time_slot, special_instructions,
            is_express, subtotal, tax_amount, discount_amount,
            total_amount, payment_status, payment_method, assignment_status,
-           estimated_delivery_date, customer_gstin
-         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'unassigned',$17,$18)
+           estimated_delivery_date, customer_gstin,
+           -- Frozen at checkout so every later recompute (delivery-partner
+           -- item edits, express toggle) replays the SAME distance and the
+           -- SAME fee rules the customer actually agreed to. See
+           -- scripts/43-order-fee-base-and-snapshot.sql.
+           delivery_distance_km, fee_config_snapshot
+         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'unassigned',$17,$18,
+                   $19, build_order_fee_snapshot($3::BIGINT))
          RETURNING id, public_id`,
         [
           orderNumber, userId, body.laundry_profile_id,
@@ -467,6 +473,7 @@ export async function POST(req: NextRequest) {
           body.pickup_date, body.pickup_time_slot, body.special_instructions ?? null,
           body.is_express, subtotal, taxAmount, discountAmount, totalAmount,
           paymentStatus, paymentMethod, estimatedDeliveryDate, customerGstin,
+          distanceKm,
         ]
       )
       const orderId = orderRes.rows[0].id
