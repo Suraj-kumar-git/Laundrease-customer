@@ -139,9 +139,12 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
 
   return (
     <div ref={boxRef} className="relative mx-auto w-full max-w-lg">
-      <div className="flex items-center gap-1.5 rounded-xl bg-white p-1.5 shadow-lg dark:bg-gray-800">
+      {/* Bordered rather than relying on shadow alone — this box used to sit
+          on a saturated blue hero where the shadow read as an edge; it now
+          renders on the page's own light background, where it wouldn't. */}
+      <div className="flex items-center gap-1.5 rounded-xl border border-border bg-card p-1.5 shadow-sm">
         <div className="relative flex-1">
-          <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
             type="text"
             value={query}
@@ -149,7 +152,7 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
             onFocus={() => predictions.length > 0 && setShowDropdown(true)}
             onKeyDown={e => e.key === 'Enter' && handleSubmit()}
             placeholder="Search your area or pincode"
-            className="w-full rounded-lg border-2 border-transparent bg-gray-50 py-2.5 pl-9 pr-2 text-sm transition-all focus:border-blue-500 focus:outline-none dark:bg-gray-700 dark:text-white"
+            className="w-full rounded-lg border-2 border-transparent bg-muted/50 py-2.5 pl-9 pr-2 text-sm text-foreground placeholder:text-muted-foreground transition-all focus:border-blue-500 focus:outline-none"
           />
         </div>
         <button
@@ -168,14 +171,14 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
           type="button"
           onClick={useMyLocation}
           disabled={busy}
-          className="mt-2 flex items-center gap-1.5 text-xs font-medium text-white/90 hover:text-white hover:underline disabled:opacity-50"
+          className="mt-2 flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:underline disabled:opacity-50 dark:text-blue-400"
         >
           <LocateFixed className="h-3 w-3" /> Use my current location
         </button>
       )}
 
       {showDropdown && predictions.length > 0 && (
-        <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl bg-white shadow-xl dark:bg-gray-800">
+        <div className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-border bg-card shadow-xl">
           {predictions.map(p => (
             <button
               key={p.place_id}
@@ -183,11 +186,11 @@ export function AreaSearchBox({ loading, onAreaSelected, onFreeTextSearch }: Are
               onClick={() => selectPrediction(p)}
               className={cn(
                 'flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm transition-colors',
-                'hover:bg-blue-50 dark:hover:bg-gray-700'
+                'hover:bg-muted'
               )}
             >
               <MapPin className="h-3.5 w-3.5 shrink-0 text-blue-500" />
-              <span className="truncate text-gray-800 dark:text-gray-100">{p.description}</span>
+              <span className="truncate text-foreground">{p.description}</span>
             </button>
           ))}
         </div>

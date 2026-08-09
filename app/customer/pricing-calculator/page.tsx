@@ -2,9 +2,10 @@
 
 import { useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
+import { motion } from 'framer-motion'
 import {
   Search, MapPin, Plus, Minus,
-  Zap, Clock, ShoppingBag, Trash2, ArrowRight,
+  Zap, Clock, ShoppingBag, Trash2, ArrowRight, ArrowLeft,
   CheckCircle2, AlertCircle, Loader2, RefreshCw,
   Info, Star, Home, Globe, Store, ArrowLeftRight,
 } from 'lucide-react'
@@ -162,12 +163,67 @@ function makeLineItemKey(productTypeId: number, serviceId: number) {
   return `${productTypeId}_${serviceId}`
 }
 
+// ---- Switch-provider confirm popup ---------------------------
+// Mirrors app/customer/orders/create/page.tsx's SwitchProviderModal — same
+// underlying rule (one provider's prices at a time in the cart, so switching
+// away must clear or be aborted) applied here to the calculator's local
+// sessionStorage cart. Previously, picking a different provider silently
+// swapped areaData while leaving the old provider's items (and their
+// unit_price/line_total, resolved against the OLD provider) sitting in the
+// cart — the summary panel and grid then showed genuinely wrong totals with
+// no indication anything was stale.
+function SwitchProviderModal({
+  previousProviderName, itemCount, onConfirm, onCancel, loading,
+}: {
+  previousProviderName?: string | null; itemCount: number
+  onConfirm: () => void; onCancel: () => void; loading: boolean
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onCancel} className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <motion.div
+        initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+        className="relative w-full max-w-md rounded-3xl bg-background p-6 shadow-2xl"
+      >
+        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/10">
+          <AlertCircle className="h-7 w-7 text-amber-500" />
+        </div>
+        <h2 className="text-lg font-bold text-foreground">Switch provider?</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Your estimate has {itemCount} item{itemCount !== 1 ? 's' : ''}
+          {previousProviderName
+            ? <> priced for <span className="font-semibold text-foreground">{previousProviderName}</span></>
+            : ' priced at platform base rates'}.
+          {' '}Rates differ by provider, so switching will clear these selections.
+        </p>
+
+        <div className="mt-5 space-y-3">
+          <button type="button" onClick={onConfirm} disabled={loading}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-destructive px-5 py-3.5 text-sm font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50">
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Trash2 className="h-5 w-5" />}
+            Clear & switch provider
+          </button>
+          <button type="button" onClick={onCancel} disabled={loading}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border/50 px-5 py-3.5 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50">
+            <ArrowLeft className="h-5 w-5" />
+            {previousProviderName ? `Stay with ${previousProviderName}` : 'Keep my selections'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 // ---- Sub-components -----------------------------------------
 
 function AreaSearchStep({
   onResult,
 }: {
-  onResult: (data: AreaPricingData) => void
+  // Was (data: AreaPricingData) — see handleSearch below for why this no
+  // longer round-trips through services-by-area on this step.
+  onResult: (result: { pincode?: string; city?: string; providers: PickableProvider[] }) => void
 }) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -192,16 +248,32 @@ function AreaSearchStep({
     setUncoveredArea(null)
 
     try {
-      const param = isPincode ? `pincode=${val}` : `city=${encodeURIComponent(val)}`
-      const res = await fetch(`/api/customer/public/pricing/services-by-area?${param}`)
+      // laundry-providers/search's own coverage check (provider_service_areas
+      // for a pincode, city ILIKE for a city) is the exact same query
+      // services-by-area runs to produce its 'covered' flag — so calling
+      // services-by-area here first was a second round trip just to re-learn
+      // "are there zero providers", immediately followed by this same search
+      // call to actually list them. Calling search directly gets both answers
+      // in one request, and the providers it returns are handed straight to
+      // the picker step instead of being fetched again there.
+      const res = await fetch(`/api/customer/laundry-providers/search?location=${encodeURIComponent(val)}`)
       if (!res.ok) throw new Error('Request failed')
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed')
 
-      if (!json.data.covered) {
+      const providers: PickableProvider[] = (json.data.providers ?? []).map((p: any) => ({
+        id: p.id,
+        name: p.business_name,
+        subtitle: p.business_address ?? p.city ?? '',
+        rating: p.rating,
+        ratingCount: p.rating_count,
+        minPriceKg: p.min_price_kg,
+      }))
+
+      if (providers.length === 0) {
         setUncoveredArea(val)
       } else {
-        onResult(json.data as AreaPricingData)
+        onResult({ pincode: isPincode ? val : undefined, city: isPincode ? undefined : val, providers })
       }
     } catch {
       setError('Could not fetch pricing data. Please try again.')
@@ -228,20 +300,22 @@ function AreaSearchStep({
   return (
     <div className="mx-auto max-w-2xl">
       {/* Search */}
-      <div className="rounded-2xl border border-border/50 bg-card p-8 shadow-sm">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+      <div className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm sm:p-6">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <MapPin className="h-5 w-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h2 className="font-semibold text-foreground">Enter your area</h2>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground sm:text-sm">
               We&apos;ll show services and pricing available near you
             </p>
           </div>
         </div>
 
-        <div className="flex gap-3">
+        {/* Stacks on very narrow screens so the Check button never squeezes
+            the input down to a few characters. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -256,7 +330,7 @@ function AreaSearchStep({
           <button
             onClick={handleSearch}
             disabled={loading || (!isPincode && !isCity)}
-            className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 disabled:opacity-50"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 disabled:opacity-50"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             {loading ? 'Checking...' : 'Check'}
@@ -615,9 +689,13 @@ function SummaryPanel({
 
 // ---- Main calculator ----------------------------------------
 function PricingCalculator({
-  areaData, onReset, onSwitchProvider, onUseBaseRates,
+  areaData, cart, onReset, onSwitchProvider, onUseBaseRates,
 }: {
   areaData: AreaPricingData
+  // Lifted to the page level (not created here) so the provider-switch guard
+  // in PricingCalculatorPage can inspect item count / clear it BEFORE this
+  // component ever re-renders with a different provider's areaData.
+  cart: ReturnType<typeof usePricingCalculatorCart>
   onReset: () => void
   // Shown when currently on base rates — lets the visitor pick a specific
   // provider to see exact pricing instead.
@@ -630,7 +708,6 @@ function PricingCalculator({
     areaData.services[0]?.service.id ?? 0
   )
   const [activeCategory, setActiveCategory] = useState<string>('all')
-  const cart = usePricingCalculatorCart()
   const { isExpress } = cart
 
   const cartItemsByKey = useMemo(() => {
@@ -878,6 +955,13 @@ export default function PricingCalculatorPage() {
   const [providersLoading, setProvidersLoading] = useState(false)
   const [allowSkip, setAllowSkip] = useState(true)
   const [areaData, setAreaData] = useState<AreaPricingData | null>(null)
+  // Lifted here (rather than inside PricingCalculator, which unmounts on
+  // every step change) so a provider switch can be intercepted BEFORE
+  // areaData is overwritten — see selectProvider below.
+  const cart = usePricingCalculatorCart()
+  // Set only while the confirm-switch prompt is up; holds the provider the
+  // customer picked, so onConfirm/onCancel know what to do next.
+  const [pendingProviderId, setPendingProviderId] = useState<number | null>(null)
 
   function resetAll() {
     setAreaData(null)
@@ -886,12 +970,14 @@ export default function PricingCalculatorPage() {
     setStep(user ? 'pick_path' : 'area_search')
   }
 
-  // Area search resolved (covered) — store the base-rate result immediately
-  // so "skip" has something to show, then offer to narrow to one provider.
-  async function handleAreaResult(data: AreaPricingData) {
-    setPricingContext({ pincode: data.pincode || undefined, city: data.city || undefined })
-    setAreaData(data)
-    await loadProviders({ pincode: data.pincode || undefined, city: data.city || undefined })
+  // Area search resolved — AreaSearchStep already fetched the provider list
+  // itself (see its handleSearch), so just take it. areaData stays null
+  // until the visitor actually lands on a real catalog — either by picking
+  // a provider (doSelectProvider) or hitting "Skip" (skipToBaseRates), both
+  // below — never pre-fetched here on the chance "Skip" gets used.
+  function handleAreaResult(result: { pincode?: string; city?: string; providers: PickableProvider[] }) {
+    setPricingContext({ pincode: result.pincode, city: result.city })
+    setProviders(result.providers)
     setAllowSkip(true)
     setStep('pick_provider')
   }
@@ -928,7 +1014,23 @@ export default function PricingCalculatorPage() {
     }
   }
 
+  // A cart (the calculator's local, sessionStorage-backed one) only ever
+  // holds prices for ONE provider (or base rates) at a time — the same rule
+  // the logged-in order-create flow enforces. If the customer already has
+  // items and picks a DIFFERENT provider than the one those items are priced
+  // for, confirm first instead of silently swapping areaData underneath the
+  // still-selected items (that was the bug: stale items + wrong prices, no
+  // warning). Nothing to lose — proceed straight through.
   async function selectProvider(providerId: number) {
+    const currentProviderId = areaData?.provider?.id ?? null
+    if (cart.items.length > 0 && Number(currentProviderId) !== Number(providerId)) {
+      setPendingProviderId(providerId)
+      return
+    }
+    await doSelectProvider(providerId)
+  }
+
+  async function doSelectProvider(providerId: number) {
     setProvidersLoading(true)
     try {
       const res = await fetch(`/api/customer/public/pricing/services-by-area?provider_id=${providerId}`)
@@ -942,9 +1044,33 @@ export default function PricingCalculatorPage() {
     }
   }
 
-  function skipToBaseRates() {
-    // areaData already holds the base-rate result from handleAreaResult
-    setStep('calculator')
+  function handleConfirmSwitchProvider() {
+    if (pendingProviderId == null) return
+    const providerId = pendingProviderId
+    cart.clear()
+    setPendingProviderId(null)
+    doSelectProvider(providerId)
+  }
+
+  // "Change the provider back to the previous provider" — areaData was never
+  // touched while the prompt was up, so just return to it.
+  function handleCancelSwitchProvider() {
+    setPendingProviderId(null)
+    if (areaData) setStep('calculator')
+  }
+
+  async function skipToBaseRates() {
+    // areaData is no longer pre-fetched on every search (see handleAreaResult)
+    // — fetch the base-rate catalog now, only because the visitor actually
+    // asked for it. Same lazy fetch switchToBaseRates() below does when
+    // "Use base rates" is clicked from inside the calculator itself.
+    setProvidersLoading(true)
+    try {
+      await switchToBaseRates()
+      setStep('calculator')
+    } finally {
+      setProvidersLoading(false)
+    }
   }
 
   async function switchToBaseRates() {
@@ -967,8 +1093,12 @@ export default function PricingCalculatorPage() {
       {/* Hero — compact */}
       <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
         <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
-        <PageSection className="relative py-8 md:py-10">
-          <div className="max-w-2xl">
+        {/* Centred and compact — the step content (search box, then results)
+            renders immediately below, so a tall left-aligned banner pushed
+            the actual input toward the middle of the viewport with dead
+            space around it. */}
+        <PageSection className="relative py-6 text-center md:py-8">
+          <div className="mx-auto max-w-2xl">
             <span className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-primary">
               <Star className="h-3 w-3" />
               Transparent Pricing
@@ -983,7 +1113,10 @@ export default function PricingCalculatorPage() {
         </PageSection>
       </div>
 
-      <PageSection>
+      {/* Tight top padding so search + results sit high on the page rather
+          than starting a screen-height down (PageSection defaults to
+          py-16 md:py-24). */}
+      <PageSection className="py-6 md:py-8">
         {step === 'pick_path' && (
           <div className="mx-auto max-w-md">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -1023,6 +1156,7 @@ export default function PricingCalculatorPage() {
             providers={providers}
             loading={providersLoading}
             allowSkip={allowSkip}
+            searchedArea={pricingContext.pincode || pricingContext.city || undefined}
             onSelect={selectProvider}
             onSkip={allowSkip ? skipToBaseRates : undefined}
             onBack={() => setStep(user ? 'pick_path' : 'area_search')}
@@ -1032,12 +1166,23 @@ export default function PricingCalculatorPage() {
         {step === 'calculator' && areaData && (
           <PricingCalculator
             areaData={areaData}
+            cart={cart}
             onReset={resetAll}
             onSwitchProvider={switchToProviderPicker}
             onUseBaseRates={areaData.provider ? switchToBaseRates : undefined}
           />
         )}
       </PageSection>
+
+      {pendingProviderId != null && (
+        <SwitchProviderModal
+          previousProviderName={areaData?.provider?.name ?? null}
+          itemCount={cart.items.length}
+          onConfirm={handleConfirmSwitchProvider}
+          onCancel={handleCancelSwitchProvider}
+          loading={providersLoading}
+        />
+      )}
 
       {/* How pricing works */}
       {step !== 'calculator' && (
