@@ -224,8 +224,21 @@ function cartToFlowState(cartData: any, items: any[]): Partial<OrderFlowState> {
     express_multiplier:item.express_multiplier,
   }))
 
+  // Clamp the resumed step to what the cart can actually satisfy. The pricing
+  // calculator now saves carts at step 3 (provider + address + services all
+  // settled, so only the pickup slot is left), but a saved address can be
+  // deleted, or a provider deactivated, between saving and resuming. Steps 2+
+  // render nothing without a provider and can't complete without an address,
+  // so falling back to step 1 collects whatever went missing instead of
+  // showing a blank screen.
+  const savedStep = cart.current_step ?? 1
+  const step =
+    savedStep >= 2 && !provider ? 1 :
+    savedStep >= 3 && !address  ? 1 :
+    savedStep
+
   return {
-    step:              cart.current_step ?? 1,
+    step,
     pickup_address:    address ?? undefined,
     delivery_address:  address ?? undefined,
     selected_provider: provider ?? undefined,
