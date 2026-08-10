@@ -25,7 +25,7 @@ import type { CartLineItem } from '@/types/pricing'
 import {
   loadCartFromStorage, saveCartToStorage, clearCartStorage,
   calcLineTotal, cartItemsToSelectedServices, serverItemsToCartLineItems,
-  makeCartItemKey, getSyncedUserId, setSyncedUserId,
+  makeCartItemKey, getSyncedUserId, setSyncedUserId, hasPendingCalcCheckout,
 } from '@/lib/cart-store'
 
 interface CartContextType {
@@ -120,8 +120,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         // Only push local items to server once per user+device session — prevents
         // re-pushing stale localStorage items on every page reload which would
         // overwrite a server cart that's already advanced to a later step.
+        // Stand down if the pricing calculator has a checkout waiting to be
+        // flushed for this sign-in. It writes the same cart row — with the
+        // provider, address and current_step 3 the visitor just settled on —
+        // and this push would race it carrying reset_provider: true and
+        // current_step: 1. The synced marker is deliberately left unset so a
+        // guest cart still gets pushed later if that flush never lands.
         const alreadySynced = getSyncedUserId() === user.id
-        if (!alreadySynced) {
+        if (!alreadySynced && !hasPendingCalcCheckout()) {
           setSyncedUserId(user.id)
           if (items.length > 0) {
             await fetch('/api/customer/cart', {

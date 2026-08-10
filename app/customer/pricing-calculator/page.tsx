@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import {
@@ -17,7 +17,7 @@ import { ProviderPicker, type PickableProvider } from './components/ProviderPick
 import { MyAddressStep } from './components/MyAddressStep'
 import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveProductIconSrc } from '@/lib/product-icons'
-import { calcLineTotal, cartItemsToSelectedServices } from '@/lib/cart-store'
+import { calcLineTotal, cartItemsToSelectedServices, CALC_PENDING_CHECKOUT_KEY } from '@/lib/cart-store'
 import type {
   AreaPricingData, ServiceWithProducts, PricingProductType,
   CartLineItem, PricingModel, ServiceCategory,
@@ -32,6 +32,50 @@ import { CATEGORY_LABELS, SERVICE_CATEGORY_LABELS } from '@/types/pricing'
 // CartSheet (which is an overlay, not a navigation) without ever touching
 // the real cart — only "Place Order" below pushes these into the real cart.
 const CALC_CART_STORAGE_KEY = 'laundrease_pricing_calc_cart_v1'
+
+// Set when a signed-OUT visitor hits "Place Order". Survives the round trip
+// through login/register (same tab), so the moment they come back
+// authenticated we can push exactly what they'd picked — items, provider and
+// address — into their real server cart instead of dropping it on the floor
+// (which is what used to happen: they'd land back on a reset calculator with
+// their selection apparently gone).
+//
+// The key itself lives in lib/cart-store.ts because the cart provider also
+// reads it: while a flush is pending it must skip its own guest→server push,
+// which would otherwise race this one and clobber the provider/address here.
+
+interface PendingCheckout {
+  items:      CartLineItem[]
+  isExpress:  boolean
+  providerId: number | null
+  addressId:  number | null
+}
+
+/** Provider/address the calculator resolved, carried into the server cart. */
+interface PlaceOrderContext {
+  providerId: number | null
+  addressId:  number | null
+}
+
+function savePendingCheckout(p: PendingCheckout) {
+  if (typeof window === 'undefined') return
+  try { window.sessionStorage.setItem(CALC_PENDING_CHECKOUT_KEY, JSON.stringify(p)) } catch {}
+}
+
+function loadPendingCheckout(): PendingCheckout | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.sessionStorage.getItem(CALC_PENDING_CHECKOUT_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw)
+    return Array.isArray(p?.items) && p.items.length > 0 ? p as PendingCheckout : null
+  } catch { return null }
+}
+
+function clearPendingCheckout() {
+  if (typeof window === 'undefined') return
+  try { window.sessionStorage.removeItem(CALC_PENDING_CHECKOUT_KEY) } catch {}
+}
 
 function loadCalcCart(): { items: CartLineItem[]; isExpress: boolean } {
   if (typeof window === 'undefined') return { items: [], isExpress: false }
@@ -128,20 +172,48 @@ function usePricingCalculatorCart() {
     })
   }, [persist])
 
-  const placeOrder = useCallback(async () => {
+  // Pushes the calculator's selection into the real server cart, carrying the
+  // provider (and the address, when the visitor reached here via "Use my
+  // saved address") so the order flow can resume as deep as possible.
+  //
+  // Sending provider_id matters beyond convenience: the order flow's
+  // "switch provider?" guard is gated on cart.provider being set, so a cart
+  // pushed WITHOUT it let a customer pick a different provider at step 1 and
+  // silently carry over services that provider may not even offer.
+  const pushToServerCart = useCallback(async (ctx: PlaceOrderContext, itemsToPush: CartLineItem[], express: boolean) => {
+    await fetch('/api/customer/cart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        selected_services: cartItemsToSelectedServices(itemsToPush),
+        is_express:        express,
+        provider_id:       ctx.providerId ?? undefined,
+        address_id:        ctx.addressId  ?? undefined,
+        // Provider + address + services are all settled, so the flow can pick
+        // up at Schedule Pickup. Without an address it has to fall back to
+        // step 1 to collect one — the order can't be placed without it.
+        current_step:      ctx.addressId != null ? 3 : 1,
+      }),
+    })
+  }, [])
+
+  const placeOrder = useCallback(async (ctx: PlaceOrderContext) => {
+    if (items.length === 0) return
+
+    // Signed out: stash the whole intent (items + provider + address) and send
+    // them to sign in. The calculator page flushes it to the server cart the
+    // moment they come back authenticated — see the pending-checkout effect in
+    // PricingCalculatorPage.
     if (!user) {
+      savePendingCheckout({ items, isExpress, providerId: ctx.providerId ?? null, addressId: ctx.addressId ?? null })
       router.push('/customer/auth/login?returnTo=/customer/pricing-calculator')
       return
     }
-    if (items.length === 0) return
+
     setPlacing(true)
     try {
-      await fetch('/api/customer/cart', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ selected_services: cartItemsToSelectedServices(items), is_express: isExpress }),
-      })
+      await pushToServerCart(ctx, items, isExpress)
       // Now that they're committed to ordering, clear the calculator's local
       // copy — the real cart (pushed above) is the source of truth from here.
       clear()
@@ -149,9 +221,9 @@ function usePricingCalculatorCart() {
     } finally {
       setPlacing(false)
     }
-  }, [user, items, isExpress, router, clear])
+  }, [user, items, isExpress, router, clear, pushToServerCart])
 
-  return { items, isExpress, toggleExpress, addItem, updateItem, removeItem, clear, placeOrder, placing }
+  return { items, isExpress, toggleExpress, addItem, updateItem, removeItem, clear, placeOrder, placing, pushToServerCart }
 }
 
 // ---- Helpers ------------------------------------------------
@@ -161,59 +233,6 @@ function formatINR(amount: number) {
 
 function makeLineItemKey(productTypeId: number, serviceId: number) {
   return `${productTypeId}_${serviceId}`
-}
-
-// ---- Switch-provider confirm popup ---------------------------
-// Mirrors app/customer/orders/create/page.tsx's SwitchProviderModal — same
-// underlying rule (one provider's prices at a time in the cart, so switching
-// away must clear or be aborted) applied here to the calculator's local
-// sessionStorage cart. Previously, picking a different provider silently
-// swapped areaData while leaving the old provider's items (and their
-// unit_price/line_total, resolved against the OLD provider) sitting in the
-// cart — the summary panel and grid then showed genuinely wrong totals with
-// no indication anything was stale.
-function SwitchProviderModal({
-  previousProviderName, itemCount, onConfirm, onCancel, loading,
-}: {
-  previousProviderName?: string | null; itemCount: number
-  onConfirm: () => void; onCancel: () => void; loading: boolean
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        onClick={onCancel} className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
-      <motion.div
-        initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }}
-        transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-        className="relative w-full max-w-md rounded-3xl bg-background p-6 shadow-2xl"
-      >
-        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/10">
-          <AlertCircle className="h-7 w-7 text-amber-500" />
-        </div>
-        <h2 className="text-lg font-bold text-foreground">Switch provider?</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Your estimate has {itemCount} item{itemCount !== 1 ? 's' : ''}
-          {previousProviderName
-            ? <> priced for <span className="font-semibold text-foreground">{previousProviderName}</span></>
-            : ' priced at platform base rates'}.
-          {' '}Rates differ by provider, so switching will clear these selections.
-        </p>
-
-        <div className="mt-5 space-y-3">
-          <button type="button" onClick={onConfirm} disabled={loading}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-destructive px-5 py-3.5 text-sm font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50">
-            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Trash2 className="h-5 w-5" />}
-            Clear & switch provider
-          </button>
-          <button type="button" onClick={onCancel} disabled={loading}
-            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border/50 px-5 py-3.5 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50">
-            <ArrowLeft className="h-5 w-5" />
-            {previousProviderName ? `Stay with ${previousProviderName}` : 'Keep my selections'}
-          </button>
-        </div>
-      </motion.div>
-    </div>
-  )
 }
 
 // ---- Sub-components -----------------------------------------
@@ -689,9 +708,15 @@ function SummaryPanel({
 
 // ---- Main calculator ----------------------------------------
 function PricingCalculator({
-  areaData, cart, onReset, onSwitchProvider, onUseBaseRates,
+  areaData, cart, selectedAddressId, switchNotice, onDismissNotice,
+  onReset, onSwitchProvider, onUseBaseRates,
 }: {
   areaData: AreaPricingData
+  /** Saved-address id, when known — lets Place Order skip the address step. */
+  selectedAddressId: number | null
+  /** Set when a provider change dropped the previous selection. */
+  switchNotice: string | null
+  onDismissNotice: () => void
   // Lifted to the page level (not created here) so the provider-switch guard
   // in PricingCalculatorPage can inspect item count / clear it BEFORE this
   // component ever re-renders with a different provider's areaData.
@@ -760,6 +785,18 @@ function PricingCalculator({
 
   return (
     <div>
+      {/* Replaces the old confirm dialog: state the consequence after the
+          fact instead of interrupting to ask about a selection we can't
+          show them. Dismissible, and auto-irrelevant once they re-add. */}
+      {switchNotice && (
+        <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-2.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">{switchNotice}</span>
+          <button type="button" onClick={onDismissNotice}
+            className="shrink-0 font-semibold hover:underline">Dismiss</button>
+        </div>
+      )}
+
       {/* Area / provider info bar */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/50 bg-card px-4 py-3">
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -914,7 +951,10 @@ function PricingCalculator({
             onToggleExpress={handleToggleExpress}
             areaData={areaData}
             onClear={cart.clear}
-            onPlaceOrder={cart.placeOrder}
+            onPlaceOrder={() => cart.placeOrder({
+              providerId: areaData.provider?.id ?? null,
+              addressId:  selectedAddressId,
+            })}
             placing={cart.placing}
           />
 
@@ -941,6 +981,7 @@ type PricingContext = { pincode?: string; city?: string }
 
 export default function PricingCalculatorPage() {
   const { user } = useAuth()
+  const router = useRouter()
 
   // 'pick_path'    — choose "my address" (auth only) vs "search any area"
   // 'my_address'   — pick a saved address (auth only)
@@ -959,14 +1000,54 @@ export default function PricingCalculatorPage() {
   // every step change) so a provider switch can be intercepted BEFORE
   // areaData is overwritten — see selectProvider below.
   const cart = usePricingCalculatorCart()
-  // Set only while the confirm-switch prompt is up; holds the provider the
-  // customer picked, so onConfirm/onCancel know what to do next.
-  const [pendingProviderId, setPendingProviderId] = useState<number | null>(null)
+  // Saved-address id, kept only when the visitor came in via "Use my saved
+  // address". That's the one path where the calculator actually knows WHICH
+  // address they mean (the area-search path only ever yields a pincode), and
+  // it's what lets Place Order resume straight at Schedule Pickup.
+  const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null)
+  // Shown after selections are dropped because the provider changed.
+  const [switchNotice, setSwitchNotice] = useState<string | null>(null)
+  // Which provider the CURRENT selections were priced against. Tracked as a
+  // ref (not derived from areaData) because areaData is null on the picker
+  // step, which is exactly what made the old confirm dialog misfire.
+  const pricedForProviderId = useRef<number | null>(null)
+
+  // A signed-out visitor who hit "Place Order" was bounced to sign in with
+  // their selection stashed (see savePendingCheckout). They're back and
+  // authenticated now — push it into their real cart and carry straight on
+  // into the order flow, so the trip through login is invisible to them
+  // rather than dumping them on a reset calculator with their work gone.
+  const flushedPending = useRef(false)
+  useEffect(() => {
+    if (!user || flushedPending.current) return
+    const pending = loadPendingCheckout()
+    if (!pending) return
+    flushedPending.current = true
+
+    ;(async () => {
+      try {
+        await cart.pushToServerCart(
+          { providerId: pending.providerId, addressId: pending.addressId },
+          pending.items,
+          pending.isExpress,
+        )
+        clearPendingCheckout()
+        cart.clear()
+        router.push('/customer/orders/create?resume=1')
+      } catch {
+        // Leave the pending blob in place so a retry (or a reload) can still
+        // recover it rather than silently losing their selection again.
+        flushedPending.current = false
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
 
   function resetAll() {
     setAreaData(null)
     setPricingContext({})
     setProviders([])
+    pricedForProviderId.current = null
     setStep(user ? 'pick_path' : 'area_search')
   }
 
@@ -982,8 +1063,11 @@ export default function PricingCalculatorPage() {
     setStep('pick_provider')
   }
 
-  async function handleAddressSelected(address: { postal_code: string; city: string }) {
+  async function handleAddressSelected(address: { id: number; postal_code: string; city: string }) {
     setPricingContext({ pincode: address.postal_code, city: address.city })
+    // Keep the id, not just the pincode — this is what lets Place Order skip
+    // the order flow's address step entirely.
+    setSelectedAddressId(address.id)
     await loadProviders({ pincode: address.postal_code, city: address.city })
     setAllowSkip(false)
     setStep('pick_provider')
@@ -1014,18 +1098,18 @@ export default function PricingCalculatorPage() {
     }
   }
 
-  // A cart (the calculator's local, sessionStorage-backed one) only ever
-  // holds prices for ONE provider (or base rates) at a time — the same rule
-  // the logged-in order-create flow enforces. If the customer already has
-  // items and picks a DIFFERENT provider than the one those items are priced
-  // for, confirm first instead of silently swapping areaData underneath the
-  // still-selected items (that was the bug: stale items + wrong prices, no
-  // warning). Nothing to lose — proceed straight through.
+  // A selection only ever holds prices for ONE provider at a time. Changing
+  // provider therefore drops it — silently, with an inline note rather than a
+  // confirm dialog: the dialog couldn't show what was about to be lost, and a
+  // null areaData (normal before any provider is picked) made it fire on the
+  // FIRST pick and on re-picking the same provider, which is what made it feel
+  // broken. Comparing against the provider the items were actually priced
+  // against — tracked separately from areaData — fixes that false positive.
   async function selectProvider(providerId: number) {
-    const currentProviderId = areaData?.provider?.id ?? null
-    if (cart.items.length > 0 && Number(currentProviderId) !== Number(providerId)) {
-      setPendingProviderId(providerId)
-      return
+    if (cart.items.length > 0 && pricedForProviderId.current != null &&
+        Number(pricedForProviderId.current) !== Number(providerId)) {
+      cart.clear()
+      setSwitchNotice('Your earlier selection was cleared — rates differ between providers.')
     }
     await doSelectProvider(providerId)
   }
@@ -1037,26 +1121,12 @@ export default function PricingCalculatorPage() {
       const json = await res.json()
       if (json.success && json.data.covered) {
         setAreaData(json.data)
+        pricedForProviderId.current = providerId
         setStep('calculator')
       }
     } finally {
       setProvidersLoading(false)
     }
-  }
-
-  function handleConfirmSwitchProvider() {
-    if (pendingProviderId == null) return
-    const providerId = pendingProviderId
-    cart.clear()
-    setPendingProviderId(null)
-    doSelectProvider(providerId)
-  }
-
-  // "Change the provider back to the previous provider" — areaData was never
-  // touched while the prompt was up, so just return to it.
-  function handleCancelSwitchProvider() {
-    setPendingProviderId(null)
-    if (areaData) setStep('calculator')
   }
 
   async function skipToBaseRates() {
@@ -1167,22 +1237,15 @@ export default function PricingCalculatorPage() {
           <PricingCalculator
             areaData={areaData}
             cart={cart}
+            selectedAddressId={selectedAddressId}
+            switchNotice={switchNotice}
+            onDismissNotice={() => setSwitchNotice(null)}
             onReset={resetAll}
             onSwitchProvider={switchToProviderPicker}
             onUseBaseRates={areaData.provider ? switchToBaseRates : undefined}
           />
         )}
       </PageSection>
-
-      {pendingProviderId != null && (
-        <SwitchProviderModal
-          previousProviderName={areaData?.provider?.name ?? null}
-          itemCount={cart.items.length}
-          onConfirm={handleConfirmSwitchProvider}
-          onCancel={handleCancelSwitchProvider}
-          loading={providersLoading}
-        />
-      )}
 
       {/* How pricing works */}
       {step !== 'calculator' && (
