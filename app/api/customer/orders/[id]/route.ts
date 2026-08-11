@@ -9,7 +9,7 @@ import {
   serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from '@/lib/order-status'
-import { getRefundBreakdown } from '@/lib/payment/refund'
+import { getRefundBreakdown, getRefundedTotals } from '@/lib/payment/refund'
 import { rescheduleOrder } from '@/lib/order-reschedule'
 import { autoCancelForRescheduleLimit } from '@/lib/order-cancellation'
 
@@ -140,6 +140,8 @@ export async function GET(
       multiplier: string; max_cap_amount: string; claim_window_hours: number; is_active: boolean
     }>(`SELECT multiplier, max_cap_amount, claim_window_hours, is_active FROM item_protection_policy ORDER BY id LIMIT 1`)
 
+    const refundedTotals = await getRefundedTotals((text, p) => query(text, p), orderId)
+
     // Can the order be rescheduled / cancelled?
     const canReschedule = RESCHEDULABLE_STATUSES.has(order.status)
     const canCancel     = CANCELLABLE_STATUSES.has(order.status)
@@ -207,6 +209,9 @@ export async function GET(
       payments:    paymentsRes.rows.map(r => ({
         ...r, amount: parseFloat(r.amount),
       })),
+      // What actually went back, as opposed to what a 'refunded' payment row
+      // implies. Fees are retained on cancellation, so these differ.
+      refund:      refundedTotals,
       adjustments: adjustmentsRes.rows.map(r => ({
         ...r, amount: parseFloat(r.amount),
       })),

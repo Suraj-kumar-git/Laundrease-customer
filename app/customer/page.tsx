@@ -385,13 +385,25 @@ function FeatureCard({ icon: Icon, title, description, onDark, badge }: {
     <div className="relative h-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
       <div className="h-1 bg-gradient-to-r from-blue-600 to-cyan-600" />
       <div className="p-4">
-        <div className="mb-2.5 flex items-center gap-3">
+        {/* Reserve the badge's corner so a longer title ("Delivery at Your
+            Door") doesn't run underneath the step number now that it's
+            actually legible. */}
+        <div className={cn('mb-2.5 flex items-center gap-3', badge && 'pr-9')}>
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
             <Icon className="h-5 w-5" />
           </div>
           <h3 className="text-sm font-bold text-foreground leading-tight">{title}</h3>
         </div>
-        {badge && <div className="absolute right-4 top-4 text-4xl font-extrabold text-blue-600/[0.08] select-none">{badge}</div>}
+        {/* Watermark step number. Was a flat blue-600 at 8% alpha for both
+            themes: barely there on white, and invisible on a dark card, where a
+            dark blue that faint has almost no contrast against the background.
+            Each theme now gets a hue that actually reads against its own
+            surface, at an alpha that stays decorative without disappearing. */}
+        {badge && (
+          <div className="pointer-events-none absolute right-4 top-4 select-none text-4xl font-extrabold text-blue-600/25 dark:text-blue-400/30">
+            {badge}
+          </div>
+        )}
         <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
       </div>
     </div>
@@ -468,7 +480,8 @@ export default function HomePage() {
   const STATS = [
     { label: 'Happy Users',    value: stats ? formatStat(stats.total_users)    : '—' },
     { label: 'Monthly Orders', value: stats ? formatStat(stats.monthly_orders) : '—' },
-    { label: 'Success Rate',   value: stats ? `${stats.success_rate}%`          : '—' },
+    // { label: 'Success Rate',   value: stats ? `${stats.success_rate}%`          : '—' },
+    { label: 'Success Guarantee', value: '100%', isStatic: true },
     { label: 'Local Partners', value: stats ? formatStat(stats.partner_count)  : '—' },
     { label: 'Service Areas',  value: stats ? formatStat(stats.service_areas)  : '—' },
     {
@@ -536,7 +549,11 @@ export default function HomePage() {
             <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:max-w-md">
               {STATS.map((stat, i) => (
                 <div key={i} className="text-center md:text-left">
-                  <p className="text-2xl font-extrabold text-white tabular-nums truncate">{loading ? '—' : stat.value}</p>
+                  {/* Static tiles aren't waiting on the API, so they skip the
+                      loading dash — otherwise a fixed claim flickers as "—". */}
+                  <p className="text-2xl font-extrabold text-white tabular-nums truncate">
+                    {loading && !('isStatic' in stat && stat.isStatic) ? '—' : stat.value}
+                  </p>
                   <p className="text-xs font-medium text-white/70">{stat.label}</p>
                 </div>
               ))}

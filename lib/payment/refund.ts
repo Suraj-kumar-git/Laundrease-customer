@@ -225,3 +225,66 @@ export async function checkOriginalMethodRefundStatus(refundId: number): Promise
 
   return { success: true, refundId: refund.id, status: statusResult.status }
 }
+
+// ---------------------------------------------------------------------------
+// What was ACTUALLY refunded for an order — the figure every customer-facing
+// surface must quote.
+//
+// This can't be read off the payments table: cancellation only flips those
+// rows to status='refunded' and leaves `amount` at the captured value, so a
+// ₹318.88 payment row marked "Refunded" was, under the fees-are-not-refundable
+// policy, only refunded ₹300. Reading the row's own amount overstates the
+// refund by exactly the retained fees.
+//
+// The real record lives in two places, mirroring the two ways money goes back:
+//   - wallet_transactions credits written by wallet_credit_for_order()
+//   - payment_refunds rows for refunds sent to the original payment method
+// Gateway refunds count once they're past 'pending' — the money is committed
+// at that point even though it takes days to land, which is what the customer
+// is told.
+export interface RefundedTotals {
+  wallet:        number
+  gateway:       number
+  total:         number
+  /** Captured but deliberately not returned — the order fees. */
+  feesRetained:  number
+}
+
+export async function getRefundedTotals(
+  runQuery: QueryFn,
+  orderId: number | string
+): Promise<RefundedTotals> {
+  const [walletRes, gatewayRes, capturedRes] = await Promise.all([
+    runQuery(
+      `SELECT COALESCE(SUM(amount), 0)::TEXT AS total
+         FROM wallet_transactions
+        WHERE order_id = $1 AND kind = 'credit'
+          AND metadata->>'type' = 'order_cancellation_refund'`,
+      [orderId]
+    ),
+    runQuery(
+      `SELECT COALESCE(SUM(amount), 0)::TEXT AS total
+         FROM payment_refunds
+        WHERE order_id = $1 AND status IN ('processing', 'completed')`,
+      [orderId]
+    ),
+    runQuery(
+      `SELECT COALESCE(SUM(amount), 0)::TEXT AS total
+         FROM payments
+        WHERE order_id = $1 AND status IN ('completed', 'refunded')`,
+      [orderId]
+    ),
+  ])
+
+  const wallet   = parseFloat(walletRes.rows[0]?.total  ?? '0')
+  const gateway  = parseFloat(gatewayRes.rows[0]?.total ?? '0')
+  const captured = parseFloat(capturedRes.rows[0]?.total ?? '0')
+  const total    = wallet + gateway
+
+  return {
+    wallet, gateway, total,
+    // Never negative: a full refund (e.g. provider rejection, which returns
+    // the fees too) leaves nothing retained.
+    feesRetained: Math.max(0, Number((captured - total).toFixed(2))),
+  }
+}

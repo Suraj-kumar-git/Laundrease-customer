@@ -789,10 +789,23 @@ function ProvidersNearYou({ address }: { address: Address | null }) {
                   <DeliveryFeePill preview={p.delivery_fee_preview} />
                 </div>
               )}
-              <Link href={address?.id ? `/customer/orders/create?provider=${p.id}&address=${address.id}` : `/customer/orders/create?provider=${p.id}`}
-                className="mt-3 flex items-center justify-center gap-1.5 rounded-lg bg-primary/10 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground">
-                Create order <ArrowRight className="h-3.5 w-3.5" />
-              </Link>
+              {/* mt-auto on the wrapper, not on the Link itself: the row
+                  already stretches every card to the tallest one, but the
+                  button was rendering wherever its own card's content happened
+                  to end — a provider whose name wraps to two lines (or that has
+                  a rating row the others lack) pushed its button down while the
+                  shorter cards were left with dead space BELOW theirs. Pushing
+                  the wrapper to the bottom puts every button on one baseline
+                  and moves the slack above it instead. pt-3 preserves the gap
+                  from the content on the tallest card, where mt-auto collapses
+                  to zero — it lives on the wrapper so it can't collide with the
+                  button's own py-2. */}
+              <div className="mt-auto pt-3">
+                <Link href={address?.id ? `/customer/orders/create?provider=${p.id}&address=${address.id}` : `/customer/orders/create?provider=${p.id}`}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-primary/10 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground">
+                  Create order <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
             </div>
           ))}
         </div>

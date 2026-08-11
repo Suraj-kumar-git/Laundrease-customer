@@ -156,6 +156,52 @@ function usePricingCalculatorCart() {
     persist([], isExpress)
   }, [isExpress, persist])
 
+  // Re-derive every line from a different catalog. A selection only ever
+  // carries ONE provider's rates, so swapping the catalog under it without
+  // this leaves the estimate quoting the previous provider's prices against
+  // the new provider's menu — the numbers on screen stop belonging to the
+  // provider named above them. Lines the new catalog doesn't cover can't be
+  // priced at all, so they're dropped and named back to the caller.
+  //
+  // Reads `items` from the closure rather than from inside a setItems updater
+  // so the changed/dropped report is a dependable return value (an updater may
+  // be invoked more than once, which would double-count the dropped names).
+  const repriceTo = useCallback((services: ServiceWithProducts[]) => {
+    const catalog = new Map<string, { unit_price: number; mrp: number | null; express_multiplier: number }>()
+    for (const { service, product_types } of services) {
+      for (const pt of product_types) {
+        catalog.set(`${pt.id}_${service.id}`, {
+          unit_price:         pt.unit_price,
+          mrp:                pt.mrp ?? null,
+          express_multiplier: service.express_multiplier ?? 1.5,
+        })
+      }
+    }
+
+    const kept:    CartLineItem[] = []
+    const dropped: string[]       = []
+    let   changed = false
+
+    for (const item of items) {
+      const next = catalog.get(`${item.product_type_id}_${item.service_id}`)
+      if (!next) { dropped.push(item.product_type_name); continue }
+      if (next.unit_price !== item.unit_price) changed = true
+
+      const updated: CartLineItem = {
+        ...item,
+        unit_price:         next.unit_price,
+        mrp:                next.mrp,
+        express_multiplier: next.express_multiplier,
+      }
+      updated.line_total = calcLineTotal(updated)
+      kept.push(updated)
+    }
+
+    setItems(kept)
+    persist(kept, isExpress)
+    return { changed, dropped }
+  }, [items, isExpress, persist])
+
   const toggleExpress = useCallback(() => {
     setIsExpress(prev => {
       const next = !prev
@@ -223,7 +269,7 @@ function usePricingCalculatorCart() {
     }
   }, [user, items, isExpress, router, clear, pushToServerCart])
 
-  return { items, isExpress, toggleExpress, addItem, updateItem, removeItem, clear, placeOrder, placing, pushToServerCart }
+  return { items, isExpress, toggleExpress, addItem, updateItem, removeItem, clear, repriceTo, placeOrder, placing, pushToServerCart }
 }
 
 // ---- Helpers ------------------------------------------------
@@ -1007,10 +1053,6 @@ export default function PricingCalculatorPage() {
   const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null)
   // Shown after selections are dropped because the provider changed.
   const [switchNotice, setSwitchNotice] = useState<string | null>(null)
-  // Which provider the CURRENT selections were priced against. Tracked as a
-  // ref (not derived from areaData) because areaData is null on the picker
-  // step, which is exactly what made the old confirm dialog misfire.
-  const pricedForProviderId = useRef<number | null>(null)
 
   // A signed-out visitor who hit "Place Order" was bounced to sign in with
   // their selection stashed (see savePendingCheckout). They're back and
@@ -1047,14 +1089,13 @@ export default function PricingCalculatorPage() {
     setAreaData(null)
     setPricingContext({})
     setProviders([])
-    pricedForProviderId.current = null
     setStep(user ? 'pick_path' : 'area_search')
   }
 
   // Area search resolved — AreaSearchStep already fetched the provider list
   // itself (see its handleSearch), so just take it. areaData stays null
   // until the visitor actually lands on a real catalog — either by picking
-  // a provider (doSelectProvider) or hitting "Skip" (skipToBaseRates), both
+  // a provider (selectProvider) or hitting "Skip" (skipToBaseRates), both
   // below — never pre-fetched here on the chance "Skip" gets used.
   function handleAreaResult(result: { pincode?: string; city?: string; providers: PickableProvider[] }) {
     setPricingContext({ pincode: result.pincode, city: result.city })
@@ -1098,30 +1139,44 @@ export default function PricingCalculatorPage() {
     }
   }
 
-  // A selection only ever holds prices for ONE provider at a time. Changing
-  // provider therefore drops it — silently, with an inline note rather than a
-  // confirm dialog: the dialog couldn't show what was about to be lost, and a
-  // null areaData (normal before any provider is picked) made it fire on the
-  // FIRST pick and on re-picking the same provider, which is what made it feel
-  // broken. Comparing against the provider the items were actually priced
-  // against — tracked separately from areaData — fixes that false positive.
-  async function selectProvider(providerId: number) {
-    if (cart.items.length > 0 && pricedForProviderId.current != null &&
-        Number(pricedForProviderId.current) !== Number(providerId)) {
-      cart.clear()
-      setSwitchNotice('Your earlier selection was cleared — rates differ between providers.')
+  // Every path that swaps the catalog under an existing selection runs through
+  // here, so the estimate panel can never quote one provider's prices under
+  // another provider's name.
+  //
+  // Repricing is unconditional rather than gated on "did the provider id
+  // change". Re-pricing against the same catalog is a no-op, and the previous
+  // id-comparison guard silently did nothing on the exact path that produced
+  // the stale figures: reaching the picker via Back / "Change area" runs
+  // resetAll(), which cleared the tracked id while the cart kept its items, so
+  // the guard saw null and skipped.
+  function applyCatalogToCart(data: AreaPricingData) {
+    if (cart.items.length === 0) { setSwitchNotice(null); return }
+
+    const { changed, dropped } = cart.repriceTo(data.services)
+    const rates = data.provider ? `${data.provider.name}'s rates` : "this area's base rates"
+
+    if (dropped.length > 0) {
+      const one = dropped.length === 1
+      setSwitchNotice(
+        `${dropped.join(', ')} ${one ? 'is' : 'are'} not offered here, so ${one ? 'it was' : 'they were'} removed. ` +
+        `Everything else is now priced at ${rates}.`
+      )
+    } else if (changed) {
+      setSwitchNotice(`Your selection has been repriced at ${rates}.`)
+    } else {
+      setSwitchNotice(null)
     }
-    await doSelectProvider(providerId)
   }
 
-  async function doSelectProvider(providerId: number) {
+  async function selectProvider(providerId: number) {
     setProvidersLoading(true)
     try {
       const res = await fetch(`/api/customer/public/pricing/services-by-area?provider_id=${providerId}`)
       const json = await res.json()
       if (json.success && json.data.covered) {
-        setAreaData(json.data)
-        pricedForProviderId.current = providerId
+        const data = json.data as AreaPricingData
+        applyCatalogToCart(data)
+        setAreaData(data)
         setStep('calculator')
       }
     } finally {
@@ -1149,7 +1204,13 @@ export default function PricingCalculatorPage() {
       : `city=${encodeURIComponent(pricingContext.city ?? '')}`
     const res = await fetch(`/api/customer/public/pricing/services-by-area?${param}`)
     const json = await res.json()
-    if (json.success) setAreaData(json.data)
+    if (json.success) {
+      const data = json.data as AreaPricingData
+      // Dropping from a provider's catalog to the area's base rates changes
+      // every price too, so this path needs the same repricing.
+      applyCatalogToCart(data)
+      setAreaData(data)
+    }
   }
 
   async function switchToProviderPicker() {
