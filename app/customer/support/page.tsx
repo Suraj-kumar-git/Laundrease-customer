@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils'
 import { useToast } from '@/hooks/use-toast'
 import { useTicketChat } from '@/lib/use-ticket-chat'
 import { SearchParamProvider } from '@/components/common/searchParamProvider'
+import { FaqHintBanner } from '@/components/common/FaqHintBanner'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -215,6 +216,9 @@ function NewTicketForm({
           <button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4">
+          <div className="mb-4">
+            <FaqHintBanner href="/customer/faq" />
+          </div>
           <p className="mb-4 text-xs text-muted-foreground">Choose the category that best fits your issue</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {meta.categories.map(cat => (
