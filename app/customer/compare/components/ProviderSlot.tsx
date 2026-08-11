@@ -134,12 +134,23 @@ export function ProviderSlot({ slotId, slot, armed, loading, onArm, onClear }: P
         {p.min_price_kg != null && <> · from ₹{Math.round(p.min_price_kg)}/kg</>}
       </div>
 
-      <Link
-        href={`/customer/orders/create?provider=${p.id}`}
-        className="mt-3 flex items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-      >
-        Order from here <ArrowRight className="h-3.5 w-3.5" />
-      </Link>
+      {/* mt-auto on the wrapper, not the Link: the two slots are grid siblings
+          so they already stretch to the taller one, but the button was
+          rendering right after its own card's content — a provider with a
+          rating row (or a longer name that wraps) pushed its button down while
+          the other card was left with dead space BELOW its own. Pinning the
+          wrapper to the bottom puts both buttons on one baseline and moves the
+          slack above them. pt-3 keeps the gap from the content on the taller
+          card, where mt-auto collapses to zero, and lives on the wrapper so it
+          can't collide with the button's own py-2. */}
+      <div className="mt-auto pt-3">
+        <Link
+          href={`/customer/orders/create?provider=${p.id}`}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+        >
+          Order from here <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      </div>
     </motion.div>
   )
 }
