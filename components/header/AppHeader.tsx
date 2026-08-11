@@ -9,6 +9,7 @@ import {
   User, MapPin, Wallet, Gift, Settings, LogOut, HelpCircle,
   ChevronDown, Loader2, Star, Bell, Sun, Moon, Package,
   Calculator,
+  Scale,
   Layers,
   Truck,
   MessagesSquare,
@@ -36,11 +37,13 @@ const NAV_ITEMS_AUTH: NavItem[] = [
   { href: '/customer/orders',    label: 'My Orders', icon: Package, authRequired: true  },
   { href: '/customer/addresses', label: 'Addresses', icon: MapPin, authRequired: true  },
   { href: '/customer/pricing-calculator', label: 'Pricing', icon: Calculator, authRequired: false  },
+  { href: '/customer/compare', label: 'Compare', icon: Scale, authRequired: false  },
   { href: '/customer/quick-pickup', label: 'Quick Pickup', icon: Truck, authRequired: false  },
 ]
 const NAV_ITEMS_NOT_AUTH: NavItem[] = [
   { href: '/customer/services', label: 'Services', icon: Layers, authRequired: false  },
   { href: '/customer/pricing-calculator', label: 'Pricing', icon: Calculator, authRequired: false  },
+  { href: '/customer/compare', label: 'Compare', icon: Scale, authRequired: false  },
   { href: '/customer/quick-pickup', label: 'Quick Pickup', icon: Truck, authRequired: false  },
   { href: '/customer/faq', label: 'FAQ', icon: HelpCircle, authRequired: false  },
 ]
@@ -259,6 +262,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
   const mobileGuestItems = [
     { href: '/customer/services', label: 'Services', icon: Layers },
     { href: '/customer/pricing-calculator', label: 'Pricing', icon: Calculator, },
+    { href: '/customer/compare', label: 'Compare Prices', icon: Scale, },
     { href: '/customer/quick-pickup', label: 'Quick Pickup', icon: Truck, },
     { href: '/customer/faq', label: 'FAQ', icon: HelpCircle, },
     { href: '/customer/help-center', label: 'Help Center',icon: HelpCircle },

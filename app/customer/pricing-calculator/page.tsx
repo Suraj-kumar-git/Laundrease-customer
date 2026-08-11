@@ -19,7 +19,7 @@ import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveProductIconSrc } from '@/lib/product-icons'
 import { calcLineTotal, cartItemsToSelectedServices, CALC_PENDING_CHECKOUT_KEY } from '@/lib/cart-store'
 import type {
-  AreaPricingData, ServiceWithProducts, PricingProductType,
+  AreaPricingData, PricingProductType,
   CartLineItem, PricingModel, ServiceCategory,
 } from '@/types/pricing'
 import { CATEGORY_LABELS, SERVICE_CATEGORY_LABELS } from '@/types/pricing'
@@ -156,52 +156,6 @@ function usePricingCalculatorCart() {
     persist([], isExpress)
   }, [isExpress, persist])
 
-  // Re-derive every line from a different catalog. A selection only ever
-  // carries ONE provider's rates, so swapping the catalog under it without
-  // this leaves the estimate quoting the previous provider's prices against
-  // the new provider's menu — the numbers on screen stop belonging to the
-  // provider named above them. Lines the new catalog doesn't cover can't be
-  // priced at all, so they're dropped and named back to the caller.
-  //
-  // Reads `items` from the closure rather than from inside a setItems updater
-  // so the changed/dropped report is a dependable return value (an updater may
-  // be invoked more than once, which would double-count the dropped names).
-  const repriceTo = useCallback((services: ServiceWithProducts[]) => {
-    const catalog = new Map<string, { unit_price: number; mrp: number | null; express_multiplier: number }>()
-    for (const { service, product_types } of services) {
-      for (const pt of product_types) {
-        catalog.set(`${pt.id}_${service.id}`, {
-          unit_price:         pt.unit_price,
-          mrp:                pt.mrp ?? null,
-          express_multiplier: service.express_multiplier ?? 1.5,
-        })
-      }
-    }
-
-    const kept:    CartLineItem[] = []
-    const dropped: string[]       = []
-    let   changed = false
-
-    for (const item of items) {
-      const next = catalog.get(`${item.product_type_id}_${item.service_id}`)
-      if (!next) { dropped.push(item.product_type_name); continue }
-      if (next.unit_price !== item.unit_price) changed = true
-
-      const updated: CartLineItem = {
-        ...item,
-        unit_price:         next.unit_price,
-        mrp:                next.mrp,
-        express_multiplier: next.express_multiplier,
-      }
-      updated.line_total = calcLineTotal(updated)
-      kept.push(updated)
-    }
-
-    setItems(kept)
-    persist(kept, isExpress)
-    return { changed, dropped }
-  }, [items, isExpress, persist])
-
   const toggleExpress = useCallback(() => {
     setIsExpress(prev => {
       const next = !prev
@@ -269,7 +223,7 @@ function usePricingCalculatorCart() {
     }
   }, [user, items, isExpress, router, clear, pushToServerCart])
 
-  return { items, isExpress, toggleExpress, addItem, updateItem, removeItem, clear, repriceTo, placeOrder, placing, pushToServerCart }
+  return { items, isExpress, toggleExpress, addItem, updateItem, removeItem, clear, placeOrder, placing, pushToServerCart }
 }
 
 // ---- Helpers ------------------------------------------------
@@ -1140,32 +1094,26 @@ export default function PricingCalculatorPage() {
   }
 
   // Every path that swaps the catalog under an existing selection runs through
-  // here, so the estimate panel can never quote one provider's prices under
-  // another provider's name.
+  // here. A selection only ever means anything against the catalog it was
+  // built from — carrying it into a different provider's (or the area's base)
+  // catalog, priced or not, is carrying over a choice the customer never
+  // actually made against what they're now looking at. So this clears rather
+  // than reprices: leaving the calculator's current provider context, for any
+  // reason, means starting the selection over against whatever catalog is
+  // shown next.
   //
-  // Repricing is unconditional rather than gated on "did the provider id
-  // change". Re-pricing against the same catalog is a no-op, and the previous
-  // id-comparison guard silently did nothing on the exact path that produced
-  // the stale figures: reaching the picker via Back / "Change area" runs
-  // resetAll(), which cleared the tracked id while the cart kept its items, so
-  // the guard saw null and skipped.
+  // Unconditional on "did the provider id change" — clearing an already-empty
+  // cart, or one already built from this exact catalog, is a no-op — so there
+  // is no tracked-id guard left to fall out of sync. That guard's earlier
+  // failure mode is exactly why reaching this step via Back / "Change area"
+  // used to leave stale, wrongly-priced items sitting in the estimate panel:
+  // resetAll() cleared the tracked id while the cart kept its items, so the
+  // old guard saw null and silently skipped the clear.
   function applyCatalogToCart(data: AreaPricingData) {
     if (cart.items.length === 0) { setSwitchNotice(null); return }
-
-    const { changed, dropped } = cart.repriceTo(data.services)
+    cart.clear()
     const rates = data.provider ? `${data.provider.name}'s rates` : "this area's base rates"
-
-    if (dropped.length > 0) {
-      const one = dropped.length === 1
-      setSwitchNotice(
-        `${dropped.join(', ')} ${one ? 'is' : 'are'} not offered here, so ${one ? 'it was' : 'they were'} removed. ` +
-        `Everything else is now priced at ${rates}.`
-      )
-    } else if (changed) {
-      setSwitchNotice(`Your selection has been repriced at ${rates}.`)
-    } else {
-      setSwitchNotice(null)
-    }
+    setSwitchNotice(`Your earlier selection was cleared — please choose services again for ${rates}.`)
   }
 
   async function selectProvider(providerId: number) {
