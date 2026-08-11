@@ -33,7 +33,7 @@ interface NavItem {
 // ---- Nav config (customer app) ------------------------------
 const NAV_ITEMS_AUTH: NavItem[] = [
   { href: '/customer/dashboard', label: 'Home', icon: Home, authRequired: true  },
-  { href: '/customer/orders/create', label: 'New Order', icon: ShoppingBag, authRequired: true  },
+  // { href: '/customer/orders/create', label: 'New Order', icon: ShoppingBag, authRequired: true  },
   { href: '/customer/orders',    label: 'My Orders', icon: Package, authRequired: true  },
   { href: '/customer/addresses', label: 'Addresses', icon: MapPin, authRequired: true  },
   { href: '/customer/pricing-calculator', label: 'Pricing', icon: Calculator, authRequired: false  },
