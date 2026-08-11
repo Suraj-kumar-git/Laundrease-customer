@@ -181,8 +181,14 @@ export default function ComparePage() {
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'Compare Providers' }]}>
       {/* ---- Hero + search ---- */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
-        <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+      {/* No overflow-hidden on this wrapper: the Places dropdown is absolutely
+          positioned inside it and any clipping here truncates it at the hero's
+          bottom edge. The decorative blob gets its own clipping layer instead,
+          so it still can't cause a horizontal scrollbar. */}
+      <div className="relative bg-gradient-to-br from-primary/5 via-background to-primary/10">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+          <div className="absolute -top-24 -right-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+        </div>
         <div className="container relative mx-auto px-4 pb-6 pt-8 sm:px-6 sm:pb-8 sm:pt-10">
           <div className="mx-auto mb-5 max-w-2xl text-center">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-primary">
@@ -342,8 +348,13 @@ export default function ComparePage() {
           {anyFilled && (
             <div className="mt-4">
               {/* Sticky column header keeps the two provider names attached to
-                  their prices once the list is long enough to scroll. */}
-              <div className="sticky top-16 z-20 grid grid-cols-[minmax(0,1fr)_68px_68px] items-center gap-2 rounded-t-2xl border border-border/60 bg-card/95 px-3 py-2.5 backdrop-blur sm:grid-cols-[minmax(0,1fr)_112px_112px] sm:px-4">
+                  their prices once the list is long enough to scroll.
+                  top-14 matches AppHeader's own h-14 exactly: at top-16 there
+                  was an 8px strip between the two where scrolling rows showed
+                  through above this header. Fully opaque bg-card rather than
+                  bg-card/95 for the same reason — at 95% the rows passing
+                  underneath ghosted through the header itself. */}
+              <div className="sticky top-14 z-20 grid grid-cols-[minmax(0,1fr)_68px_68px] items-center gap-2 rounded-t-2xl border border-border/60 bg-card px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_112px_112px] sm:px-4">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Item</span>
                 <span className="truncate text-center text-[11px] font-bold text-primary">
                   {slotA?.provider.business_name ?? '—'}
