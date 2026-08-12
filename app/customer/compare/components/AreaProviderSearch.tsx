@@ -37,10 +37,41 @@ interface Props {
   searched: boolean
   /** Already-picked provider ids — shown as "Selected" and not re-pickable. */
   takenIds: number[]
-  onAreaResolved: (label: string, coords: { lat: number; lng: number } | null) => void
+  /**
+   * `label` is what the visitor sees; `searchTerm` is what the provider API is
+   * actually queried with. They differ for Google picks — see extractAreaTerm.
+   */
+  onAreaResolved: (label: string, searchTerm: string, coords: { lat: number; lng: number } | null) => void
   onPickProvider: (p: CompareProvider) => void
   onClearArea: () => void
   onCancelArming: () => void
+}
+
+/**
+ * Reduces a geocode result to a term the provider search can actually match on.
+ *
+ * /api/customer/laundry-providers/search filters with `lp.city ILIKE $1` (or an
+ * exact postal_code match when the term is 5-6 digits) — the lat/lng it also
+ * accepts are used only to compute distance and delivery-fee columns, never to
+ * filter. So handing it Google's formatted description ("Pune, Maharashtra,
+ * India") matches no city at all, while the same place typed as free text
+ * ("pune") matches fine. Pulling the locality (or better, the postal code) out
+ * of address_components is what makes a picked suggestion behave like typing.
+ */
+function extractAreaTerm(components: any[] | undefined, fallback: string): string {
+  const byType = (t: string) =>
+    components?.find(c => Array.isArray(c.types) && c.types.includes(t))?.long_name as string | undefined
+
+  return (
+    byType('postal_code')                     // most precise — hits the pincode branch
+    ?? byType('locality')                     // "Pune", "Pimpri-Chinchwad"
+    ?? byType('sublocality_level_1')
+    ?? byType('administrative_area_level_3')
+    ?? byType('administrative_area_level_2')
+    // Last resort: the leading token of the description is nearly always the
+    // place itself ("Hinjawadi, Pune, Maharashtra, India" -> "Hinjawadi").
+    ?? fallback.split(',')[0].trim()
+  )
 }
 
 export function AreaProviderSearch({
@@ -123,15 +154,24 @@ export function AreaProviderSearch({
   function selectPrediction(p: { place_id: string; description: string }) {
     setQuery(p.description)
     setShowDropdown(false)
-    if (!geocoder.current) { onAreaResolved(p.description, null); return }
+    // No geocoder (no Maps key): fall back to the leading token, which is the
+    // same thing typing the place name by hand would have sent.
+    if (!geocoder.current) {
+      onAreaResolved(p.description, extractAreaTerm(undefined, p.description), null)
+      return
+    }
     setResolving(true)
     geocoder.current.geocode({ placeId: p.place_id }, (results: any[] | null, status: string) => {
       setResolving(false)
       if (status === 'OK' && results?.[0]) {
         const loc = results[0].geometry.location
-        onAreaResolved(p.description, { lat: loc.lat(), lng: loc.lng() })
+        onAreaResolved(
+          p.description,
+          extractAreaTerm(results[0].address_components, p.description),
+          { lat: loc.lat(), lng: loc.lng() },
+        )
       } else {
-        onAreaResolved(p.description, null)
+        onAreaResolved(p.description, extractAreaTerm(undefined, p.description), null)
       }
     })
   }
@@ -141,9 +181,25 @@ export function AreaProviderSearch({
     setResolving(true)
     navigator.geolocation.getCurrentPosition(
       pos => {
-        setResolving(false)
-        setQuery('Current location')
-        onAreaResolved('Current location', { lat: pos.coords.latitude, lng: pos.coords.longitude })
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+        // Coordinates alone can't drive this search — the endpoint filters on
+        // city/pincode text — so reverse-geocode them into a locality first.
+        // Without this the search ran as `city ILIKE '%Current location%'` and
+        // always came back empty.
+        if (!geocoder.current) {
+          setResolving(false)
+          setQuery('Current location')
+          onAreaResolved('Current location', 'Current location', coords)
+          return
+        }
+        geocoder.current.geocode({ location: coords }, (results: any[] | null, status: string) => {
+          setResolving(false)
+          const ok = status === 'OK' && results?.[0]
+          const term  = ok ? extractAreaTerm(results![0].address_components, '') : ''
+          const label = ok ? (results![0].formatted_address ?? 'Current location') : 'Current location'
+          setQuery(label)
+          onAreaResolved(label, term || label, coords)
+        })
       },
       () => setResolving(false),
       { timeout: 8000 }
@@ -153,7 +209,8 @@ export function AreaProviderSearch({
   function handleSubmit() {
     if (!query.trim()) return
     setShowDropdown(false)
-    onAreaResolved(query.trim(), null)
+    // Typed free text is already the search term.
+    onAreaResolved(query.trim(), query.trim(), null)
   }
 
   function clearArea() {
@@ -164,10 +221,18 @@ export function AreaProviderSearch({
 
   const busy = resolving || loadingProviders
   const dormant = !armed
-  // Once an area is locked in, the input is read-only: re-searching is an
-  // explicit "Change area" action, so a stray click can't silently drop the
-  // provider list out from under a half-finished comparison.
-  const locked = !!areaLabel
+  const hasArea = !!areaLabel
+
+  // A search that found nothing is a dead end, so there is no half-finished
+  // comparison to protect — keep the field editable and let the visitor correct
+  // the term in place. Making them hit "Change area" and re-arm a slot just to
+  // fix a typo is pure friction.
+  const noResults = hasArea && searched && !loadingProviders && providers.length === 0
+
+  // Otherwise the input goes read-only once an area resolves: re-searching
+  // becomes an explicit "Change area" action, so a stray click can't silently
+  // drop the provider list out from under a comparison in progress.
+  const locked = hasArea && !noResults
 
   return (
     <div ref={boxRef} className="relative mx-auto w-full max-w-2xl">
@@ -256,7 +321,10 @@ export function AreaProviderSearch({
 
       {/* Provider results */}
       <AnimatePresence>
-        {armed && locked && (
+        {/* hasArea, not locked: an empty result unlocks the input, and gating
+            this panel on `locked` would take the "No providers" message away at
+            the exact moment it needs to be read. */}
+        {armed && hasArea && (
           <motion.div
             initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
             className="mt-4 rounded-2xl border border-border/60 bg-card p-3 shadow-sm"

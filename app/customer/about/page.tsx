@@ -261,7 +261,7 @@ export default async function AboutUsPage() {
                 Ready to reclaim your time?
               </h2>
               <p className="mt-1 text-primary-foreground/80">
-                Join thousands of happy customers across Pune.
+                Join thousands of happy customers.
               </p>
             </div>
             <GuestOnlyCta className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-primary shadow-lg transition-all hover:-translate-y-0.5 hover:bg-white/90 hover:shadow-xl" />
