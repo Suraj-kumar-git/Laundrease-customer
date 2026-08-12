@@ -34,7 +34,12 @@ function fmt(n: number) {
 }
 
 export default function ComparePage() {
+  // Two separate values on purpose. `areaLabel` is what the visitor sees in the
+  // locked search box ("Pune, Maharashtra, India"); `areaQuery` is what the
+  // provider API is queried with ("Pune"). Conflating them is what made a
+  // picked Google suggestion return nothing while typing the same place worked.
   const [areaLabel, setAreaLabel]   = useState<string | null>(null)
+  const [areaQuery, setAreaQuery]   = useState<string | null>(null)
   const [providers, setProviders]   = useState<CompareProvider[]>([])
   const [loadingProviders, setLoadingProviders] = useState(false)
   const [searched, setSearched]     = useState(false)
@@ -52,13 +57,16 @@ export default function ComparePage() {
 
   // ---- Data loading -------------------------------------------------------
 
-  const loadProviders = useCallback(async (label: string, coords: { lat: number; lng: number } | null) => {
+  // `term` must be a city name or pincode — this endpoint filters on
+  // `lp.city ILIKE` / exact postal_code and uses lat/lng only to compute the
+  // distance and delivery-fee columns, never to narrow the result set.
+  const loadProviders = useCallback(async (term: string, coords: { lat: number; lng: number } | null) => {
     setLoadingProviders(true)
     setSearched(false)
     try {
       const qs = coords
-        ? `lat=${coords.lat}&lng=${coords.lng}&location=${encodeURIComponent(label)}`
-        : `location=${encodeURIComponent(label)}`
+        ? `lat=${coords.lat}&lng=${coords.lng}&location=${encodeURIComponent(term)}`
+        : `location=${encodeURIComponent(term)}`
       const res  = await fetch(`/api/customer/laundry-providers/search?${qs}`)
       const json = await res.json()
       const list: CompareProvider[] = json.success ? json.data.providers : []
@@ -98,12 +106,16 @@ export default function ComparePage() {
     const sp = new URLSearchParams(window.location.search)
     const area = sp.get('area')
     if (!area) return
+    // `q` is the searchable term; older links without it were only ever written
+    // from free text, where label and term were the same thing.
+    const q   = sp.get('q') || area
     const aId = Number(sp.get('a')) || null
     const bId = Number(sp.get('b')) || null
 
     ;(async () => {
       setAreaLabel(area)
-      const list = await loadProviders(area, null)
+      setAreaQuery(q)
+      const list = await loadProviders(q, null)
       const findAndLoad = (id: number | null, slotId: SlotId) => {
         const p = list.find(x => x.id === id)
         if (p) return loadSlot(slotId, p)
@@ -116,21 +128,25 @@ export default function ComparePage() {
     if (!restored.current) return
     const sp = new URLSearchParams()
     if (areaLabel)        sp.set('area', areaLabel)
+    // Only when it differs — no point doubling the URL for a free-text search.
+    if (areaQuery && areaQuery !== areaLabel) sp.set('q', areaQuery)
     if (slotA?.provider)  sp.set('a', String(slotA.provider.id))
     if (slotB?.provider)  sp.set('b', String(slotB.provider.id))
     const qs = sp.toString()
     window.history.replaceState(null, '', qs ? `${window.location.pathname}?${qs}` : window.location.pathname)
-  }, [areaLabel, slotA, slotB])
+  }, [areaLabel, areaQuery, slotA, slotB])
 
   // ---- Handlers -----------------------------------------------------------
 
-  async function handleAreaResolved(label: string, coords: { lat: number; lng: number } | null) {
+  async function handleAreaResolved(label: string, searchTerm: string, coords: { lat: number; lng: number } | null) {
     setAreaLabel(label)
-    await loadProviders(label, coords)
+    setAreaQuery(searchTerm)
+    await loadProviders(searchTerm, coords)
   }
 
   function handleClearArea() {
     setAreaLabel(null)
+    setAreaQuery(null)
     setProviders([])
     setSearched(false)
     setArmedSlot(null)

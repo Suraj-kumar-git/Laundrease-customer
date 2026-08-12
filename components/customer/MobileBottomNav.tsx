@@ -12,7 +12,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { Home, Package, Plus, LifeBuoy, UserCircle } from 'lucide-react'
+import { Home, Package, Plus, Scale, UserCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
 import { getPreferredAddressId, onPreferredAddressChange } from '@/lib/dashboard-address-pref'
@@ -49,7 +49,11 @@ export function MobileBottomNav() {
     { href: '/customer/dashboard', label: 'Home',    icon: Home,       match: ['/customer/dashboard'] },
     { href: '/customer/orders',    label: 'Orders',  icon: Package,    match: ['/customer/orders'] },
     null, // center slot — New Order
-    { href: '/customer/support',   label: 'Tickets', icon: LifeBuoy,   match: ['/customer/support'] },
+    // Compare replaces Tickets here: raising a ticket is an occasional,
+    // reactive task, while comparing prices is part of deciding to order at
+    // all — which is what this bar is for. Tickets is still one tap away under
+    // "My Tickets" in the header menu, so nothing is orphaned.
+    { href: '/customer/compare',   label: 'Compare', icon: Scale,      match: ['/customer/compare'] },
     { href: `/customer/profile/${user.id}`, label: 'Account', icon: UserCircle, match: ['/customer/profile', '/customer/settings', '/customer/addresses'] },
   ] as const
 

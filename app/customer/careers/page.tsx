@@ -98,113 +98,120 @@ function JobCard({ job }: { job: CareerJob }) {
 export default async function CareersPage() {
   const jobs = await getJobs()
 
-  // Group by department
+  // Group by department. Featured roles are NOT split into their own section —
+  // they sit in their department alongside everything else and are surfaced by
+  // the badge plus being sorted first. Splitting them out meant the same job
+  // appeared once and the "N open positions" count below never matched the
+  // list it was labelling.
   const departments = Array.from(new Set(jobs.map((j) => j.department)))
-
-  const featuredJobs = jobs.filter((j) => j.is_featured)
-  const otherJobs = jobs.filter((j) => !j.is_featured)
+  const jobsByDept = departments.map((dept) => ({
+    dept,
+    items: jobs
+      .filter((j) => j.department === dept)
+      .sort((a, b) => Number(b.is_featured) - Number(a.is_featured)),
+  }))
 
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'Careers' }]}>
       {/* Hero */}
       <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
         <div className="pointer-events-none absolute -top-40 right-0 h-[500px] w-[500px] rounded-full bg-primary/8 blur-3xl" />
-        <PageSection className="relative py-24 md:py-32">
+        {/* Compact by design. At py-24/py-32 with a text-6xl heading and a
+            text-xl subtitle, this hero filled an entire laptop viewport on its
+            own — someone landing on a jobs page saw zero jobs without
+            scrolling. Same copy, sized so the first role is visible on arrival. */}
+        <PageSection className="relative py-10 md:py-14">
           <div className="max-w-3xl">
-            <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-primary">
               <Sparkles className="h-3 w-3" />
               We are Hiring
             </span>
-            <h1 className="mt-2 text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl md:text-6xl">
+            <h1 className="mt-3 text-2xl font-bold leading-tight tracking-tight text-foreground sm:text-3xl md:text-4xl">
               Help Us Reinvent Laundry in India
             </h1>
-            <p className="mt-6 text-xl text-muted-foreground leading-relaxed">
+            <p className="mt-2.5 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
               We are a small team building fast. If you love solving real problems, shipping quickly, and obsessing over details, you will fit right in.
             </p>
-            <div className="mt-8 flex flex-wrap gap-6 text-sm text-muted-foreground">
+            <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground sm:text-sm">
               <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 Remote-friendly roles available
               </div>
               <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-primary" />
+                <div className="h-1.5 w-1.5 rounded-full bg-primary" />
                 Competitive salaries + equity
               </div>
               <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-amber-500" />
-                {jobs.length} open position{jobs.length !== 1 ? 's' : ''}
+                <div className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                {/* "0 open positions" is a deflating first impression on a
+                    careers page — say what's actually true instead. */}
+                {jobs.length > 0
+                  ? `${jobs.length} open position${jobs.length !== 1 ? 's' : ''}`
+                  : 'New roles posted regularly'}
               </div>
             </div>
           </div>
         </PageSection>
       </div>
 
-      {/* No jobs state */}
+      {/* No jobs state — this is the page's whole content when nothing is open,
+          so it carries a real call to action rather than just an apology. */}
       {jobs.length === 0 && (
         <PageSection>
-          <div className="mx-auto max-w-lg rounded-2xl border border-border/50 bg-muted/30 p-12 text-center">
-            <div className="mb-4 text-5xl">📋</div>
-            <h2 className="text-xl font-semibold text-foreground">
-              No open positions right now
+          <div className="mx-auto max-w-xl rounded-2xl border border-border/50 bg-card p-8 text-center shadow-sm sm:p-10">
+            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10">
+              <Briefcase className="h-6 w-6 text-primary" />
+            </div>
+            <h2 className="text-lg font-semibold text-foreground sm:text-xl">
+              No open roles at the moment
             </h2>
-            <p className="mt-3 text-muted-foreground">
-              We do not have any open positions at the moment, but we are growing quickly. Check back soon or send your resume to{' '}
-              <a
-                href="mailto:careers@laundrease.in"
-                className="text-primary underline underline-offset-2 hover:no-underline"
-              >
-                careers@laundrease.in
-              </a>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
+              We hire in bursts, and the next one usually is not far off. Send us your
+              resume and we will get in touch as soon as something fits.
+            </p>
+            <a
+              href="mailto:careers@laundrease.in"
+              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-all hover:shadow-md"
+            >
+              Send your resume
+              <ArrowRight className="h-4 w-4" />
+            </a>
+            <p className="mt-3 text-xs text-muted-foreground">
+              We read every application, even when nothing is posted.
             </p>
           </div>
         </PageSection>
       )}
 
-      {/* Featured jobs */}
-      {featuredJobs.length > 0 && (
-        <PageSection>
-          <SectionHeading
-            badge="Featured"
-            title="Roles We Are Excited About"
-            subtitle="These are the positions we are most actively hiring for right now."
-          />
-          <div className="grid gap-6 md:grid-cols-2">
-            {featuredJobs.map((job) => (
-              <JobCard key={job.id} job={job} />
-            ))}
-          </div>
-        </PageSection>
-      )}
-
-      {/* All other jobs grouped by department */}
-      {otherJobs.length > 0 && (
+      {/* Every open role, in one list. Featured ones keep their badge and sort
+          to the top of their department rather than living in a separate
+          section above — which previously meant scrolling past a duplicate
+          block to reach the full list, and left the count in this section's
+          subtitle describing more roles than it actually rendered. */}
+      {jobs.length > 0 && (
         <div className="bg-muted/20">
           <PageSection>
             <SectionHeading
               title="All Open Positions"
               subtitle={`${jobs.length} open position${jobs.length !== 1 ? 's' : ''} across ${departments.length} department${departments.length !== 1 ? 's' : ''}`}
             />
-            <div className="space-y-12">
-              {departments
-                .filter((dept) => otherJobs.some((j) => j.department === dept))
-                .map((dept) => (
-                  <div key={dept}>
-                    <h3 className="mb-4 flex items-center gap-3 text-sm font-semibold uppercase tracking-widest text-muted-foreground">
-                      <Briefcase className="h-4 w-4" />
-                      {dept}
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs normal-case tracking-normal">
-                        {otherJobs.filter((j) => j.department === dept).length}
-                      </span>
-                    </h3>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      {otherJobs
-                        .filter((j) => j.department === dept)
-                        .map((job) => (
-                          <JobCard key={job.id} job={job} />
-                        ))}
-                    </div>
+            <div className="space-y-10">
+              {jobsByDept.map(({ dept, items }) => (
+                <div key={dept}>
+                  <h3 className="mb-4 flex items-center gap-3 text-sm font-semibold uppercase tracking-widest text-muted-foreground">
+                    <Briefcase className="h-4 w-4" />
+                    {dept}
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs normal-case tracking-normal">
+                      {items.length}
+                    </span>
+                  </h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {items.map((job) => (
+                      <JobCard key={job.id} job={job} />
+                    ))}
                   </div>
-                ))}
+                </div>
+              ))}
             </div>
           </PageSection>
         </div>
@@ -237,28 +244,32 @@ export default async function CareersPage() {
         </div>
       </PageSection>
 
-      {/* General application CTA */}
-      <div className="border-t border-border/50 bg-muted/30">
-        <PageSection tight>
-          <div className="flex flex-col items-center gap-4 text-center md:flex-row md:justify-between md:text-left">
-            <div>
-              <h3 className="text-lg font-semibold text-foreground">
-                Do not see a role that fits?
-              </h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Send your resume and a short note about what you would like to build.
-              </p>
+      {/* General application CTA — hidden when nothing is open, because the
+          empty state above already makes exactly this ask and two identical
+          "send your resume" prompts on one short page reads as a bug. */}
+      {jobs.length > 0 && (
+        <div className="border-t border-border/50 bg-muted/30">
+          <PageSection tight>
+            <div className="flex flex-col items-center gap-4 text-center md:flex-row md:justify-between md:text-left">
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">
+                  Do not see a role that fits?
+                </h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Send your resume and a short note about what you would like to build.
+                </p>
+              </div>
+              <a
+                href="mailto:careers@laundrease.in"
+                className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-5 py-2.5 text-sm font-semibold text-primary transition-all hover:bg-primary hover:text-primary-foreground"
+              >
+                careers@laundrease.in
+                <ArrowRight className="h-4 w-4" />
+              </a>
             </div>
-            <a
-              href="mailto:careers@laundrease.in"
-              className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-primary/30 bg-primary/10 px-5 py-2.5 text-sm font-semibold text-primary transition-all hover:bg-primary hover:text-primary-foreground"
-            >
-              careers@laundrease.in
-              <ArrowRight className="h-4 w-4" />
-            </a>
-          </div>
-        </PageSection>
-      </div>
+          </PageSection>
+        </div>
+      )}
     </FooterPageLayout>
   )
 }
