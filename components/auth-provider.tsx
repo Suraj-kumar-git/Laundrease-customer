@@ -82,6 +82,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const pathname = usePathname()
   const hasCheckedOnce = useRef(false)
+  // Set once the server has confirmed there's no session. Combined with an
+  // empty "user" key in localStorage it means "definitely a guest", which lets
+  // checkAuth skip re-asking on every client-side navigation. Cleared again as
+  // soon as a check succeeds.
+  const knownAnonymous = useRef(false)
 
   // The refresh-token endpoint rotates the refresh token on every call and
   // treats any mismatch as token theft, wiping ALL of the user's sessions
@@ -141,12 +146,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const checkAuth = useCallback(async () => {
+    // A stored user is our only client-visible evidence that a session ever
+    // existed — the tokens themselves are httpOnly. It gates both the silent
+    // refresh and the re-check below.
+    let stored: string | null = null
+    try { stored = localStorage.getItem("user") } catch { /* storage blocked */ }
+
+    // Nothing to verify: a visitor we've already confirmed is signed out, with
+    // no stored session. Public pages are shared between signed-in and
+    // signed-out visitors, so the FIRST /me is genuinely needed (the header has
+    // to choose between "Log In / Sign Up" and the account menu + cart) — but
+    // repeating it on every client-side navigation just to be told "still
+    // anonymous" is pure traffic.
+    //
+    // Self-healing on login: signing in (here or in another tab) writes the
+    // "user" key, so `stored` turns truthy and normal re-validation resumes
+    // without any extra listener.
+    if (knownAnonymous.current && !stored) {
+      setIsLoading(false)
+      hasCheckedOnce.current = true
+      return
+    }
+
     // Optimistic: render header immediately with stored data (first run only)
-    if (!hasCheckedOnce.current) {
-      try {
-        const stored = localStorage.getItem("user")
-        if (stored) setUser(JSON.parse(stored))
-      } catch { /* corrupt JSON — ignore */ }
+    if (!hasCheckedOnce.current && stored) {
+      try { setUser(JSON.parse(stored)) } catch { /* corrupt JSON — ignore */ }
     }
 
     // Authoritative: always verify with server and sync verification flags
@@ -156,7 +180,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // The access token may simply have expired while the (still-valid)
       // refresh token sat untouched — try a silent refresh and re-check
       // once before treating this as a real logout.
-      if (!res.ok && (res.status === 401 || res.status === 403) && supportsSilentRefresh) {
+      //
+      // Gated on `stored`: with no prior session there is nothing to rotate, so
+      // for an anonymous visitor this only ever fired a refresh-token request
+      // that was guaranteed to fail, then a second /me to confirm it. That's
+      // the paired me → refresh-token traffic seen on public pages.
+      if (!res.ok && (res.status === 401 || res.status === 403) && supportsSilentRefresh && stored) {
         const refreshed = await tryRefresh()
         if (refreshed) {
           res = await fetch(`/api/${role}/auth/me`, { credentials: "include" })
@@ -176,11 +205,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // visible flash of re-fetched/re-rendered content on every page.
           setUser(prev => (prev && usersEquivalent(prev, serverUser)) ? prev : serverUser)
           localStorage.setItem("user", JSON.stringify(serverUser))
+          knownAnonymous.current = false
         }
       } else if (res.status === 401 || res.status === 403) {
         // Genuinely unauthenticated — token invalid/expired/revoked
         // (and, where supported, the refresh attempt above didn't help either)
         clearAuthState()
+        knownAnonymous.current = true
       }
       // Any other status (500, 502, 503, etc.) is a server/infra hiccup, not
       // proof the session is invalid — keep the optimistic state so a
