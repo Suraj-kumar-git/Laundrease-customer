@@ -282,11 +282,11 @@ export default async function RootLayout({
                             Privacy Policy
                           </Link>
                         </li>
-                        {/* <li>
-                          <Link href="#" className="text-muted-foreground transition-colors hover:text-primary">
-                            Cookie Policy
+                        <li>
+                          <Link href="/customer/faq" className="text-muted-foreground transition-colors hover:text-primary">
+                            FAQ
                           </Link>
-                        </li> */}
+                        </li>
                       </ul>
                     </div>
                     <div>

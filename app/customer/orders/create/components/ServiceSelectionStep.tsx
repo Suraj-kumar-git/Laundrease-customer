@@ -784,8 +784,24 @@ export function ServiceSelectionStep({
     bumpCartIcon()
   }, [bumpCartIcon])
 
+  // "By Piece" is the platform-wide default tab. Only start on "By Weight"
+  // when prefetchedServices already confirms (synchronously, at mount) that
+  // this provider has zero per-unit products — otherwise default to piece.
+  // On the fresh step-1→step-2 flow, prefetchedServices is populated before
+  // this component ever mounts, so that check is reliable. On cart resume
+  // (Continue Order from the cart, jumping straight to step 2),
+  // prefetchedServices starts as empty arrays and this component fetches its
+  // own catalog data after mount — defaulting to 'per_kg' in that "don't
+  // know yet" case was the bug: every resumed provider that also offers
+  // wash-fold services never got corrected back to 'per_unit' once the real
+  // data loaded, because the correction effect below only fires when a
+  // provider turns out to have NO kg services at all.
   const defaultTab = useMemo(
-    () => (prefetchedServices?.per_unit_products && prefetchedServices.per_unit_products.length > 0 ? 'per_unit' : 'per_kg') as 'per_kg' | 'per_unit',
+    () => (
+      prefetchedServices &&
+      prefetchedServices.per_unit_products.length === 0 &&
+      prefetchedServices.per_kg_services.length > 0
+    ) ? 'per_kg' : 'per_unit' as 'per_kg' | 'per_unit',
     []
   )
   const [activeTab, setActiveTab] = useState<'per_kg' | 'per_unit'>(defaultTab)

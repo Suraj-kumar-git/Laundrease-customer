@@ -18,6 +18,17 @@ export function isValidIndianMobile(input: string): boolean {
   return normalizeIndianMobile(input) !== null
 }
 
+// Accepts "+91 98765 43210", "919876543210", "09876543210", or a bare 10-digit
+// number → keeps just the bare 10 digits, which is all a phone field ever
+// stores while the user is still typing (format is enforced on submit via
+// isValidIndianMobile, not here — this only caps what's typeable).
+export function toTenDigits(raw: string): string {
+  const digits = raw.replace(/\D/g, '')
+  if (digits.length > 10 && digits.startsWith('91')) return digits.slice(2, 12)
+  if (digits.length === 11 && digits.startsWith('0')) return digits.slice(1)
+  return digits.slice(0, 10)
+}
+
 // ─── Vehicle registration number ──────────────────────────────────────────────
 // Standard: MH12AB1234 (state + RTO + series + 4 digits, series optional on old plates)
 // Bharat series: 22BH1234AB
