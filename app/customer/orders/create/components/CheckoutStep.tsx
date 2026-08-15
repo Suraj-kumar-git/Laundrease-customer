@@ -6,6 +6,7 @@ import {
   Shield, ChevronDown, ChevronUp, AlertCircle, Zap, Edit3, Lock, Truck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useCart } from '@/components/cart-provider'
 import type { SelectedService } from '../../types'
 import { AppliedCoupon, GatewayInfo, OrderFlowState } from '@/types/order-types'
 import { ProductIcon } from '@/components/customer/ProductIcon'
@@ -48,6 +49,18 @@ export function CheckoutStep({
 }: CheckoutStepProps) {
   const currentIsExpress    = orderState.selected_services.some(s => s.is_express)
   const hasAnyExpressCapable= orderState.selected_services.some(s => s.express_multiplier > 1)
+
+  // Hide the header cart button for as long as this step is on screen. The
+  // drawer edits the SERVER cart, but this screen renders — and submits — the
+  // flow's own React state, so an edit made there wouldn't show up here and
+  // the removed item would still be ordered. "Edit services" below is the
+  // way to change the order at this point. Restored on unmount, so every
+  // other step of the flow keeps its cart icon.
+  const { setCartIconHidden } = useCart()
+  useEffect(() => {
+    setCartIconHidden(true)
+    return () => setCartIconHidden(false)
+  }, [setCartIconHidden])
 
   const subtotal = useMemo(
     () => orderState.selected_services.reduce((s, i) => s + i.line_total, 0),
@@ -161,15 +174,38 @@ export function CheckoutStep({
       .then(r => r.json()).then(j => { if (j.success) setGatewayInfo(j.data) }).catch(() => {})
       .finally(() => setGatewayLoading(false))
 
-    // Pre-fill GSTIN from the saved profile, unless this checkout already has
-    // one set (e.g. navigating back to this step after entering it).
-    if (!orderState.customer_gstin) {
-      fetch('/api/customer/profile', { credentials: 'include' })
-        .then(r => r.json())
-        .then(j => { if (j.success && j.data.gstin) { setGstin(j.data.gstin); onCustomerGstin(j.data.gstin) } })
-        .catch(() => {})
-    }
+    // GSTIN-on-checkout is disabled for now (UI commented out below) — see
+    // that comment for why. Keeping this prefill active while the field is
+    // hidden would silently attach a saved GSTIN to orders without the
+    // customer ever seeing/confirming it, so it's commented out too.
+    // // Pre-fill GSTIN from the saved profile, unless this checkout already
+    // // has one set (e.g. navigating back to this step after entering it).
+    // if (!orderState.customer_gstin) {
+    //   fetch('/api/customer/profile', { credentials: 'include' })
+    //     .then(r => r.json())
+    //     .then(j => { if (j.success && j.data.gstin) { setGstin(j.data.gstin); onCustomerGstin(j.data.gstin) } })
+    //     .catch(() => {})
+    // }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- Default wallet usage (once, after the balance loads) ----
+  // `useWallet` started false and the Place Order button only renders once a
+  // payment source is chosen, so arriving here showed no way to pay at all
+  // until something was tapped — even when the wallet covered the whole order.
+  //
+  // The ref makes this run exactly once. After that the toggle is the
+  // customer's own choice and must never be overwritten by a re-render.
+  //
+  // The payment METHOD default lives further down, with the availability
+  // checks it depends on.
+  const walletDefaulted = useRef(false)
+  useEffect(() => {
+    if (walletDefaulted.current || walletLoading) return
+    walletDefaulted.current = true
+    // Any balance at all is worth spending first — a partial balance still
+    // reduces what's charged to a card, and the remainder UI handles the rest.
+    if ((walletInfo?.balance ?? 0) > 0) setUseWallet(true)
+  }, [walletLoading, walletInfo])
 
   // ---- Provider availability (re-check on checkout mount) -------
   // A resumed cart can carry a provider selected days ago — re-verify here
@@ -336,7 +372,14 @@ export function CheckoutStep({
     ? Math.min(walletInfo.balance, grossTotal) : 0
   const walletContributionRounded = Math.round(walletContribution * 100) / 100
   const amountAfterWallet  = Math.max(0, Math.round((grossTotal - walletContributionRounded) * 100) / 100)
-  const walletCoversAll    = walletContributionRounded >= grossTotal
+  // Derived from the already-rounded remainder rather than comparing the
+  // contribution against the raw grossTotal. grossTotal carries float dust from
+  // summing fee lines (e.g. 307.89000000000004), and walletContributionRounded
+  // is snapped to paise — so `rounded >= raw` came out FALSE for a wallet that
+  // covered the order exactly. The screen then offered to collect the
+  // "remaining ₹0.00" via another method, and Place Order stayed hidden until
+  // one was tapped.
+  const walletCoversAll    = walletContributionRounded > 0 && amountAfterWallet <= 0
   const onlinePaymentAvailable = Boolean(
     gatewayInfo?.gateway_configured && ['payu', 'cashfree', 'razorpay'].includes(gatewayInfo.provider)
   )
@@ -347,6 +390,43 @@ export function CheckoutStep({
   )
   const canPlace = providerAvailable &&
     (walletCoversAll || selectedMethod === 'cod' || (selectedMethod === 'online' && onlinePaymentAvailable))
+
+  // ---- Keep the chosen method in step with what's actually offered ----
+  // Declared here, below the availability values, because it reads them.
+  //
+  // Availability is derived from the LIVE total, and the total changes on this
+  // very step — the Express toggle and coupon apply/remove both move it. So a
+  // COD selection can stop qualifying after it was made: its button unmounts
+  // (it's gated on codAvailable) but selectedMethod stayed 'cod', leaving
+  // Place Order enabled for a method no longer on offer. The order then failed
+  // server-side with COD_LIMIT_EXCEEDED — correctly rejected, but as a dead-end
+  // toast rather than the choice quietly correcting itself.
+  //
+  // This also makes the first-load default cap-aware: preselecting straight
+  // from `cod_enabled` would have picked COD on a gateway-less setup even when
+  // the order was over the limit.
+  const methodDefaulted = useRef(false)
+  useEffect(() => {
+    if (walletLoading || gatewayLoading) return
+
+    if (selectedMethod === 'cod' && !codAvailable) {
+      setSelectedMethod(onlinePaymentAvailable ? 'online' : null)
+      return
+    }
+    if (selectedMethod === 'online' && !onlinePaymentAvailable) {
+      setSelectedMethod(codAvailable ? 'cod' : null)
+      return
+    }
+
+    // First pass only, so Place Order is reachable on arrival. Guarded by the
+    // ref so that deliberately deselecting a method (tapping the selected one
+    // toggles it back off) isn't immediately undone.
+    if (!methodDefaulted.current && selectedMethod === null) {
+      methodDefaulted.current = true
+      if (onlinePaymentAvailable) setSelectedMethod('online')
+      else if (codAvailable) setSelectedMethod('cod')
+    }
+  }, [walletLoading, gatewayLoading, selectedMethod, codAvailable, onlinePaymentAvailable])
 
   // The order is always created first via onSubmit (cod/wallet/online alike).
   // For 'online', the parent (page.tsx) creates the order, then calls the
@@ -512,7 +592,10 @@ export function CheckoutStep({
           )}
         </div>
 
-        {/* Customer GSTIN — optional, for B2B orders claiming ITC */}
+        {/* Customer GSTIN — parked for later. Commented out (not deleted) so
+            it's a quick re-enable when this is ready to ship; the matching
+            auto-prefill effect further up is commented out for the same
+            reason.
         <div className="rounded-xl border border-border/50 bg-card p-3">
           <div className="mb-1.5 flex items-center justify-between">
             <div className="flex items-center gap-1.5">
@@ -545,6 +628,7 @@ export function CheckoutStep({
             <p className="text-sm text-muted-foreground">{gstin || <span className="italic">None</span>}</p>
           )}
         </div>
+        */}
 
         {/* Price breakdown */}
         <div className="rounded-xl border border-border/50 bg-card p-3">
@@ -957,7 +1041,7 @@ export function CheckoutStep({
 
         <p className="text-center text-xs text-muted-foreground">
           By placing this order, you agree to our{' '}
-          <a href="/terms-of-service" className="text-primary hover:underline">Terms of Service</a>
+          <a href="/customer/terms-of-service" className="text-primary hover:underline">Terms of Service</a>
         </p>
       </div>
     </div>

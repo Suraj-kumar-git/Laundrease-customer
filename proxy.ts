@@ -18,6 +18,7 @@ const PUBLIC_URLs = [
   '/customer',
   '/customer/about',
   '/customer/careers',
+  '/customer/compare',
   '/customer/careers/*',
   '/customer/community-guidelines',
   '/customer/faq',

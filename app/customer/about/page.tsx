@@ -156,15 +156,12 @@ function MissionSection({ block }: { block: PageContentBlock }) {
         </div>
         {/* Decorative panel */}
         <div className="relative hidden md:block">
-          <div className="aspect-square max-w-sm rounded-3xl bg-gradient-to-br from-primary/20 to-primary/5 p-8">
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center">
-                <div className="mb-4 text-7xl">🧺</div>
-                <p className="text-sm font-medium text-muted-foreground">
-                  Making laundry the least of your worries
-                </p>
-              </div>
-            </div>
+          <div className="aspect-square max-w-sm overflow-hidden rounded-3xl">
+            <img
+              src="/laundrease-about.png"
+              alt="Laundry basket with freshly folded clothes"
+              className="h-full w-full object-cover"
+            />
           </div>
           <div className="absolute -bottom-4 -right-4 h-32 w-32 rounded-2xl bg-primary/10" />
           <div className="absolute -top-4 -left-4 h-20 w-20 rounded-2xl bg-primary/8" />
@@ -261,7 +258,7 @@ export default async function AboutUsPage() {
                 Ready to reclaim your time?
               </h2>
               <p className="mt-1 text-primary-foreground/80">
-                Join thousands of happy customers across Pune.
+                Join thousands of happy customers.
               </p>
             </div>
             <GuestOnlyCta className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-primary shadow-lg transition-all hover:-translate-y-0.5 hover:bg-white/90 hover:shadow-xl" />

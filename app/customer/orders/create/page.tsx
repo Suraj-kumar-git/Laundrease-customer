@@ -129,6 +129,54 @@ function ConfirmClearModal({
   )
 }
 
+// ---- Switch-provider confirm popup ------------------------------------------
+// Deep-linking from the dashboard to a DIFFERENT provider than the one already
+// in the cart used to wipe that cart silently — the customer lost their
+// selections with no warning. Now they choose: clear and start with the new
+// provider, or keep the cart and go back. A cart can only ever hold one
+// provider's services, so there's no "merge" option to offer.
+function SwitchProviderModal({
+  previousProviderName, itemCount, onConfirm, onCancel, loading,
+}: {
+  previousProviderName?: string | null; itemCount: number
+  onConfirm: () => void; onCancel: () => void; loading: boolean
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center p-4 sm:items-center">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={onCancel} className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <motion.div
+        initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+        className="relative w-full max-w-md rounded-3xl bg-background p-6 shadow-2xl"
+      >
+        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-500/10">
+          <AlertCircle className="h-7 w-7 text-amber-500" />
+        </div>
+        <h2 className="text-lg font-bold text-foreground">Start a new cart?</h2>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Your cart has {itemCount} item{itemCount !== 1 ? 's' : ''}
+          {previousProviderName ? <> from <span className="font-semibold text-foreground">{previousProviderName}</span></> : null}.
+          {' '}A cart can only hold one provider at a time, so continuing here will clear it.
+        </p>
+
+        <div className="mt-5 space-y-3">
+          <button type="button" onClick={onConfirm} disabled={loading}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-destructive px-5 py-3.5 text-sm font-semibold text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50">
+            {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : <Trash2 className="h-5 w-5" />}
+            Clear cart &amp; continue
+          </button>
+          <button type="button" onClick={onCancel} disabled={loading}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border/50 px-5 py-3.5 text-sm font-medium text-foreground hover:bg-muted disabled:opacity-50">
+            <ArrowLeft className="h-5 w-5" />
+            Keep my cart
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  )
+}
+
 // ---- Helpers ----------------------------------------------------------------
 
 // The wizard pushes service selections straight to the server cart (saveCartStep)
@@ -176,8 +224,21 @@ function cartToFlowState(cartData: any, items: any[]): Partial<OrderFlowState> {
     express_multiplier:item.express_multiplier,
   }))
 
+  // Clamp the resumed step to what the cart can actually satisfy. The pricing
+  // calculator now saves carts at step 3 (provider + address + services all
+  // settled, so only the pickup slot is left), but a saved address can be
+  // deleted, or a provider deactivated, between saving and resuming. Steps 2+
+  // render nothing without a provider and can't complete without an address,
+  // so falling back to step 1 collects whatever went missing instead of
+  // showing a blank screen.
+  const savedStep = cart.current_step ?? 1
+  const step =
+    savedStep >= 2 && !provider ? 1 :
+    savedStep >= 3 && !address  ? 1 :
+    savedStep
+
   return {
-    step:              cart.current_step ?? 1,
+    step,
     pickup_address:    address ?? undefined,
     delivery_address:  address ?? undefined,
     selected_provider: provider ?? undefined,
@@ -205,14 +266,6 @@ function PageContent() {
   // list for a DIFFERENT address, silently falling back to the manual
   // picker. Passing the exact address id removes the guesswork.
   const preferredAddressId = Number(searchParams.get('address')) || null
-  // ?reorder=<public_id> — set by the dashboard's "Book again" button. Once
-  // Step 1 resolves the same provider (via preferredProviderId above), this
-  // order's items are fetched and pre-selected on the services step instead
-  // of leaving it empty — "book again" that only re-picked the provider and
-  // still made the customer rebuild the whole cart from scratch wasn't
-  // actually saving them anything.
-  const reorderOrderId = searchParams.get('reorder')
-  const reorderAppliedRef = useRef(false)
   const { user, isLoading: authLoading } = useAuth()
   const { toast } = useToast()
   const { clear: clearGuestCart, syncFromServer } = useCart()
@@ -281,9 +334,21 @@ function PageContent() {
   const [existingCartMeta, setExistingCartMeta] = useState<{
     step: number; providerName?: string | null; itemCount: number
   } | null>(null)
+  // Deep-linked to a different provider than the cart's — pending decision.
+  const [switchProviderMeta, setSwitchProviderMeta] = useState<{
+    providerName?: string | null; itemCount: number
+  } | null>(null)
 
   // Stored for resuming after modal decision
   const pendingCartData = useRef<any>(null)
+  // Set only when the switch-provider prompt was raised mid-flow (Step 1
+  // provider change) rather than on mount by a ?provider= deep link — holds
+  // the Step 1 selections to replay once the customer confirms, and doubles
+  // as the flag telling the modal handlers which of the two paths they're on.
+  const pendingStep1 = useRef<{
+    address: Address; delivery: Address; provider: LaundryProvider
+    prefetched: { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }
+  } | null>(null)
   // One-shot guard: this effect depends on [user, resumeMode], and `user`
   // can still legitimately flip from null -> the real user object once auth
   // resolves — but once we've actually run the cart check, a duplicate
@@ -332,15 +397,19 @@ function PageContent() {
           setState(prev => ({ ...prev, ...restored }))
           setCartLoading(false)
         } else if (preferredProviderId) {
-          // Deep-linked to a DIFFERENT provider (or the stale cart never
-          // got a provider) — the customer's explicit "Create order" click
-          // is a clear, fresh intent that should win over an old/abandoned
-          // cart, not get intercepted by a "resume?" popup. Clear it and
-          // fall through exactly like the no-existing-cart path, so Step 1's
-          // own auto-advance logic (AddressProviderStep) takes it from here.
-          await fetch('/api/customer/cart', { method: 'DELETE', credentials: 'include' })
-          pendingCartData.current = null
-          setCartLoading(false)
+          // Deep-linked to a DIFFERENT provider (or the stale cart never got
+          // a provider). A cart holds one provider's services only, so
+          // continuing means losing this one — ask first rather than wiping
+          // it silently. cartLoading deliberately stays true so Step 1 never
+          // renders (and never auto-advances into the new provider) behind
+          // the modal while the decision is still pending; the loading
+          // branch of the render tree shows this modal on top of its
+          // spinner. Confirming resumes exactly the old behavior: delete the
+          // cart and fall through like the no-existing-cart path.
+          setSwitchProviderMeta({
+            providerName: cart.provider?.business_name,
+            itemCount:    json.data.item_count,
+          })
         } else {
           // Landed here directly — show popup
           setExistingCartMeta({
@@ -369,6 +438,38 @@ function PageContent() {
   const handleStartNew = () => {
     setShowExistingCart(false)
     setShowConfirmClear(true)
+  }
+
+  // Confirmed: drop the old provider's cart. Then either release the mount
+  // gate so Step 1 can auto-advance into the deep-linked provider, or — if
+  // the prompt came from a mid-flow Step 1 change — replay that advance.
+  const handleConfirmSwitchProvider = async () => {
+    setClearingCart(true)
+    try {
+      await fetch('/api/customer/cart', { method: 'DELETE', credentials: 'include' })
+      pendingCartData.current = null
+      syncFromServer([])
+      setState(prev => ({ ...prev, selected_services: [] }))
+    } catch { /* silent */ }
+    finally {
+      setClearingCart(false)
+      setSwitchProviderMeta(null)
+      const pending = pendingStep1.current
+      pendingStep1.current = null
+      if (pending) await commitStep1(pending.address, pending.delivery, pending.provider, pending.prefetched)
+      else setCartLoading(false)
+    }
+  }
+
+  // Declined — the cart is left exactly as it was. From a deep link there's
+  // nothing mounted behind the modal, so go back where the "Create order"
+  // click came from; mid-flow they're already on Step 1 with their cart
+  // intact, so just close and let them re-pick.
+  const handleCancelSwitchProvider = () => {
+    const wasMidFlow = pendingStep1.current != null
+    pendingStep1.current = null
+    setSwitchProviderMeta(null)
+    if (!wasMidFlow) router.push('/customer/dashboard')
   }
 
   const handleConfirmClear = async () => {
@@ -406,56 +507,50 @@ function PageContent() {
   }, [])
 
   // ---- Step handlers -------------------------------------------------------
-  const handleStep1Complete = useCallback(async (
+  // The actual Step 1 -> Step 2 advance, split out from the guard below so
+  // the confirm-switch modal can invoke it once the customer has agreed to
+  // drop a cart belonging to a different provider.
+  const commitStep1 = useCallback(async (
     address: Address, delivery: Address, provider: LaundryProvider,
     prefetched: { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }
   ) => {
     setPrefetchedServices(prefetched)
 
-    // "Book again" reorder seed — fetched (and awaited) BEFORE step flips to
-    // 2, so ServiceSelectionStep mounts fresh with these already present in
-    // its initialSelected prop. It seeds its own selection state once, on
-    // mount, from that prop — updating selected_services after the fact
-    // wouldn't be picked up, so this can't be a fire-and-forget effect.
-    let reorderSeed: SelectedService[] | null = null
-    if (reorderOrderId && !reorderAppliedRef.current) {
-      reorderAppliedRef.current = true
-      try {
-        const res  = await fetch(`/api/customer/orders/${reorderOrderId}`, { credentials: 'include' })
-        const json = await res.json()
-        if (json.success) {
-          reorderSeed = (json.data.items ?? []).map((item: any) => {
-            const isPerKg = item.weight_kg != null
-            return {
-              type:               isPerKg ? 'per_kg' : 'per_unit',
-              service_id:         item.service_id,
-              service_name:       item.service_name,
-              product_type_id:    isPerKg ? null : item.product_type_id,
-              product_type_name:  item.product_type_name ?? '',
-              weight_kg:          isPerKg ? item.weight_kg : 0,
-              quantity:           isPerKg ? 0 : item.quantity,
-              unit_price:         item.unit_price,
-              mrp:                null,
-              is_express:         !!item.is_express,
-              express_multiplier: item.express_multiplier ?? 1,
-              line_total:         item.line_total,
-              icon:               item.icon,
-            } as SelectedService
-          })
-        }
-      } catch {
-        // Reorder seed is a convenience, not a requirement — fall through
-        // to an empty services step the customer fills in manually.
-      }
-    }
-
     setState(prev => ({
       ...prev, step: 2, pickup_address: address, delivery_address: delivery, selected_provider: provider,
-      selected_services: reorderSeed && reorderSeed.length > 0 ? reorderSeed : prev.selected_services,
     }))
     const draftNum = await saveCartStep(2, { providerId: provider.id, addressId: address.id })
     if (draftNum) setState(prev => ({ ...prev, draft_order_number: draftNum }))
-  }, [saveCartStep, reorderOrderId])
+  }, [saveCartStep])
+
+  const handleStep1Complete = useCallback(async (
+    address: Address, delivery: Address, provider: LaundryProvider,
+    prefetched: { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }
+  ) => {
+    // A cart only ever holds one provider's services. Picking a different
+    // provider here (entered via the bottom-nav "New Order", so no
+    // ?provider= deep link ran the equivalent check on mount) would strand
+    // the existing selections against the wrong provider — so confirm first,
+    // exactly like the deep-link path does. Read the cart fresh rather than
+    // trusting local state: the customer may have resumed, backed up from
+    // Step 2, or changed provider more than once in this session.
+    try {
+      const res  = await fetch('/api/customer/cart', { credentials: 'include' })
+      const json = await res.json()
+      const cartProviderId = json?.data?.cart?.provider?.id
+      if (json?.success && json.data?.has_items && cartProviderId != null &&
+          Number(cartProviderId) !== Number(provider.id)) {
+        pendingStep1.current = { address, delivery, provider, prefetched }
+        setSwitchProviderMeta({
+          providerName: json.data.cart.provider?.business_name,
+          itemCount:    json.data.item_count,
+        })
+        return
+      }
+    } catch { /* cart check is advisory — never block the flow on it */ }
+
+    await commitStep1(address, delivery, provider, prefetched)
+  }, [commitStep1])
 
   // Fired (debounced) on every add/remove/quantity change on the services
   // step, independent of clicking "Continue" — keeps the server cart (and
@@ -610,7 +705,26 @@ function PageContent() {
 
   // ---- Render states -------------------------------------------------------
   if (authLoading || cartLoading) {
-    return <div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+    // The switch-provider prompt lives here rather than in the main tree:
+    // cartLoading stays true until it's answered, so the wizard behind it
+    // never mounts Step 1 (and never auto-advances into the new provider)
+    // while the old cart is still on the server.
+    return (
+      <>
+        <div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
+        <AnimatePresence>
+          {switchProviderMeta && (
+            <SwitchProviderModal
+              previousProviderName={switchProviderMeta.providerName}
+              itemCount={switchProviderMeta.itemCount}
+              onConfirm={handleConfirmSwitchProvider}
+              onCancel={handleCancelSwitchProvider}
+              loading={clearingCart}
+            />
+          )}
+        </AnimatePresence>
+      </>
+    )
   }
   if (!user) return null
   if (confirmed && state.order_id && state.order_number) {
@@ -785,6 +899,18 @@ function PageContent() {
             loading={clearingCart}
           />
         )}
+        {/* Mid-flow provider change on Step 1. (The deep-link entry raises the
+            same modal from the loading branch above, before this tree ever
+            mounts — only one of the two can be on screen at a time.) */}
+        {switchProviderMeta && (
+          <SwitchProviderModal
+            previousProviderName={switchProviderMeta.providerName}
+            itemCount={switchProviderMeta.itemCount}
+            onConfirm={handleConfirmSwitchProvider}
+            onCancel={handleCancelSwitchProvider}
+            loading={clearingCart}
+          />
+        )}
       </AnimatePresence>
     </>
   )
@@ -806,7 +932,6 @@ function PageWithFreshMountPerDeepLink() {
     searchParams.get('provider') ?? '',
     searchParams.get('address') ?? '',
     searchParams.get('resume') ?? '',
-    searchParams.get('reorder') ?? '',
   ].join(':')
   return <PageContent key={mountKey} />
 }

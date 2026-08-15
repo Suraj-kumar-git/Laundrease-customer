@@ -14,6 +14,12 @@ import { FooterPageLayout, PageSection } from '@/components/layout/footer-page-l
 import { cn } from '@/lib/utils'
 import type { CustomerProfile } from '@/types/referral'
 
+// Account deletion is a manual, human-reviewed request rather than a
+// self-service delete, so it goes to the support inbox. Named once here
+// because the address appears twice below — in the mailto and in the
+// copy-it-yourself fallback — and those must never drift apart.
+const SUPPORT_EMAIL = 'support@laundrease.in'
+
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
 }
@@ -71,19 +77,19 @@ function ProfileAvatar({
 // ---- Editable field -----------------------------------------
 function EditableField({
   label, value, name, type = 'text', readonly = false,
-  icon: Icon, error, placeholder, onChange,
+  icon: Icon, error, placeholder, onChange, maxLength,
 }: {
   label: string; value: string; name: string; type?: string
   readonly?: boolean; icon: React.ComponentType<{ className?: string }>
   error?: string; placeholder?: string
-  onChange?: (val: string) => void
+  onChange?: (val: string) => void; maxLength?: number
 }) {
   return (
     <div>
       <label className="mb-1.5 block text-sm font-medium text-foreground">{label}</label>
       <div className="relative">
         <Icon className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input type={type} value={value} readOnly={readonly}
+        <input type={type} value={value} readOnly={readonly} maxLength={maxLength}
           placeholder={placeholder}
           onChange={(e) => onChange?.(e.target.value)}
           className={cn(
@@ -397,10 +403,14 @@ export default function ProfilePage() {
                 <div>
                   <EditableField label="Phone Number" name="phone" icon={Phone}
                     value={editing ? editData.phone : (profile.phone ?? '')}
-                    placeholder="+919876543210"
+                    placeholder="+919876543210" maxLength={13}
                     readonly={!editing || profile.phone_verified}
                     error={editErrors.phone}
-                    onChange={(v) => { setEditData((p) => ({ ...p, phone: v })); setEditErrors((p) => { const n = { ...p }; delete n.phone; return n }) }} />
+                    onChange={(v) => {
+                      const filtered = v.replace(/[^\d+]/g, '')
+                      setEditData((p) => ({ ...p, phone: filtered }))
+                      setEditErrors((p) => { const n = { ...p }; delete n.phone; return n })
+                    }} />
                   {profile.phone_verified && (
                     <p className="mt-1 text-xs text-muted-foreground">Phone number is verified and cannot be changed here. Contact support if you need to update it.</p>
                   )}
@@ -564,11 +574,35 @@ export default function ProfilePage() {
                 <p className="mb-4 text-sm text-muted-foreground">
                   Deleting your account is permanent and cannot be undone. All your orders, wallet balance, and data will be removed.
                 </p>
-                <a href="mailto:support@laundrease.in?subject=Account Deletion Request"
+                {/* Encoded with encodeURIComponent — the raw spaces this used
+                    to carry ("subject=Account Deletion Request") are invalid in
+                    a URL query, and handlers that don't repair them truncate
+                    the subject at the first space. The settings page already
+                    had the encoded form; these two now match. */}
+                <a href={
+                  `mailto:${SUPPORT_EMAIL}` +
+                  `?subject=${encodeURIComponent('Account Deletion Request')}` +
+                  `&body=${encodeURIComponent(
+                    `Please delete my Laundrease account.\n\nAccount email: ${profile.email}\n`
+                  )}`
+                }
                   className="inline-flex items-center gap-2 rounded-xl border border-destructive/30 px-4 py-2 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10">
                   <Trash2 className="h-4 w-4" />
                   Request Account Deletion
                 </a>
+
+                {/* A mailto: link does nothing at all on a device with no mail
+                    client registered — the browser attempts the navigation and
+                    silently cancels it, leaving a dead button and no way
+                    forward. Showing the address means the request is always
+                    completable, whatever the device is set up with. */}
+                <p className="mt-3 text-xs text-muted-foreground">
+                  If your mail app doesn&apos;t open, email{' '}
+                  <a href={`mailto:${SUPPORT_EMAIL}`} className="font-medium text-foreground underline underline-offset-2">
+                    {SUPPORT_EMAIL}
+                  </a>{' '}
+                  from your registered address.
+                </p>
               </div>
             )}
           </div>
