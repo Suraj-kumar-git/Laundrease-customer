@@ -22,6 +22,11 @@ export async function generateAndUploadDeliveryPayslip(payoutId: number): Promis
     pickup_count: number; delivery_count: number
     pickup_salary: string; delivery_salary: string; total_salary: string
     adjustments: string; adjustments_note: string | null
+    distance_pay: string; billable_km: string; slab_top_up: string
+    surge_pay: string; first_mile_pay: string
+    failed_trip_pay: string; failed_trip_count: number
+    volume_bonus: string
+    payout_rate_snapshot: { is_active?: boolean; per_km_rate?: number; minimum_billable_km?: number } | null
     status: string; payment_reference: string | null; paid_at: string | null
     full_name: string; pan_number: string | null
     bank_account_number: string | null; bank_ifsc_code: string | null
@@ -31,6 +36,11 @@ export async function generateAndUploadDeliveryPayslip(payoutId: number): Promis
             pmp.pickup_count, pmp.delivery_count,
             pmp.pickup_salary::TEXT, pmp.delivery_salary::TEXT, pmp.total_salary::TEXT,
             pmp.adjustments::TEXT, pmp.adjustments_note,
+            pmp.distance_pay::TEXT, pmp.billable_km::TEXT, pmp.slab_top_up::TEXT,
+            pmp.surge_pay::TEXT, pmp.first_mile_pay::TEXT,
+            pmp.failed_trip_pay::TEXT, pmp.failed_trip_count,
+            pmp.volume_bonus::TEXT,
+            pmp.payout_rate_snapshot,
             pmp.status, pmp.payment_reference, pmp.paid_at::TEXT,
             u.full_name, dp.pan_number,
             dp.bank_account_number, dp.bank_ifsc_code, dp.bank_account_holder_name
@@ -42,12 +52,60 @@ export async function generateAndUploadDeliveryPayslip(payoutId: number): Promis
   )
   if (!payout) throw new Error('Payout not found')
 
-  const breakdown =
-    `Pickups: ${payout.pickup_count} (₹${parseFloat(payout.pickup_salary).toFixed(2)}) · ` +
-    `Deliveries: ${payout.delivery_count} (₹${parseFloat(payout.delivery_salary).toFixed(2)})` +
-    (parseFloat(payout.adjustments) !== 0
-      ? ` · Adjustments: ₹${parseFloat(payout.adjustments).toFixed(2)}${payout.adjustments_note ? ` (${payout.adjustments_note})` : ''}`
-      : '')
+  const adjustments = parseFloat(payout.adjustments) || 0
+  const adjustmentsText = adjustments !== 0
+    ? ` · Adjustments: ₹${adjustments.toFixed(2)}${payout.adjustments_note ? ` (${payout.adjustments_note})` : ''}`
+    : ''
+
+  // Which pay model this payout was actually calculated under. The snapshot is
+  // the authority — distance_pay can legitimately be 0 (a partner who did no
+  // legs), and rows calculated before distance pay existed have no snapshot at
+  // all. Getting this wrong would print slab figures on a payslip whose total
+  // came from distance, so the numbers wouldn't add up for the partner.
+  const paidByDistance = payout.payout_rate_snapshot?.is_active === true
+
+  let breakdown: string
+
+  if (paidByDistance) {
+    const legs      = payout.pickup_count + payout.delivery_count
+    const distance  = parseFloat(payout.distance_pay) || 0
+    const km        = parseFloat(payout.billable_km) || 0
+    const topUp     = parseFloat(payout.slab_top_up) || 0
+    const rate      = payout.payout_rate_snapshot?.per_km_rate
+    const slabTotal = (parseFloat(payout.pickup_salary) || 0) + (parseFloat(payout.delivery_salary) || 0)
+
+    // Every earning component gets its own line. A partner asking "why this
+    // amount?" should find the answer here, not in a support ticket — and a
+    // component silently omitted reads as underpayment.
+    const parts = [
+      `${payout.pickup_count} pickups + ${payout.delivery_count} deliveries = ${legs} legs`,
+      `${km.toFixed(2)} km billable${rate != null ? ` @ ₹${rate}/km` : ''} = ₹${distance.toFixed(2)}`,
+    ]
+
+    const surge     = parseFloat(payout.surge_pay) || 0
+    const firstMile = parseFloat(payout.first_mile_pay) || 0
+    const failedPay = parseFloat(payout.failed_trip_pay) || 0
+    const bonus     = parseFloat(payout.volume_bonus) || 0
+
+    if (surge > 0)     parts.push(`Peak-hour bonus: ₹${surge.toFixed(2)}`)
+    if (firstMile > 0) parts.push(`First-mile allowance: ₹${firstMile.toFixed(2)}`)
+    if (failedPay > 0) {
+      parts.push(
+        `Failed-trip pay (${payout.failed_trip_count} attempt${payout.failed_trip_count === 1 ? '' : 's'}): ₹${failedPay.toFixed(2)}`
+      )
+    }
+    if (bonus > 0)     parts.push(`Volume bonus: ₹${bonus.toFixed(2)}`)
+    if (topUp > 0) {
+      parts.push(`Monthly minimum top-up: ₹${topUp.toFixed(2)} (guaranteed ₹${slabTotal.toFixed(2)})`)
+    }
+
+    breakdown = parts.join(' · ') + adjustmentsText
+  } else {
+    breakdown =
+      `Pickups: ${payout.pickup_count} (₹${parseFloat(payout.pickup_salary).toFixed(2)}) · ` +
+      `Deliveries: ${payout.delivery_count} (₹${parseFloat(payout.delivery_salary).toFixed(2)})` +
+      adjustmentsText
+  }
 
   const data: PayslipData = {
     staffName: payout.full_name,

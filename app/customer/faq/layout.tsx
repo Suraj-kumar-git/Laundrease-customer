@@ -1,14 +1,14 @@
 // app/customer/faq/layout.tsx
-// page.tsx in this segment is 'use client' (search/filter UI) and can't
-// export metadata itself — this sibling server layout carries metadata plus
-// FAQPage structured data, built from the same faqData the page renders.
-// Imported from ./faq-data (a plain, non-'use client' module) rather than
-// from page.tsx directly — importing a named export from a client-component
-// module into a server component crosses the RSC client/server boundary and
-// isn't guaranteed to behave as a plain value.
+// Carries the segment's metadata plus FAQPage structured data.
+//
+// The JSON-LD is built from getFaqs() — the same loader page.tsx renders from
+// — so the questions Google is told about are always the questions actually on
+// the page. It used to be built from the static faqData, which meant the
+// structured data kept advertising hardcoded questions regardless of what the
+// CMS held.
 
 import type { Metadata } from 'next'
-import { faqData } from './faq-data'
+import { getFaqs } from './get-faqs'
 
 export const metadata: Metadata = {
   title: 'Frequently Asked Questions | Laundrease',
@@ -22,17 +22,18 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image', title: 'Frequently Asked Questions | Laundrease' },
 }
 
-const faqJsonLd = {
-  '@context': 'https://schema.org',
-  '@type': 'FAQPage',
-  mainEntity: faqData.map((item) => ({
-    '@type': 'Question',
-    name: item.question,
-    acceptedAnswer: { '@type': 'Answer', text: item.answer },
-  })),
-}
+export default async function FaqLayout({ children }: { children: React.ReactNode }) {
+  const items = await getFaqs()
+  const faqJsonLd = {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: items.map((item) => ({
+      '@type': 'Question',
+      name: item.question,
+      acceptedAnswer: { '@type': 'Answer', text: item.answer },
+    })),
+  }
 
-export default function FaqLayout({ children }: { children: React.ReactNode }) {
   return (
     <>
       <script

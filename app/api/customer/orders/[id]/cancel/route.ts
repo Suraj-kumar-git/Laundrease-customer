@@ -6,7 +6,10 @@
 // CANCELLABLE_STATUSES — see app/api/customer/orders/[id]/route.ts).
 //
 // Refunds work off the completed payment rows (not orders.payment_status),
-// split by source — see getRefundBreakdown:
+// split by source, net of non-refundable order fees — see getCancellationRefund:
+//  - Order fees (delivery/platform/convenience fee, GST on fees) are never
+//    refunded; only the subtotal (GST on subtotal already folded in)
+//    refunds. Delivery fee refunds too if cancelled before pickup.
 //  - The wallet-paid portion (wallet-only or the wallet slice of a
 //    wallet+online / wallet+COD order) can only go back to the wallet.
 //  - The gateway-paid portion (PayU/Cashfree) goes to the wallet by default,

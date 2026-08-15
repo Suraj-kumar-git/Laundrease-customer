@@ -68,7 +68,16 @@ export async function GET(req: NextRequest) {
          ci.quantity,
          ci.weight_kg,
          pt.name           AS product_type_name,
-         pt.pricing_model,
+         -- Ground truth for whether THIS cart line is per-kg or per-unit is
+         -- its own weight_kg column (NULL for per-unit, set for per-kg) —
+         -- never pt.pricing_model. That catalog flag just describes the
+         -- product type in the abstract and is admin-editable independently
+         -- of how items actually get added to a cart; trusting it here mis-
+         -- labelled every per-unit line added under a product type whose
+         -- catalog entry was (incorrectly) marked per_kg, which undercounts
+         -- it in the header badge/cart-drawer total (both sum by quantity
+         -- only for lines they believe are per_unit).
+         CASE WHEN ci.weight_kg IS NOT NULL THEN 'per_kg' ELSE 'per_unit' END AS pricing_model,
          pt.icon,
          cis.id            AS service_item_id,
          cis.service_id,
