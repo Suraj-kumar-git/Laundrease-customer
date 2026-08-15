@@ -1033,8 +1033,16 @@ export const InvoiceDocument: React.FC<InvoiceDocumentProps> = ({ data, ...docPr
           ))
         )}
 
-        {/* ---- Totals and Tax Breakdown ---- */}
-        <View style={s.totalsWrap}>
+        {/* ---- Totals and Tax Breakdown ----
+             wrap={false} keeps this whole row on one page. Left to itself,
+             react-pdf splits the row and continues only the overflowing column
+             on the next page — and by then the fixed-width totals box beside it
+             has already been consumed, so the tax table's `flex: 1` stretches
+             the leftover rows across the full content width instead of the
+             half-width column they had on page one. Moving the block intact
+             avoids that, and also stops a lone "Total Tax" row being orphaned
+             away from the table it totals. */}
+        <View style={s.totalsWrap} wrap={false}>
 
           {/* Tax Breakdown */}
           <View style={s.taxBreakdownBox}>

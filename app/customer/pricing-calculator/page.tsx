@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import { motion } from 'framer-motion'
 import {
   Search, MapPin, Plus, Minus,
-  Zap, Clock, ShoppingBag, Trash2, ArrowRight,
+  Zap, Clock, ShoppingBag, Trash2, ArrowRight, ArrowLeft,
   CheckCircle2, AlertCircle, Loader2, RefreshCw,
   Info, Star, Home, Globe, Store, ArrowLeftRight,
 } from 'lucide-react'
@@ -16,9 +17,9 @@ import { ProviderPicker, type PickableProvider } from './components/ProviderPick
 import { MyAddressStep } from './components/MyAddressStep'
 import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveProductIconSrc } from '@/lib/product-icons'
-import { calcLineTotal, cartItemsToSelectedServices } from '@/lib/cart-store'
+import { calcLineTotal, cartItemsToSelectedServices, CALC_PENDING_CHECKOUT_KEY } from '@/lib/cart-store'
 import type {
-  AreaPricingData, ServiceWithProducts, PricingProductType,
+  AreaPricingData, PricingProductType,
   CartLineItem, PricingModel, ServiceCategory,
 } from '@/types/pricing'
 import { CATEGORY_LABELS, SERVICE_CATEGORY_LABELS } from '@/types/pricing'
@@ -31,6 +32,50 @@ import { CATEGORY_LABELS, SERVICE_CATEGORY_LABELS } from '@/types/pricing'
 // CartSheet (which is an overlay, not a navigation) without ever touching
 // the real cart — only "Place Order" below pushes these into the real cart.
 const CALC_CART_STORAGE_KEY = 'laundrease_pricing_calc_cart_v1'
+
+// Set when a signed-OUT visitor hits "Place Order". Survives the round trip
+// through login/register (same tab), so the moment they come back
+// authenticated we can push exactly what they'd picked — items, provider and
+// address — into their real server cart instead of dropping it on the floor
+// (which is what used to happen: they'd land back on a reset calculator with
+// their selection apparently gone).
+//
+// The key itself lives in lib/cart-store.ts because the cart provider also
+// reads it: while a flush is pending it must skip its own guest→server push,
+// which would otherwise race this one and clobber the provider/address here.
+
+interface PendingCheckout {
+  items:      CartLineItem[]
+  isExpress:  boolean
+  providerId: number | null
+  addressId:  number | null
+}
+
+/** Provider/address the calculator resolved, carried into the server cart. */
+interface PlaceOrderContext {
+  providerId: number | null
+  addressId:  number | null
+}
+
+function savePendingCheckout(p: PendingCheckout) {
+  if (typeof window === 'undefined') return
+  try { window.sessionStorage.setItem(CALC_PENDING_CHECKOUT_KEY, JSON.stringify(p)) } catch {}
+}
+
+function loadPendingCheckout(): PendingCheckout | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.sessionStorage.getItem(CALC_PENDING_CHECKOUT_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw)
+    return Array.isArray(p?.items) && p.items.length > 0 ? p as PendingCheckout : null
+  } catch { return null }
+}
+
+function clearPendingCheckout() {
+  if (typeof window === 'undefined') return
+  try { window.sessionStorage.removeItem(CALC_PENDING_CHECKOUT_KEY) } catch {}
+}
 
 function loadCalcCart(): { items: CartLineItem[]; isExpress: boolean } {
   if (typeof window === 'undefined') return { items: [], isExpress: false }
@@ -127,20 +172,48 @@ function usePricingCalculatorCart() {
     })
   }, [persist])
 
-  const placeOrder = useCallback(async () => {
+  // Pushes the calculator's selection into the real server cart, carrying the
+  // provider (and the address, when the visitor reached here via "Use my
+  // saved address") so the order flow can resume as deep as possible.
+  //
+  // Sending provider_id matters beyond convenience: the order flow's
+  // "switch provider?" guard is gated on cart.provider being set, so a cart
+  // pushed WITHOUT it let a customer pick a different provider at step 1 and
+  // silently carry over services that provider may not even offer.
+  const pushToServerCart = useCallback(async (ctx: PlaceOrderContext, itemsToPush: CartLineItem[], express: boolean) => {
+    await fetch('/api/customer/cart', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({
+        selected_services: cartItemsToSelectedServices(itemsToPush),
+        is_express:        express,
+        provider_id:       ctx.providerId ?? undefined,
+        address_id:        ctx.addressId  ?? undefined,
+        // Provider + address + services are all settled, so the flow can pick
+        // up at Schedule Pickup. Without an address it has to fall back to
+        // step 1 to collect one — the order can't be placed without it.
+        current_step:      ctx.addressId != null ? 3 : 1,
+      }),
+    })
+  }, [])
+
+  const placeOrder = useCallback(async (ctx: PlaceOrderContext) => {
+    if (items.length === 0) return
+
+    // Signed out: stash the whole intent (items + provider + address) and send
+    // them to sign in. The calculator page flushes it to the server cart the
+    // moment they come back authenticated — see the pending-checkout effect in
+    // PricingCalculatorPage.
     if (!user) {
+      savePendingCheckout({ items, isExpress, providerId: ctx.providerId ?? null, addressId: ctx.addressId ?? null })
       router.push('/customer/auth/login?returnTo=/customer/pricing-calculator')
       return
     }
-    if (items.length === 0) return
+
     setPlacing(true)
     try {
-      await fetch('/api/customer/cart', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ selected_services: cartItemsToSelectedServices(items), is_express: isExpress }),
-      })
+      await pushToServerCart(ctx, items, isExpress)
       // Now that they're committed to ordering, clear the calculator's local
       // copy — the real cart (pushed above) is the source of truth from here.
       clear()
@@ -148,9 +221,9 @@ function usePricingCalculatorCart() {
     } finally {
       setPlacing(false)
     }
-  }, [user, items, isExpress, router, clear])
+  }, [user, items, isExpress, router, clear, pushToServerCart])
 
-  return { items, isExpress, toggleExpress, addItem, updateItem, removeItem, clear, placeOrder, placing }
+  return { items, isExpress, toggleExpress, addItem, updateItem, removeItem, clear, placeOrder, placing, pushToServerCart }
 }
 
 // ---- Helpers ------------------------------------------------
@@ -167,7 +240,9 @@ function makeLineItemKey(productTypeId: number, serviceId: number) {
 function AreaSearchStep({
   onResult,
 }: {
-  onResult: (data: AreaPricingData) => void
+  // Was (data: AreaPricingData) — see handleSearch below for why this no
+  // longer round-trips through services-by-area on this step.
+  onResult: (result: { pincode?: string; city?: string; providers: PickableProvider[] }) => void
 }) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -192,16 +267,32 @@ function AreaSearchStep({
     setUncoveredArea(null)
 
     try {
-      const param = isPincode ? `pincode=${val}` : `city=${encodeURIComponent(val)}`
-      const res = await fetch(`/api/customer/public/pricing/services-by-area?${param}`)
+      // laundry-providers/search's own coverage check (provider_service_areas
+      // for a pincode, city ILIKE for a city) is the exact same query
+      // services-by-area runs to produce its 'covered' flag — so calling
+      // services-by-area here first was a second round trip just to re-learn
+      // "are there zero providers", immediately followed by this same search
+      // call to actually list them. Calling search directly gets both answers
+      // in one request, and the providers it returns are handed straight to
+      // the picker step instead of being fetched again there.
+      const res = await fetch(`/api/customer/laundry-providers/search?location=${encodeURIComponent(val)}`)
       if (!res.ok) throw new Error('Request failed')
       const json = await res.json()
       if (!json.success) throw new Error(json.error || 'Failed')
 
-      if (!json.data.covered) {
+      const providers: PickableProvider[] = (json.data.providers ?? []).map((p: any) => ({
+        id: p.id,
+        name: p.business_name,
+        subtitle: p.business_address ?? p.city ?? '',
+        rating: p.rating,
+        ratingCount: p.rating_count,
+        minPriceKg: p.min_price_kg,
+      }))
+
+      if (providers.length === 0) {
         setUncoveredArea(val)
       } else {
-        onResult(json.data as AreaPricingData)
+        onResult({ pincode: isPincode ? val : undefined, city: isPincode ? undefined : val, providers })
       }
     } catch {
       setError('Could not fetch pricing data. Please try again.')
@@ -228,20 +319,22 @@ function AreaSearchStep({
   return (
     <div className="mx-auto max-w-2xl">
       {/* Search */}
-      <div className="rounded-2xl border border-border/50 bg-card p-8 shadow-sm">
-        <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+      <div className="rounded-2xl border border-border/50 bg-card p-5 shadow-sm sm:p-6">
+        <div className="mb-4 flex items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <MapPin className="h-5 w-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <h2 className="font-semibold text-foreground">Enter your area</h2>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground sm:text-sm">
               We&apos;ll show services and pricing available near you
             </p>
           </div>
         </div>
 
-        <div className="flex gap-3">
+        {/* Stacks on very narrow screens so the Check button never squeezes
+            the input down to a few characters. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -256,7 +349,7 @@ function AreaSearchStep({
           <button
             onClick={handleSearch}
             disabled={loading || (!isPincode && !isCity)}
-            className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 disabled:opacity-50"
+            className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-primary px-5 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition-all hover:bg-primary/90 disabled:opacity-50"
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
             {loading ? 'Checking...' : 'Check'}
@@ -615,9 +708,19 @@ function SummaryPanel({
 
 // ---- Main calculator ----------------------------------------
 function PricingCalculator({
-  areaData, onReset, onSwitchProvider, onUseBaseRates,
+  areaData, cart, selectedAddressId, switchNotice, onDismissNotice,
+  onReset, onSwitchProvider, onUseBaseRates,
 }: {
   areaData: AreaPricingData
+  /** Saved-address id, when known — lets Place Order skip the address step. */
+  selectedAddressId: number | null
+  /** Set when a provider change dropped the previous selection. */
+  switchNotice: string | null
+  onDismissNotice: () => void
+  // Lifted to the page level (not created here) so the provider-switch guard
+  // in PricingCalculatorPage can inspect item count / clear it BEFORE this
+  // component ever re-renders with a different provider's areaData.
+  cart: ReturnType<typeof usePricingCalculatorCart>
   onReset: () => void
   // Shown when currently on base rates — lets the visitor pick a specific
   // provider to see exact pricing instead.
@@ -630,7 +733,6 @@ function PricingCalculator({
     areaData.services[0]?.service.id ?? 0
   )
   const [activeCategory, setActiveCategory] = useState<string>('all')
-  const cart = usePricingCalculatorCart()
   const { isExpress } = cart
 
   const cartItemsByKey = useMemo(() => {
@@ -683,6 +785,18 @@ function PricingCalculator({
 
   return (
     <div>
+      {/* Replaces the old confirm dialog: state the consequence after the
+          fact instead of interrupting to ask about a selection we can't
+          show them. Dismissible, and auto-irrelevant once they re-add. */}
+      {switchNotice && (
+        <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-2.5 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1">{switchNotice}</span>
+          <button type="button" onClick={onDismissNotice}
+            className="shrink-0 font-semibold hover:underline">Dismiss</button>
+        </div>
+      )}
+
       {/* Area / provider info bar */}
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border/50 bg-card px-4 py-3">
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -837,7 +951,10 @@ function PricingCalculator({
             onToggleExpress={handleToggleExpress}
             areaData={areaData}
             onClear={cart.clear}
-            onPlaceOrder={cart.placeOrder}
+            onPlaceOrder={() => cart.placeOrder({
+              providerId: areaData.provider?.id ?? null,
+              addressId:  selectedAddressId,
+            })}
             placing={cart.placing}
           />
 
@@ -864,6 +981,7 @@ type PricingContext = { pincode?: string; city?: string }
 
 export default function PricingCalculatorPage() {
   const { user } = useAuth()
+  const router = useRouter()
 
   // 'pick_path'    — choose "my address" (auth only) vs "search any area"
   // 'my_address'   — pick a saved address (auth only)
@@ -878,6 +996,48 @@ export default function PricingCalculatorPage() {
   const [providersLoading, setProvidersLoading] = useState(false)
   const [allowSkip, setAllowSkip] = useState(true)
   const [areaData, setAreaData] = useState<AreaPricingData | null>(null)
+  // Lifted here (rather than inside PricingCalculator, which unmounts on
+  // every step change) so a provider switch can be intercepted BEFORE
+  // areaData is overwritten — see selectProvider below.
+  const cart = usePricingCalculatorCart()
+  // Saved-address id, kept only when the visitor came in via "Use my saved
+  // address". That's the one path where the calculator actually knows WHICH
+  // address they mean (the area-search path only ever yields a pincode), and
+  // it's what lets Place Order resume straight at Schedule Pickup.
+  const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null)
+  // Shown after selections are dropped because the provider changed.
+  const [switchNotice, setSwitchNotice] = useState<string | null>(null)
+
+  // A signed-out visitor who hit "Place Order" was bounced to sign in with
+  // their selection stashed (see savePendingCheckout). They're back and
+  // authenticated now — push it into their real cart and carry straight on
+  // into the order flow, so the trip through login is invisible to them
+  // rather than dumping them on a reset calculator with their work gone.
+  const flushedPending = useRef(false)
+  useEffect(() => {
+    if (!user || flushedPending.current) return
+    const pending = loadPendingCheckout()
+    if (!pending) return
+    flushedPending.current = true
+
+    ;(async () => {
+      try {
+        await cart.pushToServerCart(
+          { providerId: pending.providerId, addressId: pending.addressId },
+          pending.items,
+          pending.isExpress,
+        )
+        clearPendingCheckout()
+        cart.clear()
+        router.push('/customer/orders/create?resume=1')
+      } catch {
+        // Leave the pending blob in place so a retry (or a reload) can still
+        // recover it rather than silently losing their selection again.
+        flushedPending.current = false
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
 
   function resetAll() {
     setAreaData(null)
@@ -886,18 +1046,23 @@ export default function PricingCalculatorPage() {
     setStep(user ? 'pick_path' : 'area_search')
   }
 
-  // Area search resolved (covered) — store the base-rate result immediately
-  // so "skip" has something to show, then offer to narrow to one provider.
-  async function handleAreaResult(data: AreaPricingData) {
-    setPricingContext({ pincode: data.pincode || undefined, city: data.city || undefined })
-    setAreaData(data)
-    await loadProviders({ pincode: data.pincode || undefined, city: data.city || undefined })
+  // Area search resolved — AreaSearchStep already fetched the provider list
+  // itself (see its handleSearch), so just take it. areaData stays null
+  // until the visitor actually lands on a real catalog — either by picking
+  // a provider (selectProvider) or hitting "Skip" (skipToBaseRates), both
+  // below — never pre-fetched here on the chance "Skip" gets used.
+  function handleAreaResult(result: { pincode?: string; city?: string; providers: PickableProvider[] }) {
+    setPricingContext({ pincode: result.pincode, city: result.city })
+    setProviders(result.providers)
     setAllowSkip(true)
     setStep('pick_provider')
   }
 
-  async function handleAddressSelected(address: { postal_code: string; city: string }) {
+  async function handleAddressSelected(address: { id: number; postal_code: string; city: string }) {
     setPricingContext({ pincode: address.postal_code, city: address.city })
+    // Keep the id, not just the pincode — this is what lets Place Order skip
+    // the order flow's address step entirely.
+    setSelectedAddressId(address.id)
     await loadProviders({ pincode: address.postal_code, city: address.city })
     setAllowSkip(false)
     setStep('pick_provider')
@@ -928,13 +1093,38 @@ export default function PricingCalculatorPage() {
     }
   }
 
+  // Every path that swaps the catalog under an existing selection runs through
+  // here. A selection only ever means anything against the catalog it was
+  // built from — carrying it into a different provider's (or the area's base)
+  // catalog, priced or not, is carrying over a choice the customer never
+  // actually made against what they're now looking at. So this clears rather
+  // than reprices: leaving the calculator's current provider context, for any
+  // reason, means starting the selection over against whatever catalog is
+  // shown next.
+  //
+  // Unconditional on "did the provider id change" — clearing an already-empty
+  // cart, or one already built from this exact catalog, is a no-op — so there
+  // is no tracked-id guard left to fall out of sync. That guard's earlier
+  // failure mode is exactly why reaching this step via Back / "Change area"
+  // used to leave stale, wrongly-priced items sitting in the estimate panel:
+  // resetAll() cleared the tracked id while the cart kept its items, so the
+  // old guard saw null and silently skipped the clear.
+  function applyCatalogToCart(data: AreaPricingData) {
+    if (cart.items.length === 0) { setSwitchNotice(null); return }
+    cart.clear()
+    const rates = data.provider ? `${data.provider.name}'s rates` : "this area's base rates"
+    setSwitchNotice(`Your earlier selection was cleared — please choose services again for ${rates}.`)
+  }
+
   async function selectProvider(providerId: number) {
     setProvidersLoading(true)
     try {
       const res = await fetch(`/api/customer/public/pricing/services-by-area?provider_id=${providerId}`)
       const json = await res.json()
       if (json.success && json.data.covered) {
-        setAreaData(json.data)
+        const data = json.data as AreaPricingData
+        applyCatalogToCart(data)
+        setAreaData(data)
         setStep('calculator')
       }
     } finally {
@@ -942,9 +1132,18 @@ export default function PricingCalculatorPage() {
     }
   }
 
-  function skipToBaseRates() {
-    // areaData already holds the base-rate result from handleAreaResult
-    setStep('calculator')
+  async function skipToBaseRates() {
+    // areaData is no longer pre-fetched on every search (see handleAreaResult)
+    // — fetch the base-rate catalog now, only because the visitor actually
+    // asked for it. Same lazy fetch switchToBaseRates() below does when
+    // "Use base rates" is clicked from inside the calculator itself.
+    setProvidersLoading(true)
+    try {
+      await switchToBaseRates()
+      setStep('calculator')
+    } finally {
+      setProvidersLoading(false)
+    }
   }
 
   async function switchToBaseRates() {
@@ -953,7 +1152,13 @@ export default function PricingCalculatorPage() {
       : `city=${encodeURIComponent(pricingContext.city ?? '')}`
     const res = await fetch(`/api/customer/public/pricing/services-by-area?${param}`)
     const json = await res.json()
-    if (json.success) setAreaData(json.data)
+    if (json.success) {
+      const data = json.data as AreaPricingData
+      // Dropping from a provider's catalog to the area's base rates changes
+      // every price too, so this path needs the same repricing.
+      applyCatalogToCart(data)
+      setAreaData(data)
+    }
   }
 
   async function switchToProviderPicker() {
@@ -967,8 +1172,12 @@ export default function PricingCalculatorPage() {
       {/* Hero — compact */}
       <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
         <div className="pointer-events-none absolute -top-24 -right-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
-        <PageSection className="relative py-8 md:py-10">
-          <div className="max-w-2xl">
+        {/* Centred and compact — the step content (search box, then results)
+            renders immediately below, so a tall left-aligned banner pushed
+            the actual input toward the middle of the viewport with dead
+            space around it. */}
+        <PageSection className="relative py-6 text-center md:py-8">
+          <div className="mx-auto max-w-2xl">
             <span className="mb-2 inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-primary">
               <Star className="h-3 w-3" />
               Transparent Pricing
@@ -983,7 +1192,10 @@ export default function PricingCalculatorPage() {
         </PageSection>
       </div>
 
-      <PageSection>
+      {/* Tight top padding so search + results sit high on the page rather
+          than starting a screen-height down (PageSection defaults to
+          py-16 md:py-24). */}
+      <PageSection className="py-6 md:py-8">
         {step === 'pick_path' && (
           <div className="mx-auto max-w-md">
             <div className="grid gap-3 sm:grid-cols-2">
@@ -1023,6 +1235,7 @@ export default function PricingCalculatorPage() {
             providers={providers}
             loading={providersLoading}
             allowSkip={allowSkip}
+            searchedArea={pricingContext.pincode || pricingContext.city || undefined}
             onSelect={selectProvider}
             onSkip={allowSkip ? skipToBaseRates : undefined}
             onBack={() => setStep(user ? 'pick_path' : 'area_search')}
@@ -1032,6 +1245,10 @@ export default function PricingCalculatorPage() {
         {step === 'calculator' && areaData && (
           <PricingCalculator
             areaData={areaData}
+            cart={cart}
+            selectedAddressId={selectedAddressId}
+            switchNotice={switchNotice}
+            onDismissNotice={() => setSwitchNotice(null)}
             onReset={resetAll}
             onSwitchProvider={switchToProviderPicker}
             onUseBaseRates={areaData.provider ? switchToBaseRates : undefined}

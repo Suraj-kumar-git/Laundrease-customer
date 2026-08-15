@@ -35,6 +35,9 @@ interface OrderDetail {
   amount_paid: number; balance_due: number
   payment_status: string; payment_method: string
   created_at: string; updated_at: string; can_reschedule: boolean; can_cancel: boolean
+  // Actual money returned — NOT the same as a payment row's amount, which
+  // stays at the captured value even once its status flips to 'refunded'.
+  refund?: { wallet: number; gateway: number; total: number; feesRetained: number }
   provider: { id: number; name: string; address: string; city: string; phone: string } | null
   delivery_partner: { name: string; phone: string } | null
 }
@@ -90,7 +93,11 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   assigned_for_pickup: { label: 'Delivery Partner Assigned', color: 'text-blue-700', bg: 'bg-blue-100 dark:bg-blue-950/40',     step: 2 },
   out_for_pickup:   { label: 'Partner On the Way for Pickup', color: 'text-cyan-700', bg: 'bg-cyan-100 dark:bg-cyan-950/40',   step: 3 },
   picked_up:        { label: 'Picked Up',        color: 'text-blue-700',  bg: 'bg-blue-100 dark:bg-blue-950/40', step: 3 },
-  at_laundry:       { label: 'Delivered to Laundry',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 7 },
+  // Step 3, same as picked_up: the parcel has reached the laundry but nothing
+  // has been cleaned yet (that's 'processing' → step 4 "Cleaning"). This was
+  // step 7, which lit the entire tracker up to "Delivered" and made a freshly
+  // dropped-off order look finished.
+  at_laundry:       { label: 'Delivered to Laundry',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 3 },
   processing:       { label: 'Being Cleaned',    color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40', step: 4 },
   ready_for_delivery:{ label: 'Ready for Delivery', color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40',     step: 5 },
   out_for_delivery: { label: 'Out for Delivery', color: 'text-emerald-700', bg: 'bg-emerald-100 dark:bg-emerald-950/40', step: 6 },
@@ -1107,9 +1114,16 @@ export default function OrderDetailPage() {
                   </p>
                 )}
                 <p className="text-sm text-red-700/90 dark:text-red-400/90">
+                  {/* Quote what was actually refunded, not the order total.
+                      A rejection returns the full captured amount (fees
+                      included), but "captured" is below total_amount whenever
+                      only part of the order was paid up front — e.g. a
+                      wallet+COD split, where the COD leg was never collected. */}
                   {order.payment_status === 'refunded'
-                    ? `₹${order.total_amount.toLocaleString('en-IN')} has been credited to your Laundrease wallet. `
-                    : ''}
+                    ? `₹${(order.refund?.total ?? order.total_amount).toLocaleString('en-IN')} has been credited to your Laundrease wallet. `
+                    : order.payment_status === 'refund_processing'
+                      ? `Your refund of ₹${(order.refund?.total ?? order.total_amount).toLocaleString('en-IN')} has been initiated to your original payment method (5–7 business days). `
+                      : ''}
                   Please place a new order and we&apos;ll match you with another laundry provider.
                 </p>
                 <Link
@@ -1495,6 +1509,34 @@ export default function OrderDetailPage() {
               <p className="text-sm text-muted-foreground">No payment records yet</p>
             ) : (
               <div className="space-y-3">
+                {/* Refund summary. The payment rows below keep showing what was
+                    CAPTURED — flipping one to 'refunded' never rewrites its
+                    amount — so without this the card read "₹318.88 Refunded"
+                    on an order where only ₹300 came back. */}
+                {order.refund && order.refund.total > 0 && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-300">Refunded</p>
+                      <p className="text-base font-bold text-emerald-700 dark:text-emerald-400">
+                        {formatINR(order.refund.total)}
+                      </p>
+                    </div>
+                    <div className="mt-1.5 space-y-0.5 text-xs text-emerald-700/90 dark:text-emerald-400/90">
+                      {order.refund.wallet > 0 && (
+                        <p>{formatINR(order.refund.wallet)} credited to your wallet</p>
+                      )}
+                      {order.refund.gateway > 0 && (
+                        <p>{formatINR(order.refund.gateway)} to your original payment method (5–7 business days)</p>
+                      )}
+                      {order.refund.feesRetained > 0 && (
+                        <p className="text-muted-foreground">
+                          {formatINR(order.refund.feesRetained)} in delivery and platform fees is non-refundable
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Split summary banner when multiple payment rows exist */}
                 {payments.length > 1 && (
                   <div className="rounded-xl border border-border/40 bg-muted/20 px-4 py-3 space-y-1.5">
@@ -1541,6 +1583,12 @@ export default function OrderDetailPage() {
                       </div>
                       <div className="shrink-0 text-right">
                         <p className="text-base font-bold text-foreground">{formatINR(p.amount)}</p>
+                        {/* This row's amount is what was charged, not what came
+                            back — say so, or the "Refunded" badge underneath
+                            makes it read as the refund figure. */}
+                        {p.status === 'refunded' && (
+                          <p className="text-[10px] text-muted-foreground">amount paid</p>
+                        )}
                         <span className={cn(
                           'mt-0.5 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold',
                           p.status === 'completed'
