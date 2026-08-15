@@ -138,7 +138,24 @@ export default function ComparePage() {
 
   // ---- Handlers -----------------------------------------------------------
 
+  // A filled slot only means anything in the context of the area it was picked
+  // from — this whole page compares two providers serving the SAME place. So
+  // any change of area empties both slots.
+  //
+  // Without this, clearing the search left the already-chosen provider sitting
+  // in its card: pick a provider in area A, hit "Change area", search area B,
+  // fill the second card — and you'd be comparing prices across two different
+  // cities, which the summary strip would then happily total up as if it meant
+  // something.
+  function clearSlots() {
+    setSlotA(null)
+    setSlotB(null)
+  }
+
   async function handleAreaResolved(label: string, searchTerm: string, coords: { lat: number; lng: number } | null) {
+    // Covers retyping a new area directly, which the empty-results path allows
+    // without going through "Change area" first.
+    if (areaQuery !== null && areaQuery !== searchTerm) clearSlots()
     setAreaLabel(label)
     setAreaQuery(searchTerm)
     await loadProviders(searchTerm, coords)
@@ -150,6 +167,7 @@ export default function ComparePage() {
     setProviders([])
     setSearched(false)
     setArmedSlot(null)
+    clearSlots()
   }
 
   async function handlePickProvider(p: CompareProvider) {

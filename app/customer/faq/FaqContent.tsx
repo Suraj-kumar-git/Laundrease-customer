@@ -13,6 +13,7 @@ import {
   Clock, CreditCard, Shield, MapPin, Star, Phone, Mail, User,
 } from 'lucide-react'
 import type { FaqEntry } from './get-faqs'
+import { FaqAnswer } from '@/components/faq/FaqAnswer'
 
 type IconComponent = React.ComponentType<{ className?: string }>
 
@@ -204,9 +205,10 @@ export function FaqContent({ items }: { items: FaqEntry[] }) {
                                 into a narrow column, so it falls back to the
                                 card's own padding. */}
                             <div className="px-4 pb-5 sm:px-5 sm:pb-6 sm:pl-[4.75rem]">
-                              <p className="whitespace-pre-line text-sm leading-relaxed text-gray-600 dark:text-gray-300 sm:text-base">
-                                {faq.answer}
-                              </p>
+                              <FaqAnswer
+                                text={faq.answer}
+                                className="text-sm leading-relaxed text-gray-600 dark:text-gray-300 sm:text-base"
+                              />
                             </div>
                           </motion.div>
                         )}

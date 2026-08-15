@@ -188,6 +188,25 @@ export function CheckoutStep({
     // }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ---- Default wallet usage (once, after the balance loads) ----
+  // `useWallet` started false and the Place Order button only renders once a
+  // payment source is chosen, so arriving here showed no way to pay at all
+  // until something was tapped — even when the wallet covered the whole order.
+  //
+  // The ref makes this run exactly once. After that the toggle is the
+  // customer's own choice and must never be overwritten by a re-render.
+  //
+  // The payment METHOD default lives further down, with the availability
+  // checks it depends on.
+  const walletDefaulted = useRef(false)
+  useEffect(() => {
+    if (walletDefaulted.current || walletLoading) return
+    walletDefaulted.current = true
+    // Any balance at all is worth spending first — a partial balance still
+    // reduces what's charged to a card, and the remainder UI handles the rest.
+    if ((walletInfo?.balance ?? 0) > 0) setUseWallet(true)
+  }, [walletLoading, walletInfo])
+
   // ---- Provider availability (re-check on checkout mount) -------
   // A resumed cart can carry a provider selected days ago — re-verify here
   // rather than trusting the stale snapshot, so a provider that's since
@@ -353,7 +372,14 @@ export function CheckoutStep({
     ? Math.min(walletInfo.balance, grossTotal) : 0
   const walletContributionRounded = Math.round(walletContribution * 100) / 100
   const amountAfterWallet  = Math.max(0, Math.round((grossTotal - walletContributionRounded) * 100) / 100)
-  const walletCoversAll    = walletContributionRounded >= grossTotal
+  // Derived from the already-rounded remainder rather than comparing the
+  // contribution against the raw grossTotal. grossTotal carries float dust from
+  // summing fee lines (e.g. 307.89000000000004), and walletContributionRounded
+  // is snapped to paise — so `rounded >= raw` came out FALSE for a wallet that
+  // covered the order exactly. The screen then offered to collect the
+  // "remaining ₹0.00" via another method, and Place Order stayed hidden until
+  // one was tapped.
+  const walletCoversAll    = walletContributionRounded > 0 && amountAfterWallet <= 0
   const onlinePaymentAvailable = Boolean(
     gatewayInfo?.gateway_configured && ['payu', 'cashfree', 'razorpay'].includes(gatewayInfo.provider)
   )
@@ -364,6 +390,43 @@ export function CheckoutStep({
   )
   const canPlace = providerAvailable &&
     (walletCoversAll || selectedMethod === 'cod' || (selectedMethod === 'online' && onlinePaymentAvailable))
+
+  // ---- Keep the chosen method in step with what's actually offered ----
+  // Declared here, below the availability values, because it reads them.
+  //
+  // Availability is derived from the LIVE total, and the total changes on this
+  // very step — the Express toggle and coupon apply/remove both move it. So a
+  // COD selection can stop qualifying after it was made: its button unmounts
+  // (it's gated on codAvailable) but selectedMethod stayed 'cod', leaving
+  // Place Order enabled for a method no longer on offer. The order then failed
+  // server-side with COD_LIMIT_EXCEEDED — correctly rejected, but as a dead-end
+  // toast rather than the choice quietly correcting itself.
+  //
+  // This also makes the first-load default cap-aware: preselecting straight
+  // from `cod_enabled` would have picked COD on a gateway-less setup even when
+  // the order was over the limit.
+  const methodDefaulted = useRef(false)
+  useEffect(() => {
+    if (walletLoading || gatewayLoading) return
+
+    if (selectedMethod === 'cod' && !codAvailable) {
+      setSelectedMethod(onlinePaymentAvailable ? 'online' : null)
+      return
+    }
+    if (selectedMethod === 'online' && !onlinePaymentAvailable) {
+      setSelectedMethod(codAvailable ? 'cod' : null)
+      return
+    }
+
+    // First pass only, so Place Order is reachable on arrival. Guarded by the
+    // ref so that deliberately deselecting a method (tapping the selected one
+    // toggles it back off) isn't immediately undone.
+    if (!methodDefaulted.current && selectedMethod === null) {
+      methodDefaulted.current = true
+      if (onlinePaymentAvailable) setSelectedMethod('online')
+      else if (codAvailable) setSelectedMethod('cod')
+    }
+  }, [walletLoading, gatewayLoading, selectedMethod, codAvailable, onlinePaymentAvailable])
 
   // The order is always created first via onSubmit (cod/wallet/online alike).
   // For 'online', the parent (page.tsx) creates the order, then calls the
