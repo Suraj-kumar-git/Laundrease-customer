@@ -48,6 +48,8 @@ const PUBLIC_API_ROUTES = [
   '/api/customer/payments/payu/success',
   '/api/customer/payments/payu/failure',
   '/api/customer/payments/cashfree/return',
+  '/api/cron/*',
+  '/api/telephony/*',
 ]
  
 // Helper to check if a path is public
