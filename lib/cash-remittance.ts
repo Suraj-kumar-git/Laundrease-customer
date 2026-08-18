@@ -98,7 +98,16 @@ export interface PartnerPending {
 // the admin and support Cash Remittance pages' "pending hand-over" picker.
 // Optionally scoped to one pickup pincode — ops covering a specific area
 // only wants to see (and reconcile) COD orders from that area.
-export async function getPendingRemittanceByPartner(pincode: string | null = null): Promise<PartnerPending[]> {
+//
+// deliveryProfileId narrows it to a single partner, which is what the
+// partner's own /delivery/cash screen needs. It's a filter on this query
+// rather than a second query so the partner and ops can never be shown a
+// different set of orders for the same balance; without it the delivery
+// route would compute every partner's position and discard all but one.
+export async function getPendingRemittanceByPartner(
+  pincode: string | null = null,
+  deliveryProfileId: number | string | null = null,
+): Promise<PartnerPending[]> {
   const pending = await query<{
     delivery_profile_id: string; partner_name: string; phone: string | null; city: string | null
     order_id: string; order_number: string; amount: string; delivered_at: string
@@ -122,8 +131,9 @@ export async function getPendingRemittanceByPartner(pincode: string | null = nul
         WHERE r.order_id = pcl.order_id AND r.kind = 'remittance'
       )
       AND ($1::TEXT IS NULL OR o.pickup_pincode = $1::TEXT)
+      AND ($2::BIGINT IS NULL OR pcl.delivery_profile_id = $2::BIGINT)
     ORDER BY u.full_name ASC, o.delivered_at ASC
-  `, [pincode])
+  `, [pincode, deliveryProfileId])
 
   const byPartner = new Map<string, PartnerPending>()
   for (const row of pending.rows) {

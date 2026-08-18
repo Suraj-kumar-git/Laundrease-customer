@@ -18,6 +18,9 @@ import { useToast } from '@/hooks/use-toast'
 import { launchGatewayCheckout } from '@/lib/payment-client'
 import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveProductIconSrc } from '@/lib/product-icons'
+import { ConditionEvidence } from '@/components/condition/ConditionEvidence'
+import type { ConditionPhoto } from '@/lib/condition-photo-types'
+import { useMaskedCall, type MaskedCallState } from '@/hooks/use-masked-call'
 
 // ---- Types --------------------------------------------------
 interface OrderDetail {
@@ -27,6 +30,8 @@ interface OrderDetail {
   delivery_date: string | null; delivery_time_slot: string | null
   estimated_delivery_date: string | null
   delivered_at: string | null
+  // NULL = no pickup inspection recorded.
+  pickup_condition_checked_at: string | null
   rejection_reason: string | null; rejected_at: string | null
   special_instructions: string | null; is_express: boolean
   subtotal: number; tax_amount: number; discount_amount: number; total_amount: number
@@ -38,8 +43,10 @@ interface OrderDetail {
   // Actual money returned — NOT the same as a payment row's amount, which
   // stays at the captured value even once its status flips to 'refunded'.
   refund?: { wallet: number; gateway: number; total: number; feesRetained: number }
-  provider: { id: number; name: string; address: string; city: string; phone: string } | null
-  delivery_partner: { name: string; phone: string } | null
+  // Phone is null once masking is on; both are then reached through a bridged
+  // call instead of a tel: link.
+  provider: { id: number; name: string; address: string; city: string; phone: string | null } | null
+  delivery_partner: { name: string; phone: string | null } | null
 }
 
 interface GarmentClaim {
@@ -93,28 +100,36 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; bg: string; 
   assigned_for_pickup: { label: 'Delivery Partner Assigned', color: 'text-blue-700', bg: 'bg-blue-100 dark:bg-blue-950/40',     step: 2 },
   out_for_pickup:   { label: 'Partner On the Way for Pickup', color: 'text-cyan-700', bg: 'bg-cyan-100 dark:bg-cyan-950/40',   step: 3 },
   picked_up:        { label: 'Picked Up',        color: 'text-blue-700',  bg: 'bg-blue-100 dark:bg-blue-950/40', step: 3 },
-  // Step 3, same as picked_up: the parcel has reached the laundry but nothing
-  // has been cleaned yet (that's 'processing' → step 4 "Cleaning"). This was
-  // step 7, which lit the entire tracker up to "Delivered" and made a freshly
-  // dropped-off order look finished.
-  at_laundry:       { label: 'Delivered to Laundry',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 3 },
-  processing:       { label: 'Being Cleaned',    color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40', step: 4 },
-  ready_for_delivery:{ label: 'Ready for Delivery', color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40',     step: 5 },
-  out_for_delivery: { label: 'Out for Delivery', color: 'text-emerald-700', bg: 'bg-emerald-100 dark:bg-emerald-950/40', step: 6 },
-  delivered:        { label: 'Delivered',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 7 },
-  completed:        { label: 'Completed',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 8 },
+  // 'At Laundry' is its own tracker step. It used to share step 3 with
+  // picked_up, which left the badge reading "Delivered to Laundry" while the
+  // tracker highlighted "Picked Up" — both technically right, but they read as
+  // a contradiction to a customer. Before that it was step 7, which lit the
+  // whole tracker through "Delivered" and made a freshly dropped-off order
+  // look finished.
+  at_laundry:       { label: 'Delivered to Laundry',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 4 },
+  processing:       { label: 'Being Cleaned',    color: 'text-indigo-700',  bg: 'bg-indigo-100 dark:bg-indigo-950/40', step: 5 },
+  ready_for_delivery:{ label: 'Ready for Delivery', color: 'text-teal-700',    bg: 'bg-teal-100 dark:bg-teal-950/40',     step: 6 },
+  out_for_delivery: { label: 'Out for Delivery', color: 'text-emerald-700', bg: 'bg-emerald-100 dark:bg-emerald-950/40', step: 7 },
+  delivered:        { label: 'Delivered',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 8 },
+  completed:        { label: 'Completed',        color: 'text-green-700',   bg: 'bg-green-100 dark:bg-green-950/40',   step: 9 },
   cancelled:        { label: 'Cancelled',        color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
   failed:           { label: 'Order Failed',     color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
   rejected:         { label: 'Rejected',         color: 'text-red-700',     bg: 'bg-red-100 dark:bg-red-950/40',       step: -1 },
   // returned:         { label: 'Returned',         color: 'text-orange-700',  bg: 'bg-orange-100 dark:bg-orange-950/40', step: -1 },
 }
 
+// Order matters: a step's position here IS its number in STATUS_CONFIG above,
+// so the two lists have to be changed together.
+//
+// 'Ready for Delivery' shortened to 'Ready' when At Laundry was added — eight
+// labels share this row on sm+, and the long one was the first to wrap.
 const PROGRESS_STEPS = [
   { key: 'pending', label: 'Placed' },
   { key: 'confirmed', label: 'Confirmed' },
   { key: 'picked_up', label: 'Picked Up' },
+  { key: 'at_laundry', label: 'At Laundry' },
   { key: 'processing', label: 'Cleaning' },
-  { key: 'ready_for_delivery', label: 'Ready for Delivery' },
+  { key: 'ready_for_delivery', label: 'Ready' },
   { key: 'out_for_delivery', label: 'Delivery' },
   { key: 'delivered', label: 'Delivered' },
 ]
@@ -640,6 +655,45 @@ function ClaimStatusModal({ claim, itemName, onClose }: {
   )
 }
 
+// ---- Masked call button --------------------------------------
+// Both counterparties are masked pairs, so this never dials — it asks the
+// platform to bridge, and the customer's own phone rings first. The three
+// states matter: a button that looks identical while connecting, after
+// succeeding, and once the line has closed reads as broken.
+function CallButton({ onClick, state, phone }: {
+  onClick: () => void
+  state:   MaskedCallState
+  /** Present means masking is off — dial it directly instead of bridging. */
+  phone?:  string | null
+}) {
+  if (phone) {
+    return (
+      <a href={`tel:${phone}`}
+        className="flex shrink-0 items-center gap-1.5 rounded-xl border border-border/50 px-3 py-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted">
+        <Phone className="h-3.5 w-3.5" /> Call
+      </a>
+    )
+  }
+
+  const closed = state === 'closed'
+  return (
+    <button type="button" onClick={onClick}
+      disabled={state === 'calling' || closed}
+      className={cn(
+        'flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition-colors',
+        closed
+          ? 'border-border/50 text-muted-foreground/70'
+          : 'border-border/50 text-muted-foreground hover:bg-muted disabled:opacity-60'
+      )}>
+      {state === 'calling'
+        ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Connecting</>
+        : closed
+        ? <><Ban className="h-3.5 w-3.5" /> Unavailable</>
+        : <><Phone className="h-3.5 w-3.5" /> Call</>}
+    </button>
+  )
+}
+
 // ---- All reported items — consolidated list ------------------
 // The per-item badge (in Services & Items) is easy to miss once there's
 // more than a couple of items — this surfaces every claim on the order in
@@ -822,6 +876,12 @@ export default function OrderDetailPage() {
 
   const [order,      setOrder]      = useState<OrderDetail | null>(null)
   const [items,      setItems]      = useState<OrderItem[]>([])
+  // One endpoint, two targets — the customer is the only party who can reach
+  // both counterparties, so each button carries its own state.
+  const laundryCall  = useMaskedCall(`/api/customer/orders/${id}/call`)
+  const deliveryCall = useMaskedCall(`/api/customer/orders/${id}/call`)
+  const [conditionPhotos,        setConditionPhotos]        = useState<ConditionPhoto[]>([])
+  const [generalConditionPhotos, setGeneralConditionPhotos] = useState<ConditionPhoto[]>([])
   const [payments,   setPayments]   = useState<Payment[]>([])
   const [adjustments,setAdjustments]= useState<Adjustment[]>([])
   const [history,    setHistory]    = useState<StatusEntry[]>([])
@@ -861,6 +921,8 @@ export default function OrderDetailPage() {
       if (!json.success) throw new Error(json.error ?? 'Failed')
       setOrder(json.data.order)
       setItems(json.data.items)
+      setConditionPhotos(json.data.condition_photos || [])
+      setGeneralConditionPhotos(json.data.general_condition_photos || [])
       setPayments(json.data.payments)
       setAdjustments(json.data.adjustments)
       setHistory(json.data.status_history)
@@ -1270,12 +1332,13 @@ export default function OrderDetailPage() {
                     <p className="mt-0.5 text-sm text-muted-foreground">{order.provider.address ? `${order.provider.address}, ` : ''}{order.provider.city}</p>
                   )}
                 </div>
-                {order.provider.phone && (
-                  <a href={`tel:${order.provider.phone}`}
-                    className="flex items-center gap-1.5 rounded-xl border border-border/50 px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted">
-                    <Phone className="h-3.5 w-3.5" /> Call
-                  </a>
-                )}
+                {/* Bridged, not dialled — the shop's number is never sent to
+                    this page. */}
+                <CallButton
+                  onClick={() => laundryCall.call({ target: 'laundry' })}
+                  state={laundryCall.state}
+                  phone={order.provider.phone}
+                />
               </div>
               {order.delivery_partner && (
                 <div className="mt-3 flex items-center justify-between rounded-xl bg-muted/30 p-3">
@@ -1283,12 +1346,11 @@ export default function OrderDetailPage() {
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Delivery Partner</p>
                     <p className="mt-0.5 text-sm font-medium text-foreground">{order.delivery_partner.name}</p>
                   </div>
-                  {order.delivery_partner.phone && (
-                    <a href={`tel:${order.delivery_partner.phone}`}
-                      className="flex items-center gap-1.5 rounded-xl border border-border/50 px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-muted">
-                      <Phone className="h-3.5 w-3.5" /> Call
-                    </a>
-                  )}
+                  <CallButton
+                    onClick={() => deliveryCall.call({ target: 'delivery' })}
+                    state={deliveryCall.state}
+                    phone={order.delivery_partner.phone}
+                  />
                 </div>
               )}
               {!isCancelled && order.assignment_status === 'unassigned' && (
@@ -1390,6 +1452,31 @@ export default function OrderDetailPage() {
               </div>
             ))}
           </Section>
+
+          {/* Anything the delivery partner found already damaged when they
+              collected the order.
+
+              Shown even though nothing here is actionable for the customer:
+              this same evidence can be used to reject a claim they file, so
+              meeting it for the first time inside a dispute would mean being
+              refused on the basis of a record they were never shown. Only
+              rendered once a pickup has actually happened — before that the
+              "no inspection recorded" state is just noise about a pickup
+              that hasn't occurred. */}
+          {(conditionPhotos.length > 0 ||
+            generalConditionPhotos.length > 0 ||
+            order.pickup_condition_checked_at ||
+            !['pending', 'confirmed', 'assigned_for_pickup', 'out_for_pickup', 'cancelled', 'rejected'].includes(order.status)
+          ) && (
+            <Section title="Condition at pickup" icon={Camera}>
+              <ConditionEvidence
+                photos={conditionPhotos}
+                generalPhotos={generalConditionPhotos}
+                checkedAt={order.pickup_condition_checked_at}
+                scope="order"
+              />
+            </Section>
+          )}
 
           {/* Price breakdown — labels sourced from order_fee_config via feeLabels */}
           <Section title="Price Breakdown" icon={Receipt}>

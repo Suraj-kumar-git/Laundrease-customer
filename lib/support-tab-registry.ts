@@ -19,7 +19,7 @@ import {
   Users, ShoppingBag, Store, Bike, Building2, Ticket, ListChecks, CreditCard,
   Calendar, IndianRupee, ShieldCheck, ShieldAlert, PhoneCall, Tag, UserPlus,
   Award, Star, MessageSquare, FileText, Briefcase, MapPin, BarChart2, PieChart,
-  Truck, HeadphonesIcon, BadgePercent, Wallet, Megaphone,
+  Truck, HeadphonesIcon, BadgePercent, Wallet, Megaphone, Phone,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -49,6 +49,10 @@ export const GRANTABLE_TABS: GrantableTab[] = [
   { key: 'item-reports',          label: 'Item Reports',          group: 'Operations', icon: ShieldAlert,    adminHref: '/admin/claims',                   supportHref: '/support/claims',                   builtForSupport: true  },
   { key: 'quick-pickup-requests', label: 'Quick Pickup Requests', group: 'Operations', icon: PhoneCall,      adminHref: '/admin/quick-pickup-requests',    supportHref: '/support/quick-pickup-requests',    builtForSupport: true  },
   { key: 'sac-codes',             label: 'SAC Codes',             group: 'Operations', icon: Tag,            adminHref: null,                              supportHref: '/support/sac-codes',                builtForSupport: true  },
+  // Read shows the settings; write is the kill switch. Granted to Operations
+  // leads so masking can be turned off during a provider outage without an
+  // admin having to be available.
+  { key: 'call-masking',          label: 'Call Masking',          group: 'Operations', icon: Phone,          adminHref: '/admin/telephony',                supportHref: '/support/telephony',                builtForSupport: true  },
 
   // ── Marketing ───────────────────────────────────────────────────────────
   { key: 'coupons',               label: 'Coupons',               group: 'Marketing',  icon: Tag,            adminHref: '/admin/coupons',                  supportHref: '/support/coupons',                  builtForSupport: true  },

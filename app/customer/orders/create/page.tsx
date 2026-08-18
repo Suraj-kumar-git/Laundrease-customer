@@ -698,8 +698,28 @@ function PageContent() {
     }
   }, [state, user, toast, router])
 
+  // Where this journey actually began.
+  //
+  // A dashboard provider card links here with BOTH ?provider= and ?address=,
+  // which means Step 1 was already answered — on the dashboard — and the flow
+  // opens on Step 2. Stepping "back" to Step 1 from there was a dead end: the
+  // deep-link params are still in the URL, so AddressProviderStep re-selects
+  // and immediately calls onComplete, bouncing straight to Step 2 again. The
+  // customer saw Step 1 flash for about a second and land back where they
+  // started.
+  //
+  // Treating Step 2 as this journey's first step fixes it at the cause rather
+  // than suppressing the button: from a first step, Back already means "leave
+  // the wizard" everywhere else here.
+  //
+  // Both params are required. The bottom nav's New Order link passes ?address=
+  // alone, which still starts at Step 1 for provider selection — that flow
+  // keeps its normal Back.
+  const enteredViaProviderDeepLink = preferredProviderId != null && preferredAddressId != null
+  const firstStep = enteredViaProviderDeepLink ? 2 : 1
+
   const handleBack = () => {
-    if (state.step > 1) setState(prev => ({ ...prev, step: (prev.step - 1) as any }))
+    if (state.step > firstStep) setState(prev => ({ ...prev, step: (prev.step - 1) as any }))
     else router.push('/customer/dashboard')
   }
 
@@ -774,7 +794,9 @@ function PageContent() {
             <button type="button" onClick={handleBack}
               className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
               <ArrowLeft className="h-4 w-4" />
-              <span className="hidden sm:inline">{state.step === 1 ? 'Dashboard' : 'Back'}</span>
+              {/* Reads "Dashboard" whenever Back would leave the wizard — which
+                  on a provider deep link is Step 2, not Step 1. */}
+              <span className="hidden sm:inline">{state.step <= firstStep ? 'Dashboard' : 'Back'}</span>
             </button>
             <div className="flex items-center gap-1 sm:gap-2">
               {STEPS.map((step, i) => {

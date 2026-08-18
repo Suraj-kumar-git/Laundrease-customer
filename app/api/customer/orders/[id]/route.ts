@@ -12,6 +12,8 @@ import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from '@/lib/order-status
 import { getRefundBreakdown, getRefundedTotals } from '@/lib/payment/refund'
 import { rescheduleOrder } from '@/lib/order-reschedule'
 import { autoCancelForRescheduleLimit } from '@/lib/order-cancellation'
+import { loadOrderConditionPhotos } from '@/lib/condition-photos-read'
+import { shouldMaskPhones } from '@/lib/phone-privacy'
 
 export async function GET(
   req: NextRequest,
@@ -45,6 +47,7 @@ export async function GET(
          o.modified_by_delivery, o.delivery_modified_at,
          o.payment_status, o.payment_method,
          o.created_at, o.updated_at,
+         o.pickup_condition_checked_at,
          -- Provider
          lp.id            AS provider_id,
          lp.business_name AS provider_name,
@@ -154,6 +157,9 @@ export async function GET(
     )
     const balanceDue = Math.max(0, Math.round((parseFloat(order.total_amount) - amountPaid) * 100) / 100)
 
+    const condition  = await loadOrderConditionPhotos(orderId)
+    const maskPhones = await shouldMaskPhones()
+
     return successResponse({
       order: {
         id:                 order.public_id,
@@ -186,18 +192,22 @@ export async function GET(
         payment_method:     order.payment_method,
         created_at:         order.created_at,
         updated_at:         order.updated_at,
+        pickup_condition_checked_at: order.pickup_condition_checked_at,
         can_reschedule:     canReschedule,
         can_cancel:         canCancel,
+        // Both counterparties are masked pairs, so their numbers are withheld
+        // once masking is on and the customer reaches them through a bridged
+        // call instead. Until then they dial directly, as they always have.
         provider: order.provider_id ? {
           id:      order.provider_id,
           name:    order.provider_name,
           address: order.provider_address,
           city:    order.provider_city,
-          phone:   order.provider_phone,
+          phone:   maskPhones ? null : order.provider_phone,
         } : null,
         delivery_partner: order.delivery_partner_name ? {
           name:  order.delivery_partner_name,
-          phone: order.delivery_partner_phone,
+          phone: maskPhones ? null : order.delivery_partner_phone,
         } : null,
       },
       items:       itemsRes.rows.map(r => ({
@@ -206,6 +216,12 @@ export async function GET(
         line_total:         parseFloat(r.line_total),
         weight_kg:          r.weight_kg ? parseFloat(r.weight_kg) : null,
       })),
+      // Damage the delivery partner recorded when collecting this order.
+      // Read-only, and shown deliberately: this evidence can be used to
+      // reject a claim, so meeting it for the first time mid-dispute would
+      // be the customer being ambushed with a record they never saw.
+      condition_photos:         condition.photos,
+      general_condition_photos: condition.generalPhotos,
       payments:    paymentsRes.rows.map(r => ({
         ...r, amount: parseFloat(r.amount),
       })),
