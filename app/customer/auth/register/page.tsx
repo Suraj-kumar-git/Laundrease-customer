@@ -207,7 +207,7 @@ function PageContent() {
 
     setSubmitting(true)
     try {
-      await register(form.full_name.trim(), form.email.trim().toLowerCase(), form.password, fullPhone, form.referral_code.trim() || undefined)
+      await register(form.full_name.trim(), form.email.trim().toLowerCase(), form.password, fullPhone, form.referral_code.trim() || undefined, form.agreeTerms)
       // Save non-sensitive fields so the register form is pre-filled if the
       // user comes back via "Update it here" on the verify page.
       try {
@@ -231,10 +231,10 @@ function PageContent() {
 
   return (
     // Full-screen two-column layout; left panel hidden on mobile
-    <div className="flex min-h-screen">
+    <div className="flex flex-1">
       <div className="flex w-full md:flex-1 flex-col bg-background">
         {/* Scrollable area for small screens */}
-        <div className="flex min-h-screen flex-col items-center justify-center px-6 py-10 sm:px-10">
+        <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 sm:px-10">
           <div className="w-full max-w-md">
             <div className="mb-6">
               <h2 className="text-2xl font-bold text-foreground">Create Account</h2>

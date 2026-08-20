@@ -99,7 +99,7 @@ function PageContent() {
 
   return (
     // Full-screen: single column on mobile, two columns on md+
-    <div className="flex min-h-screen">
+    <div className="flex flex-1">
       <div className="w-full max-w-md md:w-1/2 mx-auto bg-background px-6 py-12 sm:px-10">
         <div className="w-full">
           <div className="mb-8">

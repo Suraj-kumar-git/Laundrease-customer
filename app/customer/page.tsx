@@ -494,7 +494,7 @@ export default function HomePage() {
   ]
 
   return (
-    <div className="flex min-h-screen flex-col overflow-x-hidden bg-background">
+    <div className="flex flex-1 flex-col overflow-x-hidden bg-background">
 
       {/* ---- HERO ---- */}
       <section className="relative overflow-hidden bg-gradient-to-b from-blue-600 via-blue-600 to-cyan-600 md:bg-gradient-to-br md:from-blue-700 md:via-blue-600 md:to-cyan-600">

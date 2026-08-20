@@ -8,6 +8,8 @@ interface LegalPageProps {
   breadcrumbLabel: string
   relatedLabel: string
   relatedHref: string
+  /** Breadcrumb home target. Required on the partner apps — see FooterPageLayout. */
+  homeHref?: string
 }
 
 function SectionBlock({ section }: { section: LegalSection }) {
@@ -41,6 +43,7 @@ export function LegalPageRenderer({
   breadcrumbLabel,
   relatedLabel,
   relatedHref,
+  homeHref,
 }: LegalPageProps) {
   const effectiveDate = new Date(doc.effective_date).toLocaleDateString('en-IN', {
     day: 'numeric',
@@ -55,7 +58,7 @@ export function LegalPageRenderer({
   })
 
   return (
-    <FooterPageLayout breadcrumbs={[{ label: breadcrumbLabel }]}>
+    <FooterPageLayout breadcrumbs={[{ label: breadcrumbLabel }]} homeHref={homeHref}>
       {/* Hero */}
       <div className="border-b border-border/50 bg-muted/20">
         <PageSection tight>

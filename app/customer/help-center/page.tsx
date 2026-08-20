@@ -4,7 +4,7 @@ import {
   UserCircle, MessageCircle, Mail, Phone,
   HelpCircle,
 } from 'lucide-react'
-import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
+import { FooterPageLayout, PageSection, SectionHeading, PublicPageHero } from '@/components/layout/footer-page-layout'
 import { HELP_CENTER_FALLBACK } from '@/lib/footer-page-fallbacks'
 import { safeJsonLd } from '@/lib/json-ld'
 import type { PageContentBlock, HeroBody, FaqGroupBody, CardItem } from '@/types/footer-pages'
@@ -87,28 +87,12 @@ export default async function HelpCenterPage() {
         />
       )}
       {/* Hero */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
-        <div className="pointer-events-none absolute -top-40 -right-40 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-20 -left-20 h-72 w-72 rounded-full bg-primary/8 blur-3xl" />
-        <PageSection className="relative py-24 md:py-32">
-          <div className="max-w-3xl">
-            {heroBody?.badge && (
-              <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
-                <HelpCircle className="h-3 w-3" />
-                {heroBody.badge}
-              </span>
-            )}
-            <h1 className="mt-2 text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl md:text-6xl">
-              {hero?.title ?? 'Help Center'}
-            </h1>
-            {hero?.subtitle && (
-              <p className="mt-6 text-xl text-muted-foreground leading-relaxed">
-                {hero.subtitle}
-              </p>
-            )}
-          </div>
-        </PageSection>
-      </div>
+      <PublicPageHero
+        badge={heroBody?.badge}
+        icon={<HelpCircle className="h-3 w-3" />}
+        title={hero?.title ?? 'Help Center'}
+        subtitle={hero?.subtitle}
+      />
 
       {/* FAQ Groups */}
       {faqGroups.length > 0 && (

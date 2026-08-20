@@ -139,7 +139,7 @@ export default function ServicesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
+    <div className="flex-1 bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
       {/* Compact header + search. Deliberately NOT a full-bleed coloured
           hero: the search results render directly below this, and a tall
           banner pushed them below the fold on every device. No

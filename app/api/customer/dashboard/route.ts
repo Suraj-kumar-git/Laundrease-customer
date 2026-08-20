@@ -1,6 +1,7 @@
 // app/api/customer/dashboard/route.ts
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
+import { customerVisibleOrderSql } from '@/lib/customer-order-visibility'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { resolveProfileImageUrl } from '@/lib/s3'
 
@@ -84,7 +85,7 @@ export async function GET(req: NextRequest) {
         AND o.status NOT IN ('delivered', 'completed', 'cancelled', 'returned', 'failed')
         -- Hide orders still awaiting online payment confirmation — see
         -- app/api/customer/orders/route.ts for why.
-        AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')
+        AND ${customerVisibleOrderSql('o')}
       ORDER BY o.created_at DESC
     `, [userId])
     const activeOrderRows = activeOrdersResult.rows
@@ -135,7 +136,7 @@ export async function GET(req: NextRequest) {
         )::int                                              AS completed_orders,
         COUNT(*) FILTER (
           WHERE status NOT IN ('delivered', 'completed', 'cancelled', 'returned', 'failed')
-            AND (payment_method LIKE '%cod%' OR payment_status = 'paid')
+            AND ${customerVisibleOrderSql('orders')}
         )::int                                              AS active_orders,
         COALESCE(
           SUM(total_amount) FILTER (WHERE status IN ('delivered', 'completed')),

@@ -4,9 +4,10 @@
 // POST — raise a new support ticket (optionally linked to an order)
 // ============================================================
 
-import { NextRequest } from 'next/server'
+import { NextRequest, after } from 'next/server'
 import { query, queryOne } from '@/lib/db'
 import { getAutoAssignGroupId } from '@/lib/support-routing'
+import { notifySupportGroupOfNewTicket, getReporterName } from '@/lib/support-ticket-notify'
 import {
   successResponse, errorResponse, unauthorizedResponse,
   serverErrorResponse,
@@ -162,13 +163,13 @@ export async function POST(req: NextRequest) {
 
     const assignedGroupId = await getAutoAssignGroupId(body.category, 'customer', body.sub_category)
 
-    const ticket = await queryOne<{ id: number }>(`
+    const ticket = await queryOne<{ id: number; public_id: string }>(`
       INSERT INTO support_tickets (
         reporter_id, reporter_role, order_id, category, sub_category, priority,
         status, source, subject, description, metadata, assigned_group_id,
         first_response_due_at, resolution_due_at
       ) VALUES ($1, 'customer', $2, $3, $4, $5, 'open', 'app', $6, $7, $8, $9, $10, $11)
-      RETURNING id
+      RETURNING id, public_id::TEXT AS public_id
     `, [
       userId,
       orderId,
@@ -184,6 +185,20 @@ export async function POST(req: NextRequest) {
     ])
 
     const ticketId = ticket!.id
+
+    // Bell the routed group. Scheduled via after() so the reporter gets
+    // their response immediately, but the platform keeps the function
+    // alive until the fan-out finishes rather than freezing it mid-insert.
+    after(async () => {
+      await notifySupportGroupOfNewTicket({
+        ticketId,
+        ticketPublicId: ticket!.public_id,
+        groupId:        assignedGroupId,
+        subject:        body.subject.trim(),
+        reporterRole:   'customer',
+        reporterName:   await getReporterName(userId),
+      })
+    })
     const ticketRef = `#TICKET-${String(ticketId).padStart(5, '0')}`
 
     return successResponse({

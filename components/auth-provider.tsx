@@ -34,7 +34,7 @@ type AuthContextType = {
   user:               User
   isLoading:          boolean
   login:              (payload: LoginPayload) => Promise<void>
-  register:           (name: string, email: string, password: string, phone: string, referralCode?: string) => Promise<void>
+  register:           (name: string, email: string, password: string, phone: string, referralCode?: string, acceptTerms?: boolean) => Promise<void>
   logout:             () => void
   refreshAccessToken: () => Promise<boolean>
   getUserId:          () => string | null
@@ -287,7 +287,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: string,
     password: string,
     phone: string,
-    referralCode?: string
+    referralCode?: string,
+    acceptTerms?: boolean
   ) => {
     setIsLoading(true)
     try {
@@ -298,6 +299,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({
           full_name: name, email, password, phone,
           role: role,
+          accept_terms: acceptTerms === true,
           ...(referralCode ? { referral_code: referralCode } : {}),
         }),
       })

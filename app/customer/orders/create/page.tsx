@@ -787,7 +787,7 @@ function PageContent() {
         </div>
       )}
 
-      <div className="min-h-screen bg-muted/20">
+      <div className="flex-1 bg-muted/20">
         {/* Step header */}
         <div className="sticky top-0 z-20 border-b border-border/50 bg-background/95 backdrop-blur">
           <div className="container mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 px-4">

@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { MapPin, Clock, Briefcase, ArrowRight, Sparkles, Star } from 'lucide-react'
-import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
+import { FooterPageLayout, PageSection, SectionHeading, PublicPageHero } from '@/components/layout/footer-page-layout'
 import type { CareerJob, EmploymentType } from '@/types/footer-pages'
 import { EMPLOYMENT_TYPE_LABELS } from '@/types/footer-pages'
 
@@ -114,25 +114,13 @@ export default async function CareersPage() {
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'Careers' }]}>
       {/* Hero */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
-        <div className="pointer-events-none absolute -top-40 right-0 h-[500px] w-[500px] rounded-full bg-primary/8 blur-3xl" />
-        {/* Compact by design. At py-24/py-32 with a text-6xl heading and a
-            text-xl subtitle, this hero filled an entire laptop viewport on its
-            own — someone landing on a jobs page saw zero jobs without
-            scrolling. Same copy, sized so the first role is visible on arrival. */}
-        <PageSection className="relative py-10 md:py-14">
-          <div className="max-w-3xl">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-primary">
-              <Sparkles className="h-3 w-3" />
-              We are Hiring
-            </span>
-            <h1 className="mt-3 text-2xl font-bold leading-tight tracking-tight text-foreground sm:text-3xl md:text-4xl">
-              Help Us Reinvent Laundry in India
-            </h1>
-            <p className="mt-2.5 max-w-2xl text-sm leading-relaxed text-muted-foreground sm:text-base">
-              We are a small team building fast. If you love solving real problems, shipping quickly, and obsessing over details, you will fit right in.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground sm:text-sm">
+      <PublicPageHero
+        badge="We are Hiring"
+        icon={<Sparkles className="h-3 w-3" />}
+        title="Help Us Reinvent Laundry in India"
+        subtitle="We are a small team building fast. If you love solving real problems, shipping quickly, and obsessing over details, you will fit right in."
+      >
+          <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs text-muted-foreground sm:text-sm">
               <div className="flex items-center gap-2">
                 <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                 Remote-friendly roles available
@@ -149,10 +137,8 @@ export default async function CareersPage() {
                   ? `${jobs.length} open position${jobs.length !== 1 ? 's' : ''}`
                   : 'New roles posted regularly'}
               </div>
-            </div>
           </div>
-        </PageSection>
-      </div>
+      </PublicPageHero>
 
       {/* No jobs state — this is the page's whole content when nothing is open,
           so it carries a real call to action rather than just an apology. */}

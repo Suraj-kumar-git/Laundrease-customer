@@ -4,7 +4,7 @@ import {
   ThumbsUp, AlertTriangle, Ban, Phone,
   Users, Sparkles,
 } from 'lucide-react'
-import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
+import { FooterPageLayout, PageSection, SectionHeading, PublicPageHero } from '@/components/layout/footer-page-layout'
 
 export const metadata: Metadata = {
   title: 'Community Guidelines | Laundrease',
@@ -158,27 +158,16 @@ export default function CommunityGuidelinesPage() {
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'Community Guidelines' }]}>
       {/* Hero */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
-        <div className="pointer-events-none absolute -top-40 -right-40 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-20 -left-20 h-64 w-64 rounded-full bg-primary/5 blur-3xl" />
-        <PageSection className="relative py-24 md:py-32">
-          <div className="max-w-3xl">
-            <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
-              <Users className="h-3 w-3" />
-              Community Guidelines
-            </span>
-            <h1 className="mt-2 text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl md:text-6xl">
-              How We Treat Each Other on Laundrease
-            </h1>
-            <p className="mt-6 text-xl text-muted-foreground leading-relaxed">
-              Laundrease works because people trust each other. These guidelines exist to protect that trust — for customers, laundry partners, and delivery agents alike.
-            </p>
-            <p className="mt-4 text-sm text-muted-foreground">
-              Last updated: January 2024
-            </p>
-          </div>
-        </PageSection>
-      </div>
+      <PublicPageHero
+        badge="Community Guidelines"
+        icon={<Users className="h-3 w-3" />}
+        title="How We Treat Each Other on Laundrease"
+        subtitle="Laundrease works because people trust each other. These guidelines exist to protect that trust — for customers, laundry partners, and delivery agents alike."
+      >
+        <p className="text-xs text-muted-foreground">
+          Last updated: January 2024
+        </p>
+      </PublicPageHero>
 
       {/* Core principles */}
       <PageSection>

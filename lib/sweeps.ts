@@ -119,3 +119,38 @@ export async function runSubscriptionExpiry(): Promise<SubscriptionExpiryResult>
   )
   return { expired: parseInt(result?.count ?? '0', 10) }
 }
+
+// ── Notification retention ──────────────────────────────────────────────────
+
+export interface NotificationRetentionResult { deleted: number }
+
+/**
+ * Delete admin notifications older than the retention window.
+ *
+ * The bell's "Clear" is a per-admin dismissal — it hides a notification for
+ * one person and leaves the row for everyone else (see migration 58). Nothing
+ * in the product deletes the feed itself, so without this the table grows for
+ * the life of the platform.
+ *
+ * Deleting cascades to admin_notification_state, so per-admin read/cleared
+ * rows never outlive the notification they describe.
+ *
+ * Losing an unactioned notification is safe: these are prompts, not the work
+ * itself. A provider still awaiting verification after ten days is still
+ * sitting unverified in the Providers list, which is the actual queue — the
+ * bell is only how it got noticed the first time.
+ *
+ * Runs daily rather than on a ten-day cycle. Cron cannot express "every ten
+ * days": a step of 10 in the day-of-month field fires on the 1st, 11th, 21st
+ * and 31st, so the gap collapses to a single day at each month boundary. A
+ * daily pass keeps the table from ever carrying more than one day beyond the
+ * window, and costs one DELETE.
+ */
+export async function runNotificationRetention(retentionDays = 10): Promise<NotificationRetentionResult> {
+  const { rowCount } = await query(
+    `DELETE FROM admin_notifications
+     WHERE created_at < NOW() - make_interval(days => $1::INT)`,
+    [retentionDays]
+  )
+  return { deleted: rowCount ?? 0 }
+}

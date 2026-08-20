@@ -18,6 +18,7 @@ import {
   validationError,
 } from '@/lib/api-response'
 import { sendOtpSms } from '@/lib/notifications/sms'
+import { recordPolicyAcceptance, currentPolicyVersion, acceptanceContext } from '@/lib/legal/acceptance'
 import { sendOtpEmail } from '@/lib/notifications/email'
 import { sendSMSOtpOnEmail } from '@/lib/notifications/temp-sms-otp-on-email'
  
@@ -73,8 +74,21 @@ export async function POST(req: NextRequest) {
         ? body.referral_code.trim().toUpperCase()
         : undefined
 
+    // Terms acceptance, enforced server-side.
+    //
+    // The form has had an "I agree" checkbox for a long time, but it was only
+    // ever validated in the browser and never sent — so it stopped an honest
+    // user and nobody else, and left no record either way. This endpoint is a
+    // plain POST; consent that can be bypassed by not using the form is not
+    // consent. Recorded against the user once the transaction commits.
+    if (body.accept_terms !== true) {
+      return validationError({
+        accept_terms: ['You must accept the Terms of Service and Privacy Policy to register'],
+      } as any)
+    }
+
     const validation = registerSchema.safeParse(body)
- 
+
     if (!validation.success) {
       const errors = validation.error.flatten().fieldErrors
       return validationError(errors as any)
@@ -262,6 +276,22 @@ export async function POST(req: NextRequest) {
         // Non-fatal — code will be lazily generated on first visit to refer & earn page
         console.error('[register] Referral code generation error (non-fatal):', codeGenError)
       }
+    }
+
+    // Consent record, written once the user genuinely exists. Outside the
+    // transaction on purpose: the request was already refused above if
+    // acceptance was missing, so a failure to write the audit row must not
+    // roll back a valid registration. Stores the document VERSION, so a
+    // future revision can be re-consented by exactly the people still on the
+    // old one.
+    {
+      const { ip, userAgent } = acceptanceContext(req)
+      await recordPolicyAcceptance({
+        userId: result.user.id,
+        role: 'customer',
+        version: await currentPolicyVersion('customer'),
+        ip, userAgent,
+      })
     }
 
     // Send verification emails/SMS outside transaction

@@ -73,7 +73,7 @@ export function FaqContent({ items }: { items: FaqEntry[] }) {
   const toggleFAQ = (id: string) => setOpenId(openId === id ? null : id)
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
+    <div className="flex-1 bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
       <div className="container mx-auto px-4 pt-6 pb-10 sm:pt-8">
         {/* Compact header — the old full-bleed blue hero (py-20, a 6xl
             heading and an 80px icon medallion) filled an entire viewport

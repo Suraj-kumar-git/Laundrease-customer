@@ -1240,7 +1240,7 @@ export default function CustomerDashboard() {
     // Skeleton mirroring the real layout (header strip → stats → address/CTA
     // → content cards) — consistent with the pulse loaders used elsewhere.
     return (
-      <div className="min-h-screen bg-muted/20">
+      <div className="flex-1 bg-muted/20">
         <div className="border-b border-border/50 bg-background pb-5 pt-6">
           <div className="container mx-auto animate-pulse space-y-4 px-4">
             <div className="h-7 w-48 rounded-lg bg-muted" />
@@ -1326,7 +1326,7 @@ export default function CustomerDashboard() {
 
   return (
     <>
-      <div className="min-h-screen overflow-x-hidden bg-muted/20">
+      <div className="flex-1 overflow-x-hidden bg-muted/20">
 
         {/* ---- Compact header: greeting + stats, no heavy background ---- */}
         <div className="border-b border-border/50 bg-background pb-5 pt-6">
