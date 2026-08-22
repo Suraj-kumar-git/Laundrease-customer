@@ -1,5 +1,6 @@
 // lib/payment/cashfree.ts
 import crypto from 'crypto'
+import { signaturesMatch } from './signature'
 import type {
   PaymentGatewayAdapter,
   GatewayConfig,
@@ -86,24 +87,32 @@ export class CashfreeAdapter implements PaymentGatewayAdapter {
     const data = await response.json()
     const verified = data.payment_status === 'SUCCESS'
 
+    // payment_amount comes from Cashfree's own API over a server-to-server
+    // call, not from the browser redirect — so unlike a form field it cannot
+    // have been touched by the payer. That makes it safe to reconcile against
+    // our record (lib/payment/reconcile.ts).
+    const reported = data.payment_amount ?? data.order_amount
+
     return {
       verified,
       gatewayPaymentId: params.gatewayPaymentId,
       gatewayOrderId: params.gatewayOrderId,
+      amount: verified && reported != null ? Number(reported) : undefined,
     }
   }
 
   verifyWebhook(params: WebhookVerificationParams): boolean {
     if (!this.config.webhookSecret) return false
-    // Cashfree webhook: signature = HMAC-SHA256(timestamp + raw_body, secret)
-    // Signature header: x-webhook-signature
-    // Timestamp header: x-webhook-timestamp
-    // Since we only have signature here, basic verification:
+    // Cashfree signs the CONCATENATION of the x-webhook-timestamp header and
+    // the raw body, base64. Hashing the body alone (what this did before)
+    // never matches a real callback, so the check could only ever fail —
+    // which reads as "webhooks don't work" rather than as a bug.
+    if (!params.timestamp) return false
     const expectedSignature = crypto
       .createHmac('sha256', this.config.webhookSecret)
-      .update(params.rawBody)
+      .update(params.timestamp + params.rawBody)
       .digest('base64')
-    return expectedSignature === params.signature
+    return signaturesMatch(expectedSignature, params.signature)
   }
 
   // Cashfree refunds key off the *order* id, not the payment id.

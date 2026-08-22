@@ -109,11 +109,30 @@ export async function GET(
     )
 
     // Status history
+    //
+    // Who a customer is shown depends on the actor's role, because the raw
+    // u.full_name exposed our staff by name: an order confirmed by a provider
+    // owner, an admin, or a support agent all read as "Confirmed by <person>".
+    // A customer's relationship is with the business, not with whoever at
+    // Laundrease happened to click the button.
+    //
+    //   laundry / admin / support -> the provider's business name
+    //   delivery                  -> unchanged; the customer meets this person
+    //                                at the door and already sees their name
+    //                                on the order
+    //   customer                  -> unchanged; it is their own action
     const historyRes = await query(
       `SELECT osh.status, osh.notes, osh.created_at,
-              u.full_name AS changed_by_name
+              CASE
+                WHEN r.name IN ('laundry', 'admin', 'support')
+                  THEN COALESCE(lp.business_name, 'Laundrease')
+                ELSE u.full_name
+              END AS changed_by_name
        FROM order_status_history osh
-       LEFT JOIN users u ON u.id = osh.updated_by
+       LEFT JOIN users u  ON u.id = osh.updated_by
+       LEFT JOIN roles r  ON r.id = u.role_id
+       LEFT JOIN orders o ON o.id = osh.order_id
+       LEFT JOIN laundry_profiles lp ON lp.id = o.laundry_profile_id
        WHERE osh.order_id = $1
        ORDER BY osh.created_at ASC`,
       [orderId]

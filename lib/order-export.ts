@@ -282,7 +282,7 @@ export function buildExportSql(where: string): string {
       cu.email         AS customer_email,
       lp.business_name AS provider_name,
       du.full_name     AS delivery_partner_name,
-      (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id)::INT AS item_count
+      (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id)::INT AS item_count
 
     FROM orders o
     INNER JOIN users cu ON cu.id = o.customer_id

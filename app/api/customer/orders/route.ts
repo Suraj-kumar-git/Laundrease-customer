@@ -78,11 +78,24 @@ export async function GET(req: NextRequest) {
            o.assignment_status,
            lp.business_name  AS provider_name,
            lp.city           AS provider_city,
-           -- Quick item summary: count items and services
-           (SELECT COUNT(*)  FROM order_items oi  WHERE oi.order_id = o.id)::int AS item_count,
-           (SELECT COUNT(*)  FROM order_items oi
-            JOIN order_item_services ois ON ois.order_item_id = oi.id
-            WHERE oi.order_id = o.id)::int AS service_count
+           -- Quick item summary.
+           --
+           -- Both of these counted ROWS, which is not what either word means to
+           -- a customer. order_items holds one row per garment type per
+           -- service, so "2 T-shirts steam-ironed" was one item, and an order
+           -- of 10 garments across 3 services reported "6 items · 6 services".
+           --
+           -- Items = garments, so SUM the quantity. A per-kg line stores
+           -- quantity 1 with the weight in weight_kg, so a mixed load counts as
+           -- one item, which is what it is.
+           (SELECT COALESCE(SUM(oi.quantity), 0)
+              FROM order_items oi WHERE oi.order_id = o.id)::int AS item_count,
+           -- Services = how many distinct services were bought, not how many
+           -- garment/service pairings exist.
+           (SELECT COUNT(DISTINCT ois.service_id)
+              FROM order_items oi
+              JOIN order_item_services ois ON ois.order_item_id = oi.id
+             WHERE oi.order_id = o.id)::int AS service_count
          FROM orders o
          LEFT JOIN laundry_profiles lp ON lp.id = o.laundry_profile_id
          WHERE ${where}

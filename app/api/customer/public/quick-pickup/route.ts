@@ -14,6 +14,11 @@ import {
 const PHONE_REGEX = /^\+?[6-9]\d{9}$/   // Indian mobile numbers
 const PINCODE_REGEX = /^\d{6}$/
 
+// A real person submits once and waits for the call. Two allows for a genuine
+// retry after a network failure; more than that is a script.
+const MAX_QUICK_PICKUPS_PER_PHONE = 2
+const QUICK_PICKUP_WINDOW_MINUTES = 60
+
 export async function POST(req: NextRequest) {
   let body: Record<string, any>
 
@@ -76,9 +81,40 @@ export async function POST(req: NextRequest) {
     return validationError(errors)
   }
 
-  // ---- Rate limiting (simple IP-based, in-memory) -----------
-  // For production: use Redis. This prevents form spam in the meantime.
-  // The middleware rate limiting already handles general abuse.
+  // ---- Abuse control ------------------------------------------
+  //
+  // This endpoint is UNAUTHENTICATED (it lives under /api/customer/public/*,
+  // which proxy.ts lets through without a session) and it INSERTs a lead that
+  // lands in providers' queues. It previously carried a comment claiming
+  // "simple IP-based, in-memory" rate limiting with no code under it, and a
+  // second claim that "the middleware rate limiting already handles general
+  // abuse" — proxy.ts has no rate limiting whatsoever. So anyone on the
+  // internet could generate unlimited leads, and a reader of this file would
+  // have believed otherwise.
+  //
+  // Counted in the database, not in memory: an in-process Map is per-instance
+  // and resets on every cold start, which on serverless is no control at all.
+  try {
+    const recent = await query<{ cnt: string }>(
+      `SELECT COUNT(*)::TEXT AS cnt
+       FROM quick_pickup_requests
+       WHERE phone = $1
+         AND created_at > NOW() - make_interval(mins => $2::INT)`,
+      [phone, QUICK_PICKUP_WINDOW_MINUTES]
+    )
+    if (parseInt(recent.rows[0]?.cnt ?? '0', 10) >= MAX_QUICK_PICKUPS_PER_PHONE) {
+      // Deliberately not "you are rate limited" — this endpoint is public, and
+      // a precise message tells an abuser exactly what the ceiling is.
+      return errorResponse(
+        'We already have a recent request from this number. Our team will call you shortly.',
+        429,
+        'QUICK_PICKUP_ALREADY_SUBMITTED'
+      )
+    }
+  } catch (err) {
+    // A failure to COUNT must not block a genuine customer's request.
+    console.error('[quick-pickup] abuse check failed, allowing:', (err as Error).message)
+  }
 
   // ---- Insert -------------------------------------------------
   try {

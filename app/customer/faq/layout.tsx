@@ -9,6 +9,7 @@
 
 import type { Metadata } from 'next'
 import { getFaqs } from './get-faqs'
+import { safeJsonLd } from '@/lib/json-ld'
 
 export const metadata: Metadata = {
   title: 'Frequently Asked Questions | Laundrease',
@@ -38,7 +39,9 @@ export default async function FaqLayout({ children }: { children: React.ReactNod
     <>
       <script
         type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
+        // safeJsonLd, not JSON.stringify: this payload is CMS text, and a raw
+        // stringify lets a '</script>' inside an answer break out of the tag.
+        dangerouslySetInnerHTML={{ __html: safeJsonLd(faqJsonLd) }}
       />
       {children}
     </>

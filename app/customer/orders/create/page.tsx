@@ -483,6 +483,22 @@ function PageContent() {
     finally { setClearingCart(false); setShowConfirmClear(false) }
   }
 
+  // Only what identifies a line. Prices, names and icons are display data
+  // the server re-derives from its own catalogue anyway, and sending a
+  // price the backend ignores just invites someone to try changing it.
+  const toPricingPayload = (services: SelectedService[]) => services.map(s => ({
+    type:            s.type,
+    service_id:      s.service_id,
+    product_type_id: s.product_type_id,
+    quantity:        s.quantity,
+    weight_kg:       s.weight_kg,
+    is_express:      s.is_express,
+    // Not used for pricing — the server only quotes it back in validation
+    // messages ("\"Wash & Fold\" requires minimum 0.5 kg"). Dropping it turned
+    // those into "undefined requires minimum 0.5 kg".
+    service_name:    s.service_name,
+  }))
+
   // ---- Save cart step (fire-and-forget, returns draft_order_number) --------
   const saveCartStep = useCallback(async (step: number, data: {
     providerId?: number; addressId?: number; services?: SelectedService[]
@@ -495,7 +511,7 @@ function PageContent() {
           current_step:      step,
           provider_id:       data.providerId  ?? null,
           address_id:        data.addressId   ?? null,
-          selected_services: data.services    ?? undefined,
+          selected_services: data.services ? toPricingPayload(data.services) : undefined,
           pickup_date:       data.pickupDate  ?? null,
           pickup_time_slot:  data.pickupTimeSlot ?? null,
           is_express:        data.isExpress   ?? false,
@@ -642,7 +658,7 @@ function PageContent() {
           pickup_date:           state.pickup_date,
           pickup_time_slot:      state.pickup_time_slot,
           is_express:            state.selected_services.some(s => s.is_express),
-          services:              state.selected_services,
+          services:              toPricingPayload(state.selected_services),
           payment_method:        paymentMethod,
           wallet_amount:         walletAmount,
           coupon_code:           state.applied_coupon?.code,

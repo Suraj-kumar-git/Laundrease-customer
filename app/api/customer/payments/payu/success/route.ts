@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { transaction } from '@/lib/db'
 import { getActiveGateway } from '@/lib/payment'
+import { reconcileAmount, logReconcileFailure } from '@/lib/payment/reconcile'
 
 function getCustomerBaseUrl(): string {
   const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL
@@ -71,6 +72,12 @@ export async function POST(req: NextRequest) {
     // The redirect URL needs the order's public_id (UUID) — orders.id is an
     // internal BIGSERIAL the customer-facing routes don't accept.
     let orderPublicId: string | null = null
+    // Hoisted: the redirect below must reflect whether the payment was
+    // actually settled, not merely whether the signature parsed. A rejected
+    // amount marks the payment failed, so sending the payer to the success
+    // page would tell them an unpaid order is paid.
+    let settled = false
+    let failureReason = 'verification_failed'
 
     await transaction(async (client) => {
       const paymentResult = await client.query(
@@ -89,7 +96,20 @@ export async function POST(req: NextRequest) {
 
       const payment = paymentResult.rows[0]
       orderPublicId = payment.order_public_id
-      const isVerifiedSuccess = verification.verified
+
+      // A valid signature proves the message came from PayU unaltered. It does
+      // NOT prove PayU collected what this order is worth — the amount is a
+      // separate claim, and accepting the first as the second is how a large
+      // order gets settled for a small payment. `amount` is one of the hashed
+      // fields, so a verified signature vouches for the figure we compare.
+      const reconciled = reconcileAmount(payment.amount, verification.amount)
+      if (verification.verified && !reconciled.ok) {
+        logReconcileFailure('payu/success', txnid, reconciled)
+      }
+
+      const isVerifiedSuccess = verification.verified && reconciled.ok
+      settled = isVerifiedSuccess
+      if (verification.verified && !reconciled.ok) failureReason = 'amount_mismatch'
       const paymentStatus = isVerifiedSuccess ? 'completed' : 'failed'
       const completedAt = isVerifiedSuccess ? new Date() : null
       const failedAt     = isVerifiedSuccess ? null : new Date()
@@ -173,11 +193,11 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    if (verification.verified) {
+    if (settled) {
       return buildRedirect(`/customer/orders/payment/success?order_id=${orderPublicId ?? ''}`)
     }
 
-    return buildRedirect(`/customer/orders/payment/failure?order_id=${orderPublicId ?? ''}&reason=verification_failed`)
+    return buildRedirect(`/customer/orders/payment/failure?order_id=${orderPublicId ?? ''}&reason=${failureReason}`)
   } catch (error) {
     console.error('[POST /api/customer/payments/payu/success]', error)
     return NextResponse.redirect(

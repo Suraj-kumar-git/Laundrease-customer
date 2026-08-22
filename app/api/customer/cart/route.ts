@@ -6,6 +6,7 @@
 import { NextRequest } from 'next/server'
 import { query, transaction } from '@/lib/db'
 import { getMixedLoadProductTypeId } from '@/lib/product-types'
+import { getPricingContext, priceLine, PricingError, type Exec } from '@/lib/order-pricing'
 import {
   successResponse, errorResponse, serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
@@ -252,38 +253,71 @@ export async function POST(req: NextRequest) {
       if (body.selected_services !== undefined) {
         await client.query(`DELETE FROM cart_items WHERE cart_id = $1`, [cartId])
 
-        // Per-kg items aren't tied to a specific garment — resolve the
-        // shared "Regular Laundry (Mixed)" product type once up front
-        // rather than trusting whatever (or nothing) the client sent.
-        const hasKgItem = body.selected_services.some(item => item.type === 'per_kg')
-        const mixedLoadProductTypeId = hasKgItem ? await getMixedLoadProductTypeId(client) : null
+        // ---- Server-side price resolution (SECURITY) ----------------------
+        //
+        // unit_price, line_total and express_multiplier are NEVER read from
+        // the request. They used to be written straight through, so a hand-
+        // rolled request could add a ₹149 item to the cart at ₹10 and every
+        // screen reading the cart would repeat that figure back.
+        //
+        // The same lib the order-create route uses re-derives each line from
+        // the provider's catalogue, so the cart and the eventual order cannot
+        // disagree about what something costs.
+        const exec: Exec = (text, params) => client.query(text, params)
 
-        for (const item of body.selected_services) {
-          if (item.type === 'per_kg') {
+        // Which provider to price against: the one being set in this request
+        // if present, otherwise whatever the cart already points at.
+        let pricingProviderId: number | null = body.provider_id ?? null
+        if (pricingProviderId == null && !body.reset_provider) {
+          const cur = await client.query(
+            `SELECT provider_id FROM shopping_carts WHERE id = $1`, [cartId]
+          )
+          pricingProviderId = cur.rows[0]?.provider_id ?? null
+        }
+
+        // No provider means nothing can be priced. An empty selection is
+        // still fine — that is how the customer clears their cart.
+        if (body.selected_services.length > 0 && pricingProviderId == null) {
+          throw new Error('CART_NO_PROVIDER')
+        }
+
+        if (body.selected_services.length > 0) {
+          const ctx = await getPricingContext(exec, pricingProviderId!)
+
+          // Per-kg items aren't tied to a specific garment — resolve the
+          // shared "Regular Laundry (Mixed)" product type once up front
+          // rather than trusting whatever (or nothing) the client sent.
+          const hasKgItem = body.selected_services.some(item => item.type === 'per_kg')
+          const mixedLoadProductTypeId = hasKgItem ? await getMixedLoadProductTypeId(client) : null
+
+          for (const item of body.selected_services) {
+            const priced = await priceLine(exec, ctx, {
+              type:            item.type,
+              service_id:      item.service_id,
+              product_type_id: item.type === 'per_kg' ? mixedLoadProductTypeId : item.product_type_id,
+              quantity:        item.quantity,
+              weight_kg:       item.weight_kg,
+              is_express:      item.is_express,
+            })
+
             const ci = await client.query(
               `INSERT INTO cart_items (cart_id, product_type_id, quantity, weight_kg)
-               VALUES ($1, $2, 1, $3) RETURNING id`,
-              [cartId, mixedLoadProductTypeId, item.weight_kg]
+               VALUES ($1, $2, $3, $4) RETURNING id`,
+              [
+                cartId,
+                priced.product_type_id,
+                priced.type === 'per_kg' ? 1 : priced.quantity,
+                priced.type === 'per_kg' ? priced.weight_kg : null,
+              ]
             )
             await client.query(
               `INSERT INTO cart_item_services
                  (cart_item_id, service_id, unit_price, line_total, is_express, express_multiplier)
                VALUES ($1,$2,$3,$4,$5,$6)`,
-              [ci.rows[0].id, item.service_id, item.unit_price,
-               item.line_total, item.is_express, item.express_multiplier]
-            )
-          } else if (item.type === 'per_unit') {
-            const ci = await client.query(
-              `INSERT INTO cart_items (cart_id, product_type_id, quantity, weight_kg)
-               VALUES ($1, $2, $3, NULL) RETURNING id`,
-              [cartId, item.product_type_id, item.quantity]
-            )
-            await client.query(
-              `INSERT INTO cart_item_services
-                 (cart_item_id, service_id, unit_price, line_total, is_express, express_multiplier)
-               VALUES ($1,$2,$3,$4,$5,$6)`,
-              [ci.rows[0].id, item.service_id, item.unit_price,
-               item.line_total, item.is_express, item.express_multiplier]
+              [
+                ci.rows[0].id, priced.service_id, priced.unit_price,
+                priced.line_total, priced.is_express, priced.express_multiplier,
+              ]
             )
           }
         }
@@ -298,6 +332,22 @@ export async function POST(req: NextRequest) {
       draft_order_number: result.draft_order_number,
     })
   } catch (err) {
+    // Pricing failures are the customer's problem to see, not a 500: the
+    // provider went inactive, or stopped offering something still sitting in
+    // the basket. Saying so lets the page recover instead of showing a
+    // generic error over a cart that will never save.
+    if (err instanceof PricingError) {
+      return errorResponse(
+        err.code === 'INVALID_PROVIDER'
+          ? 'That provider is no longer available. Please choose another.'
+          : 'One of the selected services is no longer offered by this provider.',
+        400,
+        err.code
+      )
+    }
+    if (err instanceof Error && err.message === 'CART_NO_PROVIDER') {
+      return errorResponse('Choose a provider before adding items.', 400, 'CART_NO_PROVIDER')
+    }
     console.error('[POST /api/customer/cart]', err)
     return serverErrorResponse('Failed to save cart')
   }
