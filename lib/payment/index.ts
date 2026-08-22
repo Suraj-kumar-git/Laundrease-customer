@@ -34,7 +34,38 @@ export async function getActiveGateway(): Promise<ActiveGatewayInfo | null> {
 
   if (result.rowCount === 0) return null
 
-  const row = result.rows[0]
+  return buildGatewayInfo(result.rows[0])
+}
+
+/**
+ * Resolve a gateway by provider name, ACTIVE OR NOT.
+ *
+ * Webhooks need this and getActiveGateway() cannot serve them. Switching the
+ * active gateway does not cancel the payments already in flight on the old
+ * one, and their callbacks keep arriving for hours. Matching only the active
+ * provider would reject those as "invalid provider" — silently dropping the
+ * settlement signal for real money, at exactly the moment the config changed.
+ *
+ * Safe because the signature still has to verify against THAT row's own
+ * webhook secret; being listed here grants nothing on its own.
+ */
+export async function getGatewayByProvider(provider: string): Promise<ActiveGatewayInfo | null> {
+  const result = await query(
+    `SELECT id, provider, api_key_enc, api_secret_enc, webhook_secret_enc,
+            config, cod_enabled, cod_max_order_amount
+     FROM payment_gateway_config
+     WHERE provider = $1
+     ORDER BY is_active DESC, id DESC
+     LIMIT 1`,
+    [provider]
+  )
+
+  if (result.rowCount === 0) return null
+
+  return buildGatewayInfo(result.rows[0])
+}
+
+function buildGatewayInfo(row: any): ActiveGatewayInfo | null {
   const apiKey = safeDecrypt(row.api_key_enc)
   const apiSecret = safeDecrypt(row.api_secret_enc)
 

@@ -112,6 +112,13 @@ export async function POST(
       )
     }
 
+    // Record the gateway order we are about to create, keyed to this payment.
+    //
+    // This is what lets verification later prove a signature belongs to THIS
+    // order: the gateway order was created with this row's amount, so matching
+    // its id is equivalent to matching the amount for gateways whose signature
+    // does not cover the amount (Razorpay). Without it, a valid signature from
+    // any other order would settle this one.
     const gatewayOrder = await gatewayInfo.adapter.createOrder({
       amount: parseFloat(payment.amount),
       currency: 'INR',
@@ -123,6 +130,26 @@ export async function POST(
         productinfo: `Order ${order.order_number}`,
       },
     })
+
+    // Persist the gateway order id against this payment. Upsert on
+    // merchant_txn_id so a retry updates the existing row rather than
+    // colliding with it.
+    await query(`
+      INSERT INTO payment_gateway_transactions (
+        payment_id, gateway_config_id, provider, merchant_txn_id,
+        provider_order_id, amount, currency, status
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, 'INR', 'initiated')
+      ON CONFLICT (merchant_txn_id) DO UPDATE SET
+        gateway_config_id = EXCLUDED.gateway_config_id,
+        provider          = EXCLUDED.provider,
+        provider_order_id = EXCLUDED.provider_order_id,
+        amount            = EXCLUDED.amount,
+        updated_at        = NOW()
+    `, [
+      payment.id, gatewayInfo.id, gatewayInfo.provider, payment.merchant_txn_id,
+      gatewayOrder.gatewayOrderId, payment.amount,
+    ]).catch(e => console.error('[pay] gateway-order record failed:', (e as Error).message))
 
     return successResponse({
       order_id:    order.id,

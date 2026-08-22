@@ -1,6 +1,7 @@
 // app/api/customer/dashboard/route.ts
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
+import { customerVisibleOrderSql } from '@/lib/customer-order-visibility'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { resolveProfileImageUrl } from '@/lib/s3'
 
@@ -48,6 +49,8 @@ export async function GET(req: NextRequest) {
         city,
         state,
         postal_code,
+        latitude,
+        longitude,
         is_default,
         contact_name,
         contact_phone,
@@ -58,8 +61,8 @@ export async function GET(req: NextRequest) {
       ORDER BY is_default DESC, position ASC
     `, [customerProfileId])
 
-    // ---- 3. Active order (most recent non-terminal) ------------------
-    const activeOrderResult = await query(`
+    // ---- 3. Active orders (every non-terminal order, most recent first) ----
+    const activeOrdersResult = await query(`
       SELECT
         o.id,
         o.public_id,
@@ -82,29 +85,30 @@ export async function GET(req: NextRequest) {
         AND o.status NOT IN ('delivered', 'completed', 'cancelled', 'returned', 'failed')
         -- Hide orders still awaiting online payment confirmation — see
         -- app/api/customer/orders/route.ts for why.
-        AND (o.payment_method LIKE '%cod%' OR o.payment_status = 'paid')
+        AND ${customerVisibleOrderSql('o')}
       ORDER BY o.created_at DESC
-      LIMIT 1
     `, [userId])
+    const activeOrderRows = activeOrdersResult.rows
 
-    const activeOrderRow = activeOrderResult.rowCount! > 0
-      ? activeOrderResult.rows[0]
-      : null
-
-    // ---- 4. Status history for active order -------------------------
-    let orderStatusHistory: any[] = []
-    if (activeOrderRow) {
+    // ---- 4. Status history for every active order, batched ----------
+    let historyByOrderId = new Map<number, any[]>()
+    if (activeOrderRows.length > 0) {
       const historyResult = await query(`
         SELECT
+          osh.order_id,
           osh.status,
           osh.notes,
           osh.location,
           osh.created_at AS timestamp
         FROM order_status_history osh
-        WHERE osh.order_id = $1
+        WHERE osh.order_id = ANY($1)
         ORDER BY osh.created_at ASC
-      `, [activeOrderRow.id])
-      orderStatusHistory = historyResult.rows
+      `, [activeOrderRows.map(o => o.id)])
+      for (const row of historyResult.rows) {
+        const list = historyByOrderId.get(row.order_id) ?? []
+        list.push(row)
+        historyByOrderId.set(row.order_id, list)
+      }
     }
 
     // ---- 5. Wallet --------------------------------------------------
@@ -132,7 +136,7 @@ export async function GET(req: NextRequest) {
         )::int                                              AS completed_orders,
         COUNT(*) FILTER (
           WHERE status NOT IN ('delivered', 'completed', 'cancelled', 'returned', 'failed')
-            AND (payment_method LIKE '%cod%' OR payment_status = 'paid')
+            AND ${customerVisibleOrderSql('orders')}
         )::int                                              AS active_orders,
         COALESCE(
           SUM(total_amount) FILTER (WHERE status IN ('delivered', 'completed')),
@@ -166,29 +170,31 @@ export async function GET(req: NextRequest) {
         city:         a.city,
         state:        a.state,
         postalCode:   a.postal_code,
+        latitude:     a.latitude  ?? null,
+        longitude:    a.longitude ?? null,
         isDefault:    a.is_default,
         contactName:  a.contact_name ?? null,
         contactPhone: a.contact_phone ?? null,
         instructions: a.instructions ?? null,
       })),
 
-      activeOrder: activeOrderRow ? {
-        id:               activeOrderRow.public_id,
-        orderNumber:      activeOrderRow.order_number,
-        status:           activeOrderRow.status,
-        pickupAddress:    activeOrderRow.pickup_address,
-        deliveryAddress:  activeOrderRow.delivery_address,
-        pickupDate:       activeOrderRow.pickup_date,
-        pickupTimeSlot:   activeOrderRow.pickup_time_slot,
-        deliveryDate:     activeOrderRow.delivery_date,
-        deliveryTimeSlot: activeOrderRow.delivery_time_slot,
-        totalAmount:      parseFloat(activeOrderRow.total_amount),
-        isExpress:        activeOrderRow.is_express,
-        laundryName:      activeOrderRow.laundry_name,
-        createdAt:        activeOrderRow.created_at,
-        updatedAt:        activeOrderRow.updated_at,
-        statusHistory:    orderStatusHistory,
-      } : null,
+      activeOrders: activeOrderRows.map(row => ({
+        id:               row.public_id,
+        orderNumber:      row.order_number,
+        status:           row.status,
+        pickupAddress:    row.pickup_address,
+        deliveryAddress:  row.delivery_address,
+        pickupDate:       row.pickup_date,
+        pickupTimeSlot:   row.pickup_time_slot,
+        deliveryDate:     row.delivery_date,
+        deliveryTimeSlot: row.delivery_time_slot,
+        totalAmount:      parseFloat(row.total_amount),
+        isExpress:        row.is_express,
+        laundryName:      row.laundry_name,
+        createdAt:        row.created_at,
+        updatedAt:        row.updated_at,
+        statusHistory:    historyByOrderId.get(row.id) ?? [],
+      })),
 
       // recentOrders intentionally removed per requirements
 

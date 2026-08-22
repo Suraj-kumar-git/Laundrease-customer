@@ -14,11 +14,18 @@ import { PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL } from '@/lib/subscription'
 //   ?pincode=411045
 //   ?city=Pune
 //
-// Returns providers in that area with contact details visible to public.
+// Returns providers in that area for public discovery.
 // We only expose: business_name, city, postal_code, rating,
-//   services_offered, contact_person_name, contact_person_phone,
-//   address_line1, landmark
-// We deliberately do NOT expose: bank details, documents, exact coordinates.
+//   services_offered, contact_person_name, address_line1, landmark
+// We deliberately do NOT expose: bank details, documents, exact coordinates,
+//   or any phone number.
+//
+// The phone used to be here. It came out for two reasons. Customer ↔ provider
+// calls are masked once an order exists, and a number published one click away
+// on an unauthenticated page makes that masking pointless. More importantly, a
+// public shop number lets a customer discover a laundry here and then book
+// directly — no order, no commission. Enquiries go through the quick-pickup
+// form instead, which captures the lead rather than handing it away.
 
 export async function GET(req: NextRequest) {
   const { searchParams } = req.nextUrl
@@ -38,7 +45,6 @@ export async function GET(req: NextRequest) {
       rating: number
       services_offered: string[] | null
       contact_person_name: string | null
-      contact_person_phone: string | null
       address_line1: string | null
       landmark: string | null
     }>(
@@ -51,7 +57,6 @@ export async function GET(req: NextRequest) {
              lp.rating,
              lp.services_offered,
              lp.contact_person_name,
-             lp.contact_person_phone,
              lp.address_line1,
              lp.landmark
            FROM laundry_profiles lp
@@ -64,7 +69,7 @@ export async function GET(req: NextRequest) {
            ORDER BY lp.rating DESC, lp.business_name ASC`
         : `SELECT
              lp.id, lp.business_name, lp.city, lp.postal_code, lp.rating,
-             lp.services_offered, lp.contact_person_name, lp.contact_person_phone,
+             lp.services_offered, lp.contact_person_name,
              lp.address_line1, lp.landmark
            FROM laundry_profiles lp
            WHERE lp.status = 'active'

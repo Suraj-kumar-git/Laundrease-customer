@@ -5,7 +5,7 @@ import {
   Lock, EyeOff, Smartphone, Trash2,
   Phone, Mail, Sparkles,
 } from 'lucide-react'
-import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
+import { FooterPageLayout, PageSection, SectionHeading, PublicPageHero } from '@/components/layout/footer-page-layout'
 import { SAFETY_CENTER_FALLBACK } from '@/lib/footer-page-fallbacks'
 import type { PageContentBlock, HeroBody, CardItem, TextBlockBody } from '@/types/footer-pages'
 
@@ -156,45 +156,29 @@ export default async function SafetyCenterPage() {
   return (
     <FooterPageLayout breadcrumbs={[{ label: 'Safety Center' }]}>
       {/* Hero */}
-      <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
-        <div className="pointer-events-none absolute -top-40 -right-40 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-        <div className="pointer-events-none absolute bottom-0 left-0 h-64 w-64 rounded-full bg-primary/5 blur-3xl" />
-        <PageSection className="relative py-24 md:py-32">
-          <div className="max-w-3xl">
-            {heroBody?.badge && (
-              <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
-                <ShieldCheck className="h-3 w-3" />
-                {heroBody.badge}
-              </span>
-            )}
-            <h1 className="mt-2 text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl md:text-6xl">
-              {hero?.title ?? 'Safety Center'}
-            </h1>
-            {hero?.subtitle && (
-              <p className="mt-6 text-xl text-muted-foreground leading-relaxed">
-                {hero.subtitle}
-              </p>
-            )}
-
-            {/* Trust indicators */}
-            <div className="mt-10 flex flex-wrap gap-4">
-              {[
-                { icon: 'shield-check', label: 'Verified Partners' },
-                { icon: 'lock', label: 'Encrypted Data' },
-                { icon: 'eye-off', label: 'Number Masking' },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="inline-flex items-center gap-2 rounded-full border border-border/50 bg-card px-4 py-2 text-sm text-muted-foreground shadow-sm"
-                >
-                  <DynamicIcon name={item.icon} className="h-4 w-4 text-primary" />
-                  {item.label}
-                </div>
-              ))}
+      <PublicPageHero
+        badge={heroBody?.badge}
+        icon={<ShieldCheck className="h-3 w-3" />}
+        title={hero?.title ?? 'Safety Center'}
+        subtitle={hero?.subtitle}
+      >
+        {/* Trust indicators */}
+        <div className="flex flex-wrap gap-2.5">
+          {[
+            { icon: 'shield-check', label: 'Verified Partners' },
+            { icon: 'lock', label: 'Encrypted Data' },
+            { icon: 'eye-off', label: 'Number Masking' },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="inline-flex items-center gap-2 rounded-full border border-border/50 bg-card px-3.5 py-1.5 text-xs text-muted-foreground shadow-sm sm:text-sm"
+            >
+              <DynamicIcon name={item.icon} className="h-3.5 w-3.5 text-primary" />
+              {item.label}
             </div>
-          </div>
-        </PageSection>
-      </div>
+          ))}
+        </div>
+      </PublicPageHero>
 
       {/* Partner safety */}
       {partnerSafety && <CardsSection block={partnerSafety} />}

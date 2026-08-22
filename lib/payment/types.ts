@@ -33,12 +33,32 @@ export interface PaymentVerificationResult {
   verified: boolean
   gatewayPaymentId: string
   gatewayOrderId: string
+  /**
+   * The amount in RUPEES that the verified signature actually covers, so the
+   * caller can reconcile it against our own record (lib/payment/reconcile.ts).
+   *
+   * Only meaningful when the gateway's signature includes the amount — PayU
+   * and Cashfree do, so they set it. Razorpay signs order_id|payment_id only,
+   * so it leaves this undefined rather than echoing back a number the
+   * signature does not vouch for: an amount taken from an unsigned field is
+   * attacker-controlled, and checking it would look like a control while
+   * being none.
+   */
+  amount?: number
 }
 
 export interface WebhookVerificationParams {
   rawBody: string
   signature: string
   provider: string
+  /**
+   * The provider's own timestamp header, when its signature covers it.
+   *
+   * Cashfree signs `timestamp + rawBody` (x-webhook-timestamp), so without
+   * this its verification can never pass on a real callback. PayU and
+   * Razorpay sign the body alone and ignore this.
+   */
+  timestamp?: string
 }
 
 export interface RefundParams {

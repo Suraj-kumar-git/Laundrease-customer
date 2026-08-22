@@ -5,7 +5,7 @@ import {
   Package, Smile, Store, MapPin,
   ArrowRight, Sparkles,
 } from 'lucide-react'
-import { FooterPageLayout, PageSection, SectionHeading } from '@/components/layout/footer-page-layout'
+import { FooterPageLayout, PageSection, SectionHeading, PublicPageHero } from '@/components/layout/footer-page-layout'
 import { GuestOnlyCta } from '@/components/common/guest-only-cta'
 import { ABOUT_US_FALLBACK } from '@/lib/footer-page-fallbacks'
 import { formatStat } from '@/lib/format-stat'
@@ -67,46 +67,29 @@ async function getAboutContent(): Promise<PageContentBlock[]> {
 function HeroSection({ block }: { block: PageContentBlock }) {
   const body = block.body as HeroBody
   return (
-    <div className="relative overflow-hidden bg-gradient-to-br from-primary/5 via-background to-primary/10">
-      {/* Decorative blobs */}
-      <div className="pointer-events-none absolute -top-40 -right-40 h-96 w-96 rounded-full bg-primary/10 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-20 -left-20 h-72 w-72 rounded-full bg-primary/8 blur-3xl" />
-
-      <PageSection className="relative py-24 md:py-32">
-        <div className="max-w-3xl">
-          {body.badge && (
-            <span className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-4 py-1.5 text-xs font-semibold uppercase tracking-widest text-primary">
-              <Sparkles className="h-3 w-3" />
-              {body.badge}
+    <PublicPageHero
+      badge={body.badge}
+      icon={<Sparkles className="h-3 w-3" />}
+      title={block.title ?? ''}
+      subtitle={block.subtitle}
+    >
+      {body.cta_text && body.cta_href && (
+        <div className="flex flex-wrap items-center gap-4">
+          <Link
+            href={body.cta_href}
+            className="inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-xl hover:shadow-primary/30"
+          >
+            {body.cta_text}
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+          {body.tagline && (
+            <span className="text-sm text-muted-foreground italic">
+              &quot;{body.tagline}&quot;
             </span>
           )}
-          <h1 className="mt-2 text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl md:text-6xl">
-            {block.title}
-          </h1>
-          {block.subtitle && (
-            <p className="mt-6 text-xl text-muted-foreground leading-relaxed">
-              {block.subtitle}
-            </p>
-          )}
-          {body.cta_text && body.cta_href && (
-            <div className="mt-10 flex flex-wrap items-center gap-4">
-              <Link
-                href={body.cta_href}
-                className="inline-flex items-center gap-2 rounded-xl bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:-translate-y-0.5 hover:bg-primary/90 hover:shadow-xl hover:shadow-primary/30"
-              >
-                {body.cta_text}
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-              {body.tagline && (
-                <span className="text-sm text-muted-foreground italic">
-                  &quot;{body.tagline}&quot;
-                </span>
-              )}
-            </div>
-          )}
         </div>
-      </PageSection>
-    </div>
+      )}
+    </PublicPageHero>
   )
 }
 
@@ -156,15 +139,12 @@ function MissionSection({ block }: { block: PageContentBlock }) {
         </div>
         {/* Decorative panel */}
         <div className="relative hidden md:block">
-          <div className="aspect-square max-w-sm rounded-3xl bg-gradient-to-br from-primary/20 to-primary/5 p-8">
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center">
-                <div className="mb-4 text-7xl">🧺</div>
-                <p className="text-sm font-medium text-muted-foreground">
-                  Making laundry the least of your worries
-                </p>
-              </div>
-            </div>
+          <div className="aspect-square max-w-sm overflow-hidden rounded-3xl">
+            <img
+              src="/laundrease-about.png"
+              alt="Laundry basket with freshly folded clothes"
+              className="h-full w-full object-cover"
+            />
           </div>
           <div className="absolute -bottom-4 -right-4 h-32 w-32 rounded-2xl bg-primary/10" />
           <div className="absolute -top-4 -left-4 h-20 w-20 rounded-2xl bg-primary/8" />
@@ -261,7 +241,7 @@ export default async function AboutUsPage() {
                 Ready to reclaim your time?
               </h2>
               <p className="mt-1 text-primary-foreground/80">
-                Join thousands of happy customers across Pune.
+                Join thousands of happy customers.
               </p>
             </div>
             <GuestOnlyCta className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-semibold text-primary shadow-lg transition-all hover:-translate-y-0.5 hover:bg-white/90 hover:shadow-xl" />

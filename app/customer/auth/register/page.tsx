@@ -15,16 +15,7 @@ import { useAuth } from "@/components/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { SearchParamProvider } from "@/components/common/searchParamProvider"
-import { isValidIndianMobile, isValidPersonName, isValidEmail } from "@/lib/validation/india"
-
-// Accepts "+91 98765 43210", "919876543210", "09876543210", or a bare 10-digit
-// number → keeps just the bare 10 digits, which is all the field ever stores.
-function toTenDigits(raw: string): string {
-  const digits = raw.replace(/\D/g, "")
-  if (digits.length > 10 && digits.startsWith("91")) return digits.slice(2, 12)
-  if (digits.length === 11 && digits.startsWith("0")) return digits.slice(1)
-  return digits.slice(0, 10)
-}
+import { isValidIndianMobile, isValidPersonName, isValidEmail, toTenDigits } from "@/lib/validation/india"
 
 // ---- Password strength ---------------------------------------------------
 function passwordStrength(p: string): { score: 0 | 1 | 2 | 3 | 4; label: string; color: string } {
@@ -216,7 +207,7 @@ function PageContent() {
 
     setSubmitting(true)
     try {
-      await register(form.full_name.trim(), form.email.trim().toLowerCase(), form.password, fullPhone, form.referral_code.trim() || undefined)
+      await register(form.full_name.trim(), form.email.trim().toLowerCase(), form.password, fullPhone, form.referral_code.trim() || undefined, form.agreeTerms)
       // Save non-sensitive fields so the register form is pre-filled if the
       // user comes back via "Update it here" on the verify page.
       try {
@@ -240,10 +231,10 @@ function PageContent() {
 
   return (
     // Full-screen two-column layout; left panel hidden on mobile
-    <div className="flex min-h-screen">
+    <div className="flex flex-1">
       <div className="flex w-full md:flex-1 flex-col bg-background">
         {/* Scrollable area for small screens */}
-        <div className="flex min-h-screen flex-col items-center justify-center px-6 py-10 sm:px-10">
+        <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 sm:px-10">
           <div className="w-full max-w-md">
             <div className="mb-6">
               <h2 className="text-2xl font-bold text-foreground">Create Account</h2>

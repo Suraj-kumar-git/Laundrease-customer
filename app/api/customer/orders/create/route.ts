@@ -7,6 +7,7 @@ import { getActiveGateway } from '@/lib/payment'
 import { getMixedLoadProductTypeId } from '@/lib/product-types'
 import { checkProviderOrderEligibility } from '@/lib/subscription'
 import { getGstRate, applyGst } from '@/lib/gst'
+import { getPricingContext, priceLine, PricingError, type Exec } from '@/lib/order-pricing'
 import { randomUUID } from 'crypto'
 import {
   successResponse, errorResponse, validationError,
@@ -42,7 +43,10 @@ interface CreateOrderBody {
   coupon_code?:          string
   special_instructions?: string
   customer_gstin?:       string   // optional — B2B customers (hotels/hospitals) claiming ITC
-  draft_order_number?:   string   // idempotency key from cart
+  // DEPRECATED and ignored. The idempotency key is read from the server-side
+  // cart instead — see the note in POST. Kept in the type only so existing
+  // clients that still send it type-check.
+  draft_order_number?:   string
 }
 
 // Maps order_fee_config.code → valid order_adjustments.kind
@@ -58,6 +62,17 @@ function extractSecondaryMethod(pm: string): string {
   if (!pm.includes('+')) return pm
   return pm.split('+').find(p => p !== 'wallet') ?? pm
 }
+
+// How many unpaid ONLINE orders one customer may have outstanding at once.
+// Generous for real use — a checkout resolves to a single draft, so reaching
+// this means orders are being created and never paid for.
+const MAX_OPEN_DRAFT_ORDERS = 5
+
+// Burst ceiling across every payment method, counted in the database so it
+// survives serverless instances. Nobody places eight orders in ten minutes by
+// hand; a script does it in one second.
+const MAX_ORDERS_PER_BURST_WINDOW = 8
+const ORDER_BURST_WINDOW_MINUTES  = 10
 
 export async function POST(req: NextRequest) {
   const userId = req.headers.get('x-user-id')
@@ -99,20 +114,85 @@ export async function POST(req: NextRequest) {
   const onlineProvider = gatewayInfo?.provider ?? 'payu'
 
   try {
-    // ---- Idempotency --------------------------------------------------------
-    // Only short-circuit on a *paid* match — re-submitting the same draft after
-    // a successful payment should return the existing order, not double-charge.
-    // If the previous attempt under this draft number never completed payment
-    // (abandoned online checkout, failed payment, etc.), it's a stale/zombie
-    // order — void it and fall through to create a fresh one for this attempt,
-    // so a retry (e.g. switching to COD from checkout) isn't silently bound to
-    // the old attempt's payment_method/status.
+    // ---- Idempotency key: taken from the SERVER's cart, never the client ----
+    //
+    // Only short-circuits on a *paid* match — re-submitting the same draft
+    // after a successful payment returns the existing order rather than
+    // double-charging. A draft that never completed payment (abandoned
+    // checkout, failed payment) is a zombie: it gets voided and a fresh order
+    // is created for this attempt, so a retry — switching to COD, say — isn't
+    // silently bound to the old attempt's payment_method.
+    //
+    // This used to read body.draft_order_number. The logic below was right —
+    // one checkout resolves to one order — but it only ran if the caller chose
+    // to send the key. Omitting it (as any script trivially does) skipped
+    // straight past and minted a brand new order on every request, without
+    // limit. Those orders are hidden from the customer by the unpaid-online
+    // filter but are perfectly visible to providers and admin, so the spam
+    // lands as real work in someone's queue.
+    //
+    // shopping_carts.user_id is UNIQUE and the cart already holds the draft
+    // number, so the server can look it up. The client may still send the
+    // field; it is ignored.
+    const cartDraft = await queryOne<{ draft_order_number: string | null }>(
+      `SELECT draft_order_number FROM shopping_carts WHERE user_id = $1`,
+      [userId]
+    )
+    const draftOrderNumber = cartDraft?.draft_order_number ?? null
+
+    // Second line of defence, for the case where there is no cart at all
+    // (so no draft number to dedupe on). Counts only the unpaid ONLINE drafts
+    // — the invisible-to-customer, visible-to-provider ones. COD and settled
+    // orders are real orders and never blocked.
+    const openDrafts = await queryOne<{ cnt: number }>(
+      `SELECT COUNT(*)::INT AS cnt
+       FROM orders
+       WHERE customer_id = $1
+         AND payment_status = 'pending'
+         AND payment_method NOT ILIKE '%cod%'
+         AND status NOT IN ('cancelled', 'failed', 'rejected', 'delivered', 'completed', 'returned')`,
+      [userId]
+    )
+    if ((openDrafts?.cnt ?? 0) >= MAX_OPEN_DRAFT_ORDERS) {
+      return errorResponse(
+        'You have several orders still awaiting payment. Please complete or cancel one before placing another.',
+        429,
+        'TOO_MANY_OPEN_DRAFTS'
+      )
+    }
+
+    // Method-agnostic burst ceiling.
+    //
+    // The two controls above do not cover COD: a COD order is final at
+    // creation, so the cart is cleared straight away, which leaves no draft
+    // number to dedupe the next call against — and COD is excluded from the
+    // open-drafts count because those orders are real, visible commitments.
+    // Without this, COD is simply the easier way to spam providers.
+    //
+    // Counted in the database rather than in memory on purpose: the in-process
+    // limiter in lib/auth.ts is per-instance, and on serverless that means a
+    // fresh allowance with every cold start.
+    const recentOrders = await queryOne<{ cnt: number }>(
+      `SELECT COUNT(*)::INT AS cnt
+       FROM orders
+       WHERE customer_id = $1
+         AND created_at > NOW() - make_interval(mins => $2::INT)`,
+      [userId, ORDER_BURST_WINDOW_MINUTES]
+    )
+    if ((recentOrders?.cnt ?? 0) >= MAX_ORDERS_PER_BURST_WINDOW) {
+      return errorResponse(
+        'Too many orders placed in a short time. Please wait a few minutes and try again.',
+        429,
+        'ORDER_RATE_LIMITED'
+      )
+    }
+
     let staleDraftVoided = false
-    if (body.draft_order_number) {
+    if (draftOrderNumber) {
       const existing = await query(
         `SELECT id, public_id, order_number, total_amount, payment_status, payment_method
          FROM orders WHERE order_number = $1 AND customer_id = $2`,
-        [body.draft_order_number, userId]
+        [draftOrderNumber, userId]
       )
       if (existing.rowCount! > 0) {
         const o = existing.rows[0]
@@ -179,70 +259,33 @@ export async function POST(req: NextRequest) {
       // ---- Server-side price resolution (SECURITY) ---------------------------
       // Never trust the client's unit_price/line_total — re-derive every line
       // from the provider's actual catalog (provider override > base price),
-      // the exact same resolution /api/customer/laundry-providers/[id]/services
-      // uses, including the GST-inclusive overlay. Without this, a customer
-      // could submit an arbitrary price for a real order.
-      const gstInclusive = provider.has_gst && provider.gst_inclusive_pricing
-      const gstRate      = gstInclusive ? await getGstRate() : 0
+      // including the GST-inclusive overlay. Without this, a customer could
+      // submit an arbitrary price for a real order.
+      //
+      // Lives in lib/order-pricing.ts, shared with /api/customer/cart. The two
+      // used to differ: this route re-derived, the cart stored whatever it was
+      // sent. One implementation means the cart total and the order total
+      // cannot disagree.
+      const exec: Exec = (text, params) => client.query(text, params)
+      const pricingCtx = await getPricingContext(exec, body.laundry_profile_id)
 
       const resolvedServices: ServiceItem[] = []
       for (const svc of body.services) {
-        if (svc.type === 'per_kg') {
-          const priceRow = await client.query(
-            `SELECT
-               COALESCE(ps.price_per_kg_override, ps.price_override, s.price_per_kg, s.base_price) AS price,
-               COALESCE(ps.is_express_available_override, s.is_express_available) AS effective_express,
-               COALESCE(ps.express_multiplier_override, s.express_multiplier) AS effective_multiplier
-             FROM provider_services ps
-             JOIN services s ON s.id = ps.service_id
-             WHERE ps.provider_id = $1 AND ps.service_id = $2
-               AND s.category IN ('wash_fold', 'wash_iron')`,
-            [body.laundry_profile_id, svc.service_id]
-          )
-          if (priceRow.rowCount === 0) throw new Error('SERVICE_UNAVAILABLE')
-          const row = priceRow.rows[0]
-          const basePrice = gstInclusive
-            ? applyGst(parseFloat(row.price), gstRate)!
-            : parseFloat(row.price)
-          const multiplier   = parseFloat(row.effective_multiplier)
-          const isExpress    = !!svc.is_express && row.effective_express
-          const weightKg     = svc.weight_kg!
-          const lineTotal    = Math.round(basePrice * (isExpress ? multiplier : 1) * weightKg * 100) / 100
-          resolvedServices.push({
-            ...svc, unit_price: basePrice, line_total: lineTotal,
-            is_express: isExpress, express_multiplier: multiplier,
-          })
-        } else {
-          const priceRow = await client.query(
-            `SELECT
-               COALESCE(ppsp.unit_price, psp.unit_price) AS price,
-               s.is_express_available, s.express_multiplier
-             FROM product_service_prices psp
-             JOIN product_types pt ON pt.id = psp.product_type_id
-             JOIN services s ON s.id = psp.service_id
-             LEFT JOIN provider_product_service_prices ppsp
-               ON ppsp.provider_id = $1 AND ppsp.product_type_id = psp.product_type_id
-                  AND ppsp.service_id = psp.service_id
-             INNER JOIN provider_services ps ON ps.provider_id = $1 AND ps.service_id = psp.service_id
-             WHERE pt.id = $2 AND s.id = $3 AND pt.is_active = TRUE
-               AND s.category NOT IN ('wash_fold', 'wash_iron')
-               AND (ppsp.unit_price IS NOT NULL OR psp.unit_price IS NOT NULL)`,
-            [body.laundry_profile_id, svc.product_type_id, svc.service_id]
-          )
-          if (priceRow.rowCount === 0) throw new Error('SERVICE_UNAVAILABLE')
-          const row = priceRow.rows[0]
-          const basePrice = gstInclusive
-            ? applyGst(parseFloat(row.price), gstRate)!
-            : parseFloat(row.price)
-          const multiplier   = parseFloat(row.express_multiplier)
-          const isExpress    = !!svc.is_express && row.is_express_available
-          const quantity     = svc.quantity!
-          const lineTotal    = Math.round(basePrice * (isExpress ? multiplier : 1) * quantity * 100) / 100
-          resolvedServices.push({
-            ...svc, unit_price: basePrice, line_total: lineTotal,
-            is_express: isExpress, express_multiplier: multiplier,
-          })
-        }
+        const priced = await priceLine(exec, pricingCtx, {
+          type:            svc.type,
+          service_id:      svc.service_id,
+          product_type_id: svc.product_type_id,
+          quantity:        svc.quantity,
+          weight_kg:       svc.weight_kg,
+          is_express:      svc.is_express,
+        })
+        resolvedServices.push({
+          ...svc,
+          unit_price:         priced.unit_price,
+          line_total:         priced.line_total,
+          is_express:         priced.is_express,
+          express_multiplier: priced.express_multiplier,
+        })
       }
 
       // ---- Subtotal ---------------------------------------------------------
@@ -435,8 +478,8 @@ export async function POST(req: NextRequest) {
       }
 
       // ---- Insert order -----------------------------------------------------
-      const orderNumber    = (body.draft_order_number && !staleDraftVoided)
-        ? body.draft_order_number
+      const orderNumber    = (draftOrderNumber && !staleDraftVoided)
+        ? draftOrderNumber
         : `ORD${Date.now()}`
       const paymentStatus  = walletFullyCovered ? 'paid' : 'pending'
 
@@ -458,8 +501,14 @@ export async function POST(req: NextRequest) {
            pickup_date, pickup_time_slot, special_instructions,
            is_express, subtotal, tax_amount, discount_amount,
            total_amount, payment_status, payment_method, assignment_status,
-           estimated_delivery_date, customer_gstin
-         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'unassigned',$17,$18)
+           estimated_delivery_date, customer_gstin,
+           -- Frozen at checkout so every later recompute (delivery-partner
+           -- item edits, express toggle) replays the SAME distance and the
+           -- SAME fee rules the customer actually agreed to. See
+           -- scripts/43-order-fee-base-and-snapshot.sql.
+           delivery_distance_km, fee_config_snapshot
+         ) VALUES ($1,$2,$3,NULL,'pending',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,'unassigned',$17,$18,
+                   $19, build_order_fee_snapshot($3::BIGINT))
          RETURNING id, public_id`,
         [
           orderNumber, userId, body.laundry_profile_id,
@@ -467,6 +516,7 @@ export async function POST(req: NextRequest) {
           body.pickup_date, body.pickup_time_slot, body.special_instructions ?? null,
           body.is_express, subtotal, taxAmount, discountAmount, totalAmount,
           paymentStatus, paymentMethod, estimatedDeliveryDate, customerGstin,
+          distanceKm,
         ]
       )
       const orderId = orderRes.rows[0].id

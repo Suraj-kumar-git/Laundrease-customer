@@ -5,6 +5,7 @@
 
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
+import { customerVisibleOrderSql } from '@/lib/customer-order-visibility'
 import {
   successResponse, serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
@@ -35,12 +36,7 @@ export async function GET(req: NextRequest) {
     // order becomes visible normally.
     const conditions = [
       'o.customer_id = $1',
-      // 'failed', 'cancelled' and 'rejected' orders are always shown to the
-      // customer regardless of payment_status — cancelling/rejecting a paid
-      // order flips payment_status to 'refunded', which wouldn't match
-      // payment_status = 'paid' below. Only the still-pending,
-      // payment-not-yet-resolved drafts stay invisible.
-      `(o.payment_method LIKE '%cod%' OR o.payment_status = 'paid' OR o.status IN ('failed', 'cancelled', 'rejected'))`,
+      customerVisibleOrderSql('o'),
     ]
     const params: any[] = [userId]
     let pi = 2
@@ -82,11 +78,24 @@ export async function GET(req: NextRequest) {
            o.assignment_status,
            lp.business_name  AS provider_name,
            lp.city           AS provider_city,
-           -- Quick item summary: count items and services
-           (SELECT COUNT(*)  FROM order_items oi  WHERE oi.order_id = o.id)::int AS item_count,
-           (SELECT COUNT(*)  FROM order_items oi
-            JOIN order_item_services ois ON ois.order_item_id = oi.id
-            WHERE oi.order_id = o.id)::int AS service_count
+           -- Quick item summary.
+           --
+           -- Both of these counted ROWS, which is not what either word means to
+           -- a customer. order_items holds one row per garment type per
+           -- service, so "2 T-shirts steam-ironed" was one item, and an order
+           -- of 10 garments across 3 services reported "6 items · 6 services".
+           --
+           -- Items = garments, so SUM the quantity. A per-kg line stores
+           -- quantity 1 with the weight in weight_kg, so a mixed load counts as
+           -- one item, which is what it is.
+           (SELECT COALESCE(SUM(oi.quantity), 0)
+              FROM order_items oi WHERE oi.order_id = o.id)::int AS item_count,
+           -- Services = how many distinct services were bought, not how many
+           -- garment/service pairings exist.
+           (SELECT COUNT(DISTINCT ois.service_id)
+              FROM order_items oi
+              JOIN order_item_services ois ON ois.order_item_id = oi.id
+             WHERE oi.order_id = o.id)::int AS service_count
          FROM orders o
          LEFT JOIN laundry_profiles lp ON lp.id = o.laundry_profile_id
          WHERE ${where}

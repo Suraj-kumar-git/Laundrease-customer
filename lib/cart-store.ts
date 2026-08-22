@@ -19,6 +19,22 @@ export const CART_STORAGE_KEY = 'laundrease_cart_v1'
 // gateway callback already correctly cleared.
 export const CART_SYNCED_USER_KEY = 'laundrease_cart_synced_user_v1'
 
+// Set by the public pricing calculator when a signed-out visitor clicks "Place
+// Order": their selection is stashed across the login redirect and pushed to
+// the server cart once they land back. While this key is present the cart
+// provider's own guest→server push must stand down — both write the same cart
+// row with a full selected_services replace, so whichever fetch happened to
+// resolve last would win. Losing that race drops the calculator's binding
+// entirely, since the provider's push sends reset_provider: true and
+// current_step: 1.
+export const CALC_PENDING_CHECKOUT_KEY = 'laundrease_pricing_calc_pending_v1'
+
+export function hasPendingCalcCheckout(): boolean {
+  if (typeof window === 'undefined') return false
+  try { return window.sessionStorage.getItem(CALC_PENDING_CHECKOUT_KEY) !== null }
+  catch { return false }
+}
+
 export function getSyncedUserId(): string | null {
   if (typeof window === 'undefined') return null
   return window.localStorage.getItem(CART_SYNCED_USER_KEY)

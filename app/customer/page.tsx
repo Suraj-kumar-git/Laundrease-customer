@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/components/auth-provider'
 import { formatStat } from '@/lib/format-stat'
+import { formatDistance } from '@/lib/format-distance'
+import { useCustomerLocation } from '@/lib/use-customer-location'
 
 // ---- Types -------------------------------------------------------------------
 interface Provider {
@@ -33,157 +35,164 @@ interface HomeData {
 }
 
 // ---- Helpers -----------------------------------------------------------------
-function formatDistance(km: number | null): string {
-  if (km === null) return ''
-  if (km < 1) return `${Math.round(km * 1000)}m away`
-  return `${km.toFixed(1)} km away`
-}
 function formatPrice(p: number | null): string {
   if (!p) return ''
   return `₹${Math.round(p)}/kg`
 }
 
 // ---- Carousel ----------------------------------------------------------------
-// Infinite clone-based carousel with swipe support.
-// Clone layout: [last, ...real, first] — visual index 1 = real[0].
-// After sliding into a clone we silently snap back to the real counterpart.
+// Native CSS scroll-snap, same approach as the customer dashboard's
+// active-orders carousel: the cards are plain DOM elements, the browser owns
+// the scrolling (and therefore the swipe/fling physics), and the active dot is
+// MEASURED from real scroll position rather than tracked as an index.
+//
+// This replaces a clone-based translateX carousel that could desync three
+// different ways, all of which ended in cards vanishing:
+//   1. It rendered only ONE clone at each end ([last, ...real, first]) while
+//      showing up to THREE columns, so at the final slide the third column had
+//      no card to render — a visible gap where a provider should be.
+//   2. Its silent "jump back to the real card" hung off onTransitionEnd, which
+//      never fires while the tab is backgrounded, and ALSO fires spuriously
+//      when a card's own hover transition bubbles up to the track.
+//   3. The auto-advance timer incremented the index unconditionally, whether
+//      or not either of the above had run.
+// Once the index outran the clones the track translated past every card and
+// the section went completely blank. None of that state exists here.
+//
+// Auto-rotates one card every ROTATE_MS and rewinds to the first card at the
+// end. Any manual navigation (arrow, dot, swipe, trackpad) suspends rotation
+// for RESUME_MS; hovering suspends it for as long as the pointer is inside.
+const ROTATE_MS = 2000
+const RESUME_MS = 5000
+
 function Carousel({ children, className }: { children: React.ReactNode[]; className?: string }) {
   const count = children.length
 
   const [cols, setCols] = useState(3)
-  const colsRef = useRef(3)
   useEffect(() => {
-    const update = () => {
-      const c = window.innerWidth < 640 ? 1 : window.innerWidth < 1024 ? 2 : 3
-      setCols(c); colsRef.current = c
-    }
+    const update = () => setCols(window.innerWidth < 640 ? 1 : window.innerWidth < 1024 ? 2 : 3)
     update()
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
   }, [])
 
-  const [visual,  setVisual]  = useState(1)
-  const [realIdx, setRealIdx] = useState(0)
-  const [animate, setAnimate] = useState(true)
-  const pausedRef   = useRef(false)
-  const countRef    = useRef(count)
-  const touchStartX = useRef<number | null>(null)
-  const touchStartY = useRef<number | null>(null)
-  useEffect(() => { countRef.current = count }, [count])
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  const [activeIdx, setActiveIdx] = useState(0)
+  // Mirrors activeIdx for the rotation timer, so the interval can read the
+  // current position without being torn down and rebuilt on every scroll.
+  const activeIdxRef = useRef(0)
 
-  const cloned = count > 0 ? [children[count - 1], ...children, children[0]] : []
+  const hoveredRef  = useRef(false)
+  const resumeAtRef = useRef(0)
 
-  const onTransitionEnd = () => {
-    if (visual === count + 1) {
-      setAnimate(false); setVisual(1); setRealIdx(0)
-    } else if (visual === 0) {
-      setAnimate(false); setVisual(count); setRealIdx(count - 1)
-    }
-  }
+  // Highest index that can actually park at the scroller's left edge. Past
+  // this the scroller is already at max scroll and further scrollTo calls get
+  // clamped — so it doubles as the last reachable position, i.e. the dot count.
+  const maxIdx = Math.max(0, count - cols)
 
-  useEffect(() => {
-    if (!animate) {
-      const t = requestAnimationFrame(() => setAnimate(true))
-      return () => cancelAnimationFrame(t)
-    }
-  }, [animate])
-
-  const go   = (v: number, r: number) => { setAnimate(true); setVisual(v); setRealIdx(r) }
-  const prev = () => go(visual - 1, (realIdx - 1 + count) % count)
-  const next = () => go(visual + 1, (realIdx + 1) % count)
-  const dot  = (i: number) => go(i + 1, i)
-
-  const onTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX
-    touchStartY.current = e.touches[0].clientY
-    pausedRef.current = true
-  }
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartX.current === null || touchStartY.current === null) return
-    const dx = e.changedTouches[0].clientX - touchStartX.current
-    const dy = e.changedTouches[0].clientY - touchStartY.current
-    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 40) {
-      dx < 0 ? next() : prev()
-    }
-    touchStartX.current = null
-    touchStartY.current = null
-    setTimeout(() => { pausedRef.current = false }, 1200)
-  }
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (pausedRef.current) return
-      setAnimate(true)
-      setVisual(v => v + 1)
-      setRealIdx(r => (r + 1) % countRef.current)
-    }, 4500)
-    return () => clearInterval(id)
+  const syncActiveIdx = useCallback(() => {
+    const el = scrollerRef.current
+    if (!el) return
+    let best = 0
+    let bestDist = Infinity
+    Array.from(el.children).forEach((child, i) => {
+      const dist = Math.abs((child as HTMLElement).offsetLeft - el.scrollLeft)
+      if (dist < bestDist) { bestDist = dist; best = i }
+    })
+    activeIdxRef.current = best
+    setActiveIdx(best)
   }, [])
+
+  const scrollToIndex = useCallback((i: number) => {
+    const el   = scrollerRef.current
+    const card = el?.children[i] as HTMLElement | undefined
+    if (el && card) el.scrollTo({ left: card.offsetLeft, behavior: 'smooth' })
+  }, [])
+
+  // Hold auto-rotation off for a beat so the carousel doesn't slide out from
+  // under someone who just interacted with it.
+  const suspend = () => { resumeAtRef.current = Date.now() + RESUME_MS }
+  const manualGo = (i: number) => {
+    suspend()
+    scrollToIndex(Math.max(0, Math.min(i, maxIdx)))
+  }
+
+  useEffect(() => {
+    if (maxIdx === 0) return
+    const id = setInterval(() => {
+      if (hoveredRef.current || Date.now() < resumeAtRef.current) return
+      const at = activeIdxRef.current
+      scrollToIndex(at >= maxIdx ? 0 : at + 1)
+    }, ROTATE_MS)
+    return () => clearInterval(id)
+  }, [maxIdx, scrollToIndex])
 
   if (count === 0) return null
 
-  const pct = 100 / cols
-  const tx  = -(visual * pct)
+  const pct    = 100 / cols
+  // Everything fits on screen at this breakpoint — nothing to navigate, so the
+  // arrows and dots would be inert controls.
+  const hasNav = maxIdx > 0
 
   return (
     <div
       className={cn('relative', className)}
-      onMouseEnter={() => { pausedRef.current = true }}
-      onMouseLeave={() => { pausedRef.current = false }}
+      onMouseEnter={() => { hoveredRef.current = true }}
+      onMouseLeave={() => { hoveredRef.current = false }}
     >
+      {/* `relative` matters: it makes this element the offsetParent, so each
+          card's offsetLeft is directly comparable to the scroller's scrollLeft. */}
       <div
-        className="overflow-hidden"
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
+        ref={scrollerRef}
+        onScroll={syncActiveIdx}
+        onPointerDown={suspend}
+        onTouchStart={suspend}
+        onWheel={suspend}
+        className="relative flex snap-x snap-mandatory overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        <div
-          className="flex"
-          style={{
-            transform:  `translateX(${tx}%)`,
-            transition: animate ? 'transform 480ms cubic-bezier(0.25, 0.46, 0.45, 0.94)' : 'none',
-            willChange: 'transform',
-          }}
-          onTransitionEnd={onTransitionEnd}
-        >
-          {cloned.map((child, i) => (
-            <div key={i} style={{ width: `${pct}%`, flexShrink: 0 }} className="px-2">
-              {child}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Desktop arrows */}
-      <button onClick={prev} aria-label="Previous"
-        className="absolute -left-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-card border border-border shadow-md hover:bg-muted transition-colors z-10">
-        <ChevronLeft className="h-5 w-5 text-foreground" />
-      </button>
-      <button onClick={next} aria-label="Next"
-        className="absolute -right-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-card border border-border shadow-md hover:bg-muted transition-colors z-10">
-        <ChevronRight className="h-5 w-5 text-foreground" />
-      </button>
-
-      {/* Mobile: swipe hint arrows */}
-      <div className="mt-5 flex justify-center gap-3 md:hidden">
-        <button onClick={prev} aria-label="Previous"
-          className="h-9 w-9 flex items-center justify-center rounded-full bg-card border border-border shadow-sm active:scale-95 transition-transform">
-          <ChevronLeft className="h-4 w-4 text-foreground" />
-        </button>
-        <button onClick={next} aria-label="Next"
-          className="h-9 w-9 flex items-center justify-center rounded-full bg-card border border-border shadow-sm active:scale-95 transition-transform">
-          <ChevronRight className="h-4 w-4 text-foreground" />
-        </button>
-      </div>
-
-      {/* Dots */}
-      <div className="mt-3 flex justify-center gap-2">
-        {children.map((_, i) => (
-          <button key={i} onClick={() => dot(i)} aria-label={`Go to slide ${i + 1}`}
-            className={cn('h-2 rounded-full transition-all duration-300',
-              i === realIdx ? 'w-6 bg-blue-600' : 'w-2 bg-muted-foreground/30 hover:bg-muted-foreground/60'
-            )} />
+        {children.map((child, i) => (
+          <div key={i} style={{ width: `${pct}%`, flexShrink: 0 }} className="snap-start px-2">
+            {child}
+          </div>
         ))}
       </div>
+
+      {hasNav && (
+        <>
+          {/* Desktop arrows */}
+          <button onClick={() => manualGo(activeIdxRef.current - 1)} aria-label="Previous"
+            className="absolute -left-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-card border border-border shadow-md hover:bg-muted transition-colors z-10">
+            <ChevronLeft className="h-5 w-5 text-foreground" />
+          </button>
+          <button onClick={() => manualGo(activeIdxRef.current + 1)} aria-label="Next"
+            className="absolute -right-4 top-1/2 -translate-y-1/2 hidden md:flex h-10 w-10 items-center justify-center rounded-full bg-card border border-border shadow-md hover:bg-muted transition-colors z-10">
+            <ChevronRight className="h-5 w-5 text-foreground" />
+          </button>
+
+          {/* Mobile: swipe hint arrows */}
+          <div className="mt-5 flex justify-center gap-3 md:hidden">
+            <button onClick={() => manualGo(activeIdxRef.current - 1)} aria-label="Previous"
+              className="h-9 w-9 flex items-center justify-center rounded-full bg-card border border-border shadow-sm active:scale-95 transition-transform">
+              <ChevronLeft className="h-4 w-4 text-foreground" />
+            </button>
+            <button onClick={() => manualGo(activeIdxRef.current + 1)} aria-label="Next"
+              className="h-9 w-9 flex items-center justify-center rounded-full bg-card border border-border shadow-sm active:scale-95 transition-transform">
+              <ChevronRight className="h-4 w-4 text-foreground" />
+            </button>
+          </div>
+
+          {/* Dots — one per reachable scroll position, not per card: with 3
+              columns visible, 6 cards only have 4 distinct positions. */}
+          <div className="mt-3 flex justify-center gap-2">
+            {Array.from({ length: maxIdx + 1 }).map((_, i) => (
+              <button key={i} onClick={() => manualGo(i)} aria-label={`Go to slide ${i + 1}`}
+                className={cn('h-2 rounded-full transition-all duration-300',
+                  i === activeIdx ? 'w-6 bg-blue-600' : 'w-2 bg-muted-foreground/30 hover:bg-muted-foreground/60'
+                )} />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -376,13 +385,25 @@ function FeatureCard({ icon: Icon, title, description, onDark, badge }: {
     <div className="relative h-full overflow-hidden rounded-2xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
       <div className="h-1 bg-gradient-to-r from-blue-600 to-cyan-600" />
       <div className="p-4">
-        <div className="mb-2.5 flex items-center gap-3">
+        {/* Reserve the badge's corner so a longer title ("Delivery at Your
+            Door") doesn't run underneath the step number now that it's
+            actually legible. */}
+        <div className={cn('mb-2.5 flex items-center gap-3', badge && 'pr-9')}>
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
             <Icon className="h-5 w-5" />
           </div>
           <h3 className="text-sm font-bold text-foreground leading-tight">{title}</h3>
         </div>
-        {badge && <div className="absolute right-4 top-4 text-4xl font-extrabold text-blue-600/[0.08] select-none">{badge}</div>}
+        {/* Watermark step number. Was a flat blue-600 at 8% alpha for both
+            themes: barely there on white, and invisible on a dark card, where a
+            dark blue that faint has almost no contrast against the background.
+            Each theme now gets a hue that actually reads against its own
+            surface, at an alpha that stays decorative without disappearing. */}
+        {badge && (
+          <div className="pointer-events-none absolute right-4 top-4 select-none text-4xl font-extrabold text-blue-600/25 dark:text-blue-400/30">
+            {badge}
+          </div>
+        )}
         <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
       </div>
     </div>
@@ -431,84 +452,10 @@ const BUBBLES = [
   { w: 8,  h: 8,  top: 55, left: 70, dur: 5,   delay: 3.5 },
 ]
 
-// ---- Location hook -----------------------------------------------------------
-// Tracks the *actual* browser permission state (via the Permissions API,
-// where supported) rather than inferring it from whether the last
-// getCurrentPosition() call happened to succeed. That distinction matters:
-// a transient GPS timeout/unavailable error isn't a permission problem, and
-// treating it as one made the "Allow location" banner pop up even for users
-// who had already granted access. It also lets us tell a genuine denial
-// (which the browser will never re-prompt for — the site can't force that
-// dialog to reappear once blocked) apart from "not asked yet" (where
-// clicking the button legitimately triggers the native prompt).
-type LocationPermission = 'granted' | 'denied' | 'prompt' | 'unsupported'
-
-function useLocation() {
-  const [coords,     setCoords]     = useState<{ lat: number; lng: number } | null>(null)
-  const [permission, setPermission] = useState<LocationPermission>('prompt')
-  const [asking,     setAsking]     = useState(false)
-
-  const request = useCallback(() => {
-    if (!navigator.geolocation) { setPermission('unsupported'); return }
-    setAsking(true)
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
-        setPermission('granted')
-        setAsking(false)
-      },
-      err => {
-        setAsking(false)
-        // Only a real permission denial should trigger the "allow access"
-        // banner — a timeout or transient GPS unavailability isn't that,
-        // and there's nothing useful to prompt the user for in that case.
-        if (err.code === err.PERMISSION_DENIED) setPermission('denied')
-      },
-      { timeout: 8000 }
-    )
-  }, [])
-
-  // Guards the *automatic* initial request so it only ever fires once total,
-  // no matter which branch below triggers it. Without this, React Strict
-  // Mode's dev-only double-invoke of effects — or a browser (e.g. Safari)
-  // where permissions.query() rejects instead of resolving — could call
-  // request() twice, producing two distinct coords objects and making the
-  // provider list fetch (which depends on coords) run and visibly flicker
-  // twice. The manual "Try again" button calls `request` directly and is
-  // unaffected by this guard.
-  const autoRequestedRef = useRef(false)
-  const requestOnce = useCallback(() => {
-    if (autoRequestedRef.current) return
-    autoRequestedRef.current = true
-    request()
-  }, [request])
-
-  useEffect(() => {
-    let cancelled = false
-    if (navigator.permissions?.query) {
-      navigator.permissions.query({ name: 'geolocation' as PermissionName })
-        .then(status => {
-          if (cancelled) return
-          setPermission(status.state as LocationPermission)
-          // Keep in sync if the user changes the permission from browser
-          // settings while this tab stays open — no reload needed.
-          status.onchange = () => { if (!cancelled) setPermission(status.state as LocationPermission) }
-          if (status.state !== 'denied') requestOnce()
-        })
-        .catch(() => { if (!cancelled) requestOnce() })
-    } else {
-      requestOnce()
-    }
-    return () => { cancelled = true }
-  }, [requestOnce])
-
-  return { coords, permission, asking, request }
-}
-
 // ---- Page --------------------------------------------------------------------
 export default function HomePage() {
   const { user } = useAuth()
-  const { coords, permission, asking, request } = useLocation()
+  const { coords, permission, asking, request } = useCustomerLocation()
   const [data,    setData]    = useState<HomeData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState(false)
@@ -533,7 +480,8 @@ export default function HomePage() {
   const STATS = [
     { label: 'Happy Users',    value: stats ? formatStat(stats.total_users)    : '—' },
     { label: 'Monthly Orders', value: stats ? formatStat(stats.monthly_orders) : '—' },
-    { label: 'Success Rate',   value: stats ? `${stats.success_rate}%`          : '—' },
+    // { label: 'Success Rate',   value: stats ? `${stats.success_rate}%`          : '—' },
+    { label: 'Success Guarantee', value: '100%', isStatic: true },
     { label: 'Local Partners', value: stats ? formatStat(stats.partner_count)  : '—' },
     { label: 'Service Areas',  value: stats ? formatStat(stats.service_areas)  : '—' },
     {
@@ -546,7 +494,7 @@ export default function HomePage() {
   ]
 
   return (
-    <div className="flex min-h-screen flex-col overflow-x-hidden bg-background">
+    <div className="flex flex-1 flex-col overflow-x-hidden bg-background">
 
       {/* ---- HERO ---- */}
       <section className="relative overflow-hidden bg-gradient-to-b from-blue-600 via-blue-600 to-cyan-600 md:bg-gradient-to-br md:from-blue-700 md:via-blue-600 md:to-cyan-600">
@@ -601,7 +549,11 @@ export default function HomePage() {
             <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:max-w-md">
               {STATS.map((stat, i) => (
                 <div key={i} className="text-center md:text-left">
-                  <p className="text-2xl font-extrabold text-white tabular-nums truncate">{loading ? '—' : stat.value}</p>
+                  {/* Static tiles aren't waiting on the API, so they skip the
+                      loading dash — otherwise a fixed claim flickers as "—". */}
+                  <p className="text-2xl font-extrabold text-white tabular-nums truncate">
+                    {loading && !('isStatic' in stat && stat.isStatic) ? '—' : stat.value}
+                  </p>
                   <p className="text-xs font-medium text-white/70">{stat.label}</p>
                 </div>
               ))}

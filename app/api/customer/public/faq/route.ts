@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
 import { successResponse, errorResponse } from '@/lib/api-response'
  
@@ -70,46 +70,16 @@ export async function GET(req: NextRequest) {
     return errorResponse('Failed to fetch FAQs', 500)
   }
 }
- 
-/**
-* POST /api/customer/public/faq
-* Create a new FAQ (Admin only)
-*/
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json()
-    const { question, answer, category, sortOrder } = body
-    
-    // Validation
-    if (!question || !answer) {
-      return errorResponse('Question and answer are required', 400)
-    }
-    
-    const sql = `
-      INSERT INTO faqs (question, answer, category, sort_order, is_active)
-      VALUES ($1, $2, $3, $4, true)
-      RETURNING id, question, answer, category, sort_order, created_at
-    `
-    
-    const result = await query(sql, [
-      question,
-      answer,
-      category || 'general',
-      sortOrder || 999,
-    ])
-    
-    return successResponse({
-      faq: {
-        id: result.rows[0].id,
-        question: result.rows[0].question,
-        answer: result.rows[0].answer,
-        category: result.rows[0].category,
-        sortOrder: result.rows[0].sort_order,
-        createdAt: result.rows[0].created_at,
-      },
-    }, 201)
-  } catch (error) {
-    console.error('Create FAQ error:', error)
-    return errorResponse('Failed to create FAQ', 500)
-  }
-}
+
+// NOTE: this file deliberately has no POST.
+//
+// It used to carry one, commented "Create a new FAQ (Admin only)" — with no
+// auth check of any kind, on a path proxy.ts serves publicly. Anyone could
+// insert rows into `faqs`, which render on /customer/faq and feed that page's
+// FAQPage JSON-LD, so it was an open content-injection door on the public
+// site. Nothing called it: FAQ authoring belongs to /api/admin/cms/faqs and
+// /api/support/cms/faqs, both properly gated.
+//
+// If a public write is ever needed here, it needs a real authorization check —
+// not a comment saying admin only.
+

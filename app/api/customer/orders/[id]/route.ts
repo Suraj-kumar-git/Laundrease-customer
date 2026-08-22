@@ -9,9 +9,11 @@ import {
   serverErrorResponse, unauthorizedResponse,
 } from '@/lib/api-response'
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from '@/lib/order-status'
-import { getRefundBreakdown } from '@/lib/payment/refund'
+import { getRefundBreakdown, getRefundedTotals } from '@/lib/payment/refund'
 import { rescheduleOrder } from '@/lib/order-reschedule'
 import { autoCancelForRescheduleLimit } from '@/lib/order-cancellation'
+import { loadOrderConditionPhotos } from '@/lib/condition-photos-read'
+import { shouldMaskPhones } from '@/lib/phone-privacy'
 
 export async function GET(
   req: NextRequest,
@@ -45,6 +47,7 @@ export async function GET(
          o.modified_by_delivery, o.delivery_modified_at,
          o.payment_status, o.payment_method,
          o.created_at, o.updated_at,
+         o.pickup_condition_checked_at,
          -- Provider
          lp.id            AS provider_id,
          lp.business_name AS provider_name,
@@ -106,11 +109,30 @@ export async function GET(
     )
 
     // Status history
+    //
+    // Who a customer is shown depends on the actor's role, because the raw
+    // u.full_name exposed our staff by name: an order confirmed by a provider
+    // owner, an admin, or a support agent all read as "Confirmed by <person>".
+    // A customer's relationship is with the business, not with whoever at
+    // Laundrease happened to click the button.
+    //
+    //   laundry / admin / support -> the provider's business name
+    //   delivery                  -> unchanged; the customer meets this person
+    //                                at the door and already sees their name
+    //                                on the order
+    //   customer                  -> unchanged; it is their own action
     const historyRes = await query(
       `SELECT osh.status, osh.notes, osh.created_at,
-              u.full_name AS changed_by_name
+              CASE
+                WHEN r.name IN ('laundry', 'admin', 'support')
+                  THEN COALESCE(lp.business_name, 'Laundrease')
+                ELSE u.full_name
+              END AS changed_by_name
        FROM order_status_history osh
-       LEFT JOIN users u ON u.id = osh.updated_by
+       LEFT JOIN users u  ON u.id = osh.updated_by
+       LEFT JOIN roles r  ON r.id = u.role_id
+       LEFT JOIN orders o ON o.id = osh.order_id
+       LEFT JOIN laundry_profiles lp ON lp.id = o.laundry_profile_id
        WHERE osh.order_id = $1
        ORDER BY osh.created_at ASC`,
       [orderId]
@@ -140,6 +162,8 @@ export async function GET(
       multiplier: string; max_cap_amount: string; claim_window_hours: number; is_active: boolean
     }>(`SELECT multiplier, max_cap_amount, claim_window_hours, is_active FROM item_protection_policy ORDER BY id LIMIT 1`)
 
+    const refundedTotals = await getRefundedTotals((text, p) => query(text, p), orderId)
+
     // Can the order be rescheduled / cancelled?
     const canReschedule = RESCHEDULABLE_STATUSES.has(order.status)
     const canCancel     = CANCELLABLE_STATUSES.has(order.status)
@@ -151,6 +175,9 @@ export async function GET(
       (text, p) => query(text, p), orderId
     )
     const balanceDue = Math.max(0, Math.round((parseFloat(order.total_amount) - amountPaid) * 100) / 100)
+
+    const condition  = await loadOrderConditionPhotos(orderId)
+    const maskPhones = await shouldMaskPhones()
 
     return successResponse({
       order: {
@@ -184,18 +211,22 @@ export async function GET(
         payment_method:     order.payment_method,
         created_at:         order.created_at,
         updated_at:         order.updated_at,
+        pickup_condition_checked_at: order.pickup_condition_checked_at,
         can_reschedule:     canReschedule,
         can_cancel:         canCancel,
+        // Both counterparties are masked pairs, so their numbers are withheld
+        // once masking is on and the customer reaches them through a bridged
+        // call instead. Until then they dial directly, as they always have.
         provider: order.provider_id ? {
           id:      order.provider_id,
           name:    order.provider_name,
           address: order.provider_address,
           city:    order.provider_city,
-          phone:   order.provider_phone,
+          phone:   maskPhones ? null : order.provider_phone,
         } : null,
         delivery_partner: order.delivery_partner_name ? {
           name:  order.delivery_partner_name,
-          phone: order.delivery_partner_phone,
+          phone: maskPhones ? null : order.delivery_partner_phone,
         } : null,
       },
       items:       itemsRes.rows.map(r => ({
@@ -204,9 +235,18 @@ export async function GET(
         line_total:         parseFloat(r.line_total),
         weight_kg:          r.weight_kg ? parseFloat(r.weight_kg) : null,
       })),
+      // Damage the delivery partner recorded when collecting this order.
+      // Read-only, and shown deliberately: this evidence can be used to
+      // reject a claim, so meeting it for the first time mid-dispute would
+      // be the customer being ambushed with a record they never saw.
+      condition_photos:         condition.photos,
+      general_condition_photos: condition.generalPhotos,
       payments:    paymentsRes.rows.map(r => ({
         ...r, amount: parseFloat(r.amount),
       })),
+      // What actually went back, as opposed to what a 'refunded' payment row
+      // implies. Fees are retained on cancellation, so these differ.
+      refund:      refundedTotals,
       adjustments: adjustmentsRes.rows.map(r => ({
         ...r, amount: parseFloat(r.amount),
       })),

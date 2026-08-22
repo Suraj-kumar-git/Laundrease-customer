@@ -11,6 +11,7 @@ import { useAuth } from "@/components/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { SearchParamProvider } from "@/components/common/searchParamProvider"
+import { isValidEmail, isValidIndianMobile, toTenDigits } from "@/lib/validation/india"
 
 function validate(loginWithEmail: boolean, email: string, phone: string, password: string
 ): Record<string, string> {
@@ -18,15 +19,14 @@ function validate(loginWithEmail: boolean, email: string, phone: string, passwor
   if (loginWithEmail) {
     if (!email.trim()) {
       e.email = "Email is required"
-    } else if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
+    } else if (!isValidEmail(email)) {
       e.email = "Enter a valid email address"
     }
   } else {
-    const digits = phone.replace(/\D/g, "")
-    if (!phone.trim()) {
+    if (!phone) {
       e.phone = "Phone number is required"
-    } else if (digits.length < 10 || digits.length > 15) {
-      e.phone = "Enter a valid phone number"
+    } else if (!isValidIndianMobile(phone)) {
+      e.phone = "Enter a valid 10-digit mobile number"
     }
   }
   if (!password) {
@@ -76,7 +76,7 @@ function PageContent() {
       await login(
         loginWithEmail
           ? { email: email.trim().toLowerCase(), password }
-          : { phone: phone.trim(), password }
+          : { phone: `+91${phone}`, password }
       )
       // Hard navigation, not router.replace: the Next.js Router Cache can
       // hold onto a stale "redirect to login" result for this path from
@@ -99,7 +99,7 @@ function PageContent() {
 
   return (
     // Full-screen: single column on mobile, two columns on md+
-    <div className="flex min-h-screen">
+    <div className="flex flex-1">
       <div className="w-full max-w-md md:w-1/2 mx-auto bg-background px-6 py-12 sm:px-10">
         <div className="w-full">
           <div className="mb-8">
@@ -144,8 +144,9 @@ function PageContent() {
                   id={loginWithEmail ? "email" : "phone"}
                   type={loginWithEmail ? "email" : "tel"}
                   autoComplete={loginWithEmail ? "email" : "tel"}
-                  inputMode={loginWithEmail ? "email" : "tel"}
-                  placeholder={loginWithEmail ? "name@example.com" : "Enter phone number"}
+                  inputMode={loginWithEmail ? "email" : "numeric"}
+                  maxLength={loginWithEmail ? undefined : 10}
+                  placeholder={loginWithEmail ? "name@example.com" : "9876543210"}
                   className={cn(
                     "pl-10",
                     (errors.email || errors.phone) &&
@@ -157,9 +158,7 @@ function PageContent() {
                       setEmail(e.target.value)
                       clearError("email")
                     } else {
-                      // Allow only digits, leading +, spaces and dashes
-                      const raw = e.target.value.replace(/[^\d+\s\-]/g, '')
-                      setPhone(raw)
+                      setPhone(toTenDigits(e.target.value))
                       clearError("phone")
                     }
                     setServerError("")

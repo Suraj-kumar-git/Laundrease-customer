@@ -273,7 +273,12 @@ export function CartSheet({ open, onClose }: { open: boolean; onClose: () => voi
                       <p className="font-medium text-foreground">Cart is empty</p>
                       <p className="mt-1 text-sm text-muted-foreground">Start a new order to add services</p>
                     </div>
-                    <button onClick={() => { onClose(); router.push('/customer/orders/create') }}
+                    {/* Guests go to the public services page, not the order
+                        builder. /customer/orders/create is a protected route,
+                        so sending a logged-out visitor there bounced them
+                        straight to a login wall from a button that only
+                        promised to show them what's on offer. */}
+                    <button onClick={() => { onClose(); router.push('/customer/services') }}
                       className="rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground">
                       Browse Services
                     </button>

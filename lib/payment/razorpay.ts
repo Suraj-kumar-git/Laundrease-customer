@@ -1,5 +1,6 @@
 // lib/payment/razorpay.ts
 import crypto from 'crypto'
+import { signaturesMatch } from './signature'
 import type {
   PaymentGatewayAdapter,
   GatewayConfig,
@@ -80,6 +81,6 @@ export class RazorpayAdapter implements PaymentGatewayAdapter {
       .createHmac('sha256', this.config.webhookSecret)
       .update(params.rawBody)
       .digest('hex')
-    return expectedSignature === params.signature
+    return signaturesMatch(expectedSignature, params.signature)
   }
 }

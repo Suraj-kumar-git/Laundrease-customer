@@ -298,6 +298,123 @@ export async function getClaimPhotoUrl(s3Key: string): Promise<string | null> {
   return getSignedDownloadUrl(s3Key, { disposition: 'inline' })
 }
 
+// ─── Pickup condition photos ───────────────────────────────────────────────
+//
+// Evidence a delivery partner captures at the door: garments that were already
+// stained or damaged before the laundry ever saw them. Unlike claim photos
+// (uploaded through the server as multipart), these are presigned so the
+// partner's phone PUTs straight to S3 — they're taken 3-5 at a time on a
+// mobile connection, and a double hop through the API route is the slow part.
+
+const CONDITION_PHOTO_ALLOWED_TYPES = new Set([
+  'image/jpeg', 'image/png', 'image/webp',
+  'image/heic', 'image/heif', // iPhone camera default
+])
+const CONDITION_PHOTO_MAX_SIZE = 10 * 1024 * 1024 // 10 MB
+
+export function isAllowedConditionPhotoType(contentType: string): boolean {
+  return CONDITION_PHOTO_ALLOWED_TYPES.has(contentType)
+}
+
+export function isAllowedConditionPhotoSize(bytes: number): boolean {
+  return bytes > 0 && bytes <= CONDITION_PHOTO_MAX_SIZE
+}
+
+export const CONDITION_PHOTO_MAX_SIZE_MB = CONDITION_PHOTO_MAX_SIZE / (1024 * 1024)
+
+/**
+ * Key for a condition photo: order-condition/{orderId}/{itemId|general}/{uuid}.{ext}
+ *
+ * The uuid is server-generated, never taken from the client — the key is what
+ * the presigned URL authorises, so letting a client name it would let one
+ * order's partner write into another order's prefix.
+ */
+export function buildConditionPhotoKey(
+  orderId:     number | string,
+  orderItemId: number | string | null,
+  contentType: string
+): string {
+  const ext =
+    contentType === 'image/png'  ? 'png'  :
+    contentType === 'image/webp' ? 'webp' :
+    'jpg' // jpeg, and heic/heif which we store as-is under a jpg extension
+  return `order-condition/${orderId}/${orderItemId ?? 'general'}/${crypto.randomUUID()}.${ext}`
+}
+
+export async function getConditionPhotoUploadUrl(
+  key:         string,
+  contentType: string
+): Promise<string> {
+  return getSignedUploadUrl(key, contentType, {
+    expiresIn: 900,
+    metadata: { 'x-uploaded-by': 'delivery-condition' },
+  })
+}
+
+/**
+ * Signed view URL for a condition photo.
+ *
+ * Deliberately does NOT probe the bucket first, unlike getClaimPhotoUrl. A row
+ * only exists here because the commit endpoint already confirmed the object
+ * was present, so a HeadObject per photo would buy almost nothing — and these
+ * are read in batches of up to 25 on every order-detail load, where it would
+ * mean 25 S3 round trips. Signing itself is local and cheap.
+ */
+export async function getConditionPhotoUrl(s3Key: string): Promise<string | null> {
+  if (!s3Key) return null
+  return getSignedDownloadUrl(s3Key, { disposition: 'inline' })
+}
+
+/** Guards the commit step: only accept a key this module could have issued. */
+export function isConditionPhotoKey(s3Key: string, orderId: number | string): boolean {
+  return s3Key.startsWith(`order-condition/${orderId}/`)
+}
+
+// ─── Masked call recordings ────────────────────────────────────────────────
+//
+// Pulled out of the telephony provider's storage and into ours. Two reasons:
+// retention becomes our policy rather than theirs (we delete when the claim
+// window closes), and the evidence for a dispute lives beside the condition
+// photos for the same order instead of behind a vendor login.
+
+/** Key: call-recordings/{orderId}/{sessionId}.mp3 */
+export function buildCallRecordingKey(
+  orderId:   number | string,
+  sessionId: number | string
+): string {
+  return `call-recordings/${orderId}/${sessionId}.mp3`
+}
+
+export async function uploadCallRecording(
+  key:         string,
+  buffer:      Buffer,
+  contentType: string,
+  meta:        { orderId: string; sessionId: string }
+): Promise<void> {
+  await getS3Client().send(new PutObjectCommand({
+    Bucket:               BUCKET,
+    Key:                  key,
+    Body:                 buffer,
+    ContentType:          contentType || 'audio/mpeg',
+    // Recordings are personal data under the DPDP Act — encrypt at rest, the
+    // same as support attachments.
+    ServerSideEncryption: 'AES256',
+    Metadata: { order_id: meta.orderId, call_session_id: meta.sessionId },
+  }))
+}
+
+/** Signed playback URL for support/admin review. Null if the object is gone. */
+export async function getCallRecordingUrl(s3Key: string): Promise<string | null> {
+  if (!s3Key) return null
+  if (!(await objectExists(s3Key))) return null
+  return getSignedDownloadUrl(s3Key, { disposition: 'inline', contentType: 'audio/mpeg' })
+}
+
+/** Called when retention expires. */
+export async function deleteCallRecording(s3Key: string): Promise<void> {
+  await deleteObject(s3Key)
+}
+
 // ─── Support ticket attachments (was lib/s3-support.ts) ────────────────────
 
 const SUPPORT_SIGNED_URL_EXPIRY = parseInt(

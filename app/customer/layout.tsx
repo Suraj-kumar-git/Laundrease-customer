@@ -167,7 +167,11 @@ export default async function RootLayout({
             <div className="flex min-h-screen flex-col">
               {/* HeaderWithCart is a client component that manages the CartSheet state */}
             <HeaderWithCart />
-              <main className="flex-1">{children}</main>
+              {/* flex-col so a page root can use flex-1 to fill the space between
+                  header and footer. Pages must NOT set their own min-h-screen:
+                  this shell already reserves a viewport, so a second one stacks
+                  and leaves a band of dead space above the footer. */}
+              <main className="flex flex-1 flex-col">{children}</main>
               <footer className="border-t bg-muted/30 py-8 dark:bg-muted/10">
                 <div className="container mx-auto px-4">
                   <div className="mb-8 flex flex-col items-center justify-between gap-4 md:flex-row">
@@ -285,11 +289,11 @@ export default async function RootLayout({
                             Privacy Policy
                           </Link>
                         </li>
-                        {/* <li>
-                          <Link href="#" className="text-muted-foreground transition-colors hover:text-primary">
-                            Cookie Policy
+                        <li>
+                          <Link href="/customer/faq" className="text-muted-foreground transition-colors hover:text-primary">
+                            FAQ
                           </Link>
-                        </li> */}
+                        </li>
                       </ul>
                     </div>
                     <div>

@@ -11,14 +11,11 @@ import {
   Loader2,
   Heart,
   Navigation,
-  Plus,
-  Minus,
   ShoppingBag,
   ArrowRight,
 } from 'lucide-react'
 import { AreaSearchBox, type AreaSelection } from './components/AreaSearchBox'
 import { useCart } from '@/components/cart-provider'
-import { makeCartItemKey } from '@/lib/cart-store'
 import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveServiceIconSrc } from '@/lib/product-icons'
 
@@ -142,25 +139,27 @@ export default function ServicesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
-      {/* Hero — compact */}
-      <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 to-blue-600 px-4 py-10 sm:py-12">
-        <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
-
+    <div className="flex-1 bg-gradient-to-br from-blue-50 via-white to-blue-50 dark:from-gray-950 dark:via-gray-900 dark:to-blue-950">
+      {/* Compact header + search. Deliberately NOT a full-bleed coloured
+          hero: the search results render directly below this, and a tall
+          banner pushed them below the fold on every device. No
+          overflow-hidden anywhere on this path either, or the area-search
+          box's autocomplete dropdown gets clipped. */}
+      <div className="container mx-auto px-4 pt-6 pb-2 sm:pt-8">
         <motion.div
-          initial={{ opacity: 0, y: 16 }}
+          initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="container relative z-10 mx-auto text-center"
+          transition={{ duration: 0.4 }}
+          className="text-center"
         >
-          <h1 className="text-2xl font-bold text-white sm:text-3xl md:text-4xl">
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white sm:text-2xl md:text-3xl">
             Our Premium Services
           </h1>
-          <p className="mx-auto mt-2 max-w-xl text-sm text-white/85 sm:text-base">
+          <p className="mx-auto mt-1 max-w-xl text-xs text-gray-500 dark:text-gray-400 sm:text-sm">
             Professional laundry care, tailored to your area
           </p>
 
-          <div className="mt-6">
+          <div className="mt-4 flex flex-col items-center">
             <AreaSearchBox
               loading={searchLoading}
               onAreaSelected={handleAreaSelected}
@@ -170,7 +169,7 @@ export default function ServicesPage() {
         </motion.div>
       </div>
 
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-6">
         {/* Provider results */}
         {searched && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-10">
@@ -270,13 +269,11 @@ export default function ServicesPage() {
             <Loader2 className="h-7 w-7 animate-spin text-blue-600" />
           </div>
         ) : (
-          <div className="mb-12 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+          // Wider cards than the old 6-up grid: the icon now sits inline
+          // beside the service name (rather than stacked above it), which
+          // needs real horizontal room before the name starts wrapping.
+          <div className="mb-12 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {services.map((service, index) => {
-              const dpt = service.defaultProductType
-              const cartKey = dpt ? makeCartItemKey(dpt.id, service.id) : ''
-              const cartItem = dpt
-                ? cart.items.find(i => i.product_type_id === dpt.id && i.service_id === service.id)
-                : undefined
               return (
                 <motion.div
                   key={service.id}
@@ -284,87 +281,53 @@ export default function ServicesPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.05 }}
                   whileHover={{ y: -3 }}
-                  className="rounded-xl border border-transparent bg-white p-3.5 shadow-sm transition-all hover:border-blue-300 hover:shadow-md dark:bg-gray-800"
+                  className="flex flex-col rounded-xl border border-transparent bg-white p-4 shadow-sm transition-all hover:border-blue-300 hover:shadow-md dark:bg-gray-800"
                 >
-                  <div className={`mb-2.5 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br text-lg overflow-hidden ${ICON_GRADIENTS[index % ICON_GRADIENTS.length]}`}>
-                    <ProductIcon
-                      src={resolveServiceIconSrc(service.name)}
-                      fallbackEmoji={service.icon}
-                      alt={service.name}
-                      size={40}
-                    />
-                  </div>
-                  <h3 className="text-sm font-bold leading-tight text-gray-900 dark:text-white">
-                    {service.name}
-                  </h3>
-                  <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
-                    {service.description}
-                  </p>
-                  <div className="mt-2 flex items-baseline gap-1">
-                    <span className="text-base font-bold text-blue-600 dark:text-blue-400">
-                      {formatINR(service.startingPrice)}
-                    </span>
-                    <span className="text-[10px] text-gray-500 dark:text-gray-400">
-                      {service.pricingModel === 'per_kg' ? '/kg' : '/item'} starting
-                    </span>
+                  {/* Row 1 — icon + name side by side */}
+                  <div className="flex items-center gap-2.5">
+                    <div className={`flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br text-lg ${ICON_GRADIENTS[index % ICON_GRADIENTS.length]}`}>
+                      <ProductIcon
+                        src={resolveServiceIconSrc(service.name)}
+                        fallbackEmoji={service.icon}
+                        alt={service.name}
+                        size={40}
+                      />
+                    </div>
+                    <h3 className="min-w-0 flex-1 text-sm font-bold leading-tight text-gray-900 dark:text-white">
+                      {service.name}
+                    </h3>
                   </div>
 
-                  <div className="mt-3">
-                    {!dpt ? (
-                      <a
-                        href="/customer/pricing-calculator"
-                        className="flex w-full items-center justify-center gap-1 rounded-lg border border-gray-200 py-1.5 text-xs font-semibold text-gray-500 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-400"
-                      >
-                        See pricing
-                      </a>
-                    ) : !cartItem ? (
-                      <button
-                        onClick={() =>
-                          cart.addItem({
-                            product_type_id: dpt.id,
-                            product_type_name: dpt.name,
-                            pricing_model: dpt.pricingModel,
-                            icon: dpt.icon,
-                            service_id: service.id,
-                            service_name: service.name,
-                            unit_price: dpt.unitPrice,
-                            quantity: 1,
-                            weight_kg: 1,
-                            express_multiplier: service.isExpressAvailable ? 1.5 : 1,
-                          })
-                        }
-                        className="flex w-full items-center justify-center gap-1 rounded-lg border border-blue-200 py-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 dark:border-blue-800 dark:text-blue-300 dark:hover:bg-blue-900/20"
-                      >
-                        <ShoppingBag className="h-3.5 w-3.5" /> Add to Cart
-                      </button>
-                    ) : (
-                      <div className="flex items-center justify-between rounded-lg bg-blue-50 px-2 py-1 dark:bg-blue-900/20">
-                        <button
-                          onClick={() => {
-                            const field = dpt!.pricingModel === 'per_kg' ? 'weight_kg' : 'quantity'
-                            const current = dpt!.pricingModel === 'per_kg' ? cartItem.weight_kg : cartItem.quantity
-                            if (current <= 1) cart.removeItem(cartKey)
-                            else cart.updateItem(cartKey, field, current - 1)
-                          }}
-                          className="flex h-6 w-6 items-center justify-center rounded-md bg-white text-blue-700 shadow-sm dark:bg-gray-700"
-                        >
-                          <Minus className="h-3 w-3" />
-                        </button>
-                        <span className="text-xs font-semibold text-blue-800 dark:text-blue-200">
-                          {dpt!.pricingModel === 'per_kg' ? `${cartItem.weight_kg}kg` : cartItem.quantity}
-                        </span>
-                        <button
-                          onClick={() => {
-                            const field = dpt!.pricingModel === 'per_kg' ? 'weight_kg' : 'quantity'
-                            const current = dpt!.pricingModel === 'per_kg' ? cartItem.weight_kg : cartItem.quantity
-                            cart.updateItem(cartKey, field, current + 1)
-                          }}
-                          className="flex h-6 w-6 items-center justify-center rounded-md bg-white text-blue-700 shadow-sm dark:bg-gray-700"
-                        >
-                          <Plus className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
+                  {/* Row 2 — description. flex-1 so every card's price row
+                      lines up at the same height regardless of text length. */}
+                  <p className="mt-2.5 line-clamp-2 flex-1 text-xs leading-snug text-gray-500 dark:text-gray-400">
+                    {service.description}
+                  </p>
+
+                  {/* Row 3 — price + link to the calculator.
+                      No "Add to Cart" here on purpose: a service card has no
+                      selected product type (garment/item), so adding one
+                      meant silently guessing at whatever the catalog's
+                      arbitrary "default" product type for that service was.
+                      That produced adds the customer never actually chose
+                      (e.g. tapping "Dry Cleaning" silently added a Saree).
+                      The pricing calculator is where they pick a real
+                      product type. */}
+                  <div className="mt-3 flex items-end justify-between gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-base font-bold text-blue-600 dark:text-blue-400">
+                        {formatINR(service.startingPrice)}
+                      </span>
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                        {service.pricingModel === 'per_kg' ? '/kg' : '/item'}
+                      </span>
+                    </div>
+                    <a
+                      href="/customer/pricing-calculator"
+                      className="shrink-0 rounded-lg border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700/50"
+                    >
+                      See pricing
+                    </a>
                   </div>
                 </motion.div>
               )

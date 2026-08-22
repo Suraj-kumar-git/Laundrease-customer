@@ -22,10 +22,19 @@ const MAX_DIMENSION    = 1920
 const JPEG_QUALITY     = 0.82
 const SKIP_BELOW_BYTES = 900 * 1024 // not worth recompressing small files
 
-export async function compressImageFile(file: File): Promise<File> {
+export async function compressImageFile(
+  file: File,
+  // `force` re-encodes even a small file. Callers whose images must be
+  // *viewable later by someone else* need it: the size skip below lets a small
+  // HEIC through untouched, and HEIC only renders in Safari — so a photo that
+  // uploaded fine from an iPhone would show as a broken image to a provider on
+  // Chrome. Where the upload is only ever an archive, the skip is still the
+  // right default.
+  opts: { force?: boolean } = {}
+): Promise<File> {
   if (typeof window === 'undefined') return file
   if (!isCompressibleImage(file)) return file
-  if (file.size <= SKIP_BELOW_BYTES) return file
+  if (!opts.force && file.size <= SKIP_BELOW_BYTES) return file
 
   try {
     const source = await loadDrawable(file)

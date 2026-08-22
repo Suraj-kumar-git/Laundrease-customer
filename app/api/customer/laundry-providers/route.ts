@@ -45,7 +45,6 @@ export async function GET(req: NextRequest) {
         lsp.business_name,
         lsp.description,
         lsp.business_email,
-        lsp.business_phone,
         lsp.address_line1,
         lsp.address_line2,
         lsp.city,
@@ -250,7 +249,10 @@ export async function GET(req: NextRequest) {
           businessName: row.business_name,
           description: row.description,
           email: row.business_email,
-          phone: row.business_phone,
+          // No phone. This listing is unauthenticated, so publishing the shop's
+          // number would both defeat customer ↔ provider call masking and let a
+          // customer book directly off-platform. See
+          // public/pricing/providers-by-area for the full reasoning.
           address: {
             line1: row.address_line1,
             line2: row.address_line2,

@@ -73,6 +73,36 @@ export async function POST(req: NextRequest) {
       return errorResponse('Payment verification failed. Invalid signature.', 400)
     }
 
+    // Razorpay's signature covers order_id|payment_id — NOT the amount. So
+    // unlike the PayU and Cashfree callbacks there is no signed figure to
+    // reconcile against, and reading an amount out of the client-supplied
+    // `extra` would be checking a number the attacker chose.
+    //
+    // What the signature DOES bind is the gateway order, and we created that
+    // order server-side with this payment row's amount (see the pay route).
+    // So the binding that matters here is: the gateway_order_id being verified
+    // must be the one we issued for this payment. Without that, a signature
+    // from any other order of the same customer would settle this one.
+    const boundOrder = await query(
+      `SELECT 1
+       FROM payment_gateway_transactions pgt
+       INNER JOIN payments p ON p.id = pgt.payment_id
+       WHERE p.order_id = $1
+         AND p.provider NOT IN ('cod', 'wallet')
+         AND pgt.provider_order_id = $2`,
+      [body.order_id, body.gateway_order_id]
+    )
+    if (boundOrder.rowCount === 0) {
+      console.error(
+        `[payment-reconcile] REJECTED verify order_id=${body.order_id} ` +
+        `gateway_order_id=${body.gateway_order_id} reason=unbound_gateway_order`
+      )
+      return errorResponse(
+        'Payment verification failed. This payment does not belong to that order.',
+        400
+      )
+    }
+
     await transaction(async (client) => {
       await client.query(
         `UPDATE orders

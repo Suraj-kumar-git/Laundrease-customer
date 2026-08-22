@@ -25,7 +25,7 @@ import type { CartLineItem } from '@/types/pricing'
 import {
   loadCartFromStorage, saveCartToStorage, clearCartStorage,
   calcLineTotal, cartItemsToSelectedServices, serverItemsToCartLineItems,
-  makeCartItemKey, getSyncedUserId, setSyncedUserId,
+  makeCartItemKey, getSyncedUserId, setSyncedUserId, hasPendingCalcCheckout,
 } from '@/lib/cart-store'
 
 interface CartContextType {
@@ -58,6 +58,13 @@ interface CartContextType {
   // direct reference to each other.
   bumpSignal: number
   bumpCartIcon: () => void
+  // Lets a screen suppress the header cart button while it's mounted. Used by
+  // the order flow's checkout step: the drawer edits the SERVER cart, while
+  // checkout renders (and submits) its own React state, so editing there
+  // silently diverged the two — the removed item stayed on screen and was
+  // still ordered. Every other step keeps the cart.
+  cartIconHidden: boolean
+  setCartIconHidden: (hidden: boolean) => void
 }
 
 const CartContext = createContext<CartContextType | undefined>(undefined)
@@ -73,9 +80,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [syncing, setSyncing] = useState(false)
   const hydratedFromStorage = useRef(false)
   const syncedForUser = useRef<string | null>(null)
+  // Tracks the last user id we saw, so the logout-clear effect below can
+  // tell "was signed in, just logged out" apart from "app just loaded,
+  // still a guest" — both look like `user === null` on their own.
+  const lastUserId = useRef<string | null>(null)
   const cartIconRef = useRef<HTMLButtonElement>(null)
   const [bumpSignal, setBumpSignal] = useState(0)
   const bumpCartIcon = useCallback(() => setBumpSignal(s => s + 1), [])
+  const [cartIconHidden, setCartIconHidden] = useState(false)
 
   // Load local cart once on mount.
   useEffect(() => {
@@ -108,8 +120,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         // Only push local items to server once per user+device session — prevents
         // re-pushing stale localStorage items on every page reload which would
         // overwrite a server cart that's already advanced to a later step.
+        // Stand down if the pricing calculator has a checkout waiting to be
+        // flushed for this sign-in. It writes the same cart row — with the
+        // provider, address and current_step 3 the visitor just settled on —
+        // and this push would race it carrying reset_provider: true and
+        // current_step: 1. The synced marker is deliberately left unset so a
+        // guest cart still gets pushed later if that flush never lands.
         const alreadySynced = getSyncedUserId() === user.id
-        if (!alreadySynced) {
+        if (!alreadySynced && !hasPendingCalcCheckout()) {
           setSyncedUserId(user.id)
           if (items.length > 0) {
             await fetch('/api/customer/cart', {
@@ -143,6 +161,28 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
     sync()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  // Logout: clear the LIVE cart state right away. logout() does a
+  // client-side router.push (see components/header/user-menu-dropdown.tsx),
+  // so this CartProvider instance stays mounted through it — clearing only
+  // the localStorage mirror (auth-provider's clearAuthState() already does
+  // that) wouldn't update this already-in-memory `items` state, so the
+  // header badge/CartSheet would keep showing the previous account's items
+  // until a hard reload. This never calls the cart API — the server-side
+  // cart is untouched, so logging back in (same account) re-hydrates it via
+  // the sync effect above exactly as if this had never run.
+  useEffect(() => {
+    const wasSignedIn = lastUserId.current !== null
+    if (wasSignedIn && !user) {
+      setItems([])
+      clearCartStorage()
+      // So a subsequent login in this same tab — same account or a
+      // different one — re-runs the full sync/hydrate flow above instead of
+      // short-circuiting on a stale "already synced this session" guard.
+      syncedForUser.current = null
+    }
+    lastUserId.current = user?.id ?? null
   }, [user])
 
   const addItem = useCallback((
@@ -235,6 +275,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     items, itemCount, subtotal, isExpress, toggleExpress,
     addItem, updateItem, removeItem, clear, syncFromServer, placeOrder, placing, syncing,
     cartIconRef, bumpSignal, bumpCartIcon,
+    cartIconHidden, setCartIconHidden,
   }
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>

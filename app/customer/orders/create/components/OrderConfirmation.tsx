@@ -71,7 +71,7 @@ export function OrderConfirmation({ orderNumber, orderId }: OrderConfirmationPro
   }
 
   return (
-    <div className="min-h-screen relative">
+    <div className="flex-1 relative">
       {showConfetti && (
         <Confetti
           width={windowSize.width}

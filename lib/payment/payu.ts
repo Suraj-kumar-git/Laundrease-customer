@@ -1,4 +1,5 @@
 import crypto from 'crypto'
+import { signaturesMatch } from './signature'
 import {
   PaymentGatewayAdapter, GatewayConfig, GatewayOrderParams, GatewayOrder,
   PaymentVerificationParams, PaymentVerificationResult, WebhookVerificationParams,
@@ -214,6 +215,11 @@ export class PayUAdapter implements PaymentGatewayAdapter {
       verified,
       gatewayPaymentId: String(params.gatewayPaymentId ?? params.extra?.mihpayid ?? ''),
       gatewayOrderId: String(params.gatewayOrderId ?? params.extra?.txnid ?? ''),
+      // `amount` is one of the fields hashed above, so a verified signature
+      // vouches for this figure. Reported only when the signature actually
+      // verified — handing back an amount from a failed check would invite a
+      // caller to trust it.
+      amount: verified && amount !== '' ? Number(amount) : undefined,
     }
   }
 
@@ -250,7 +256,7 @@ export class PayUAdapter implements PaymentGatewayAdapter {
         udf5,
       }).toLowerCase()
 
-      return expectedSignature === actualSignature
+      return signaturesMatch(expectedSignature, actualSignature)
     } catch {
       return false
     }

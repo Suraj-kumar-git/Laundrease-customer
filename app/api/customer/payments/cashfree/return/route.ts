@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { query, transaction } from '@/lib/db'
 import { getActiveGateway } from '@/lib/payment'
+import { reconcileAmount, logReconcileFailure } from '@/lib/payment/reconcile'
 
 function getCustomerBaseUrl(): string {
   const baseUrl = process.env.NEXT_PUBLIC_CUSTOMER_URL
@@ -121,14 +122,26 @@ async function handle(req: NextRequest) {
       },
     })
 
-    const paymentStatus = result.verified ? 'completed' : 'failed'
-    const orderPaymentStatus = result.verified ? 'paid' : 'failed'
-    const completedAt = result.verified ? new Date() : null
-    const failedAt     = result.verified ? null : new Date()
+    // Cashfree reports SUCCESS via a server-to-server fetch, which proves the
+    // payment exists and succeeded — but not that it was for what this order
+    // costs. The amount is a separate claim and has to be checked separately,
+    // or a small payment settles a large order.
+    const reconciled = reconcileAmount(payment.amount, result.amount)
+    if (result.verified && !reconciled.ok) {
+      logReconcileFailure('cashfree/return', merchantTxnId, reconciled)
+    }
+    const settled = result.verified && reconciled.ok
+
+    const paymentStatus = settled ? 'completed' : 'failed'
+    const orderPaymentStatus = settled ? 'paid' : 'failed'
+    const completedAt = settled ? new Date() : null
+    const failedAt     = settled ? null : new Date()
 
     const responsePayload = {
       callback_source: 'cashfree_return',
       verified: result.verified,
+      amount_reconciled: reconciled.ok,
+      reconcile_detail: reconciled.detail,
       merchant_txn_id: merchantTxnId,
       provider_payment_id: providerPaymentId,
       provider_order_id: providerOrderId || null,
@@ -217,7 +230,7 @@ async function handle(req: NextRequest) {
                END,
                updated_at = NOW()
            WHERE id = $2`,
-          [orderPaymentStatus, payment.order_id, result.verified]
+          [orderPaymentStatus, payment.order_id, settled]
         )
 
         // Cart was deliberately kept around (not cleared at order-create time)
