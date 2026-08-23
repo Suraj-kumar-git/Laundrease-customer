@@ -104,6 +104,59 @@ export class PayUAdapter implements PaymentGatewayAdapter {
     return crypto.createHash('sha512').update(parts.join('|')).digest('hex')
   }
 
+  /**
+   * The exact string PayU hashes for a payment, minus the trailing salt.
+   *
+   * Built from the same parts as buildRequestHash, because it exists to be
+   * compared against what the mobile SDK asks us to sign — see
+   * lib/payment/payu-sdk-hash.ts. Keeping one source for the field order means
+   * the comparison cannot drift away from what we actually sign.
+   */
+  buildPaymentHashPreSalt(input: {
+    txnid: string
+    amount: string
+    productinfo: string
+    firstname: string
+    email: string
+    udf1?: string
+    udf2?: string
+    udf3?: string
+    udf4?: string
+    udf5?: string
+  }): string {
+    return [
+      this.config.apiKey,
+      input.txnid,
+      input.amount,
+      input.productinfo,
+      input.firstname,
+      input.email,
+      input.udf1 ?? '',
+      input.udf2 ?? '',
+      input.udf3 ?? '',
+      input.udf4 ?? '',
+      input.udf5 ?? '',
+      '', '', '', '', '',
+    ].join('|') + '|'
+  }
+
+  /**
+   * Sign a string the CheckoutPro mobile SDK asked for.
+   *
+   * This is the raw primitive only. It must never be reached with a string
+   * that has not been authorised first — see authoriseSdkHash() — because
+   * signing arbitrary input with the merchant salt is equivalent to handing
+   * the salt out.
+   */
+  signMobileSdkHash(hashStringPreSalt: string, postSalt?: string | null): string {
+    const payload = `${hashStringPreSalt}${this.config.apiSecret}${postSalt ?? ''}`
+    return crypto.createHash('sha512').update(payload).digest('hex')
+  }
+
+  get merchantKey(): string {
+    return this.config.apiKey
+  }
+
   async createOrder(params: GatewayOrderParams): Promise<GatewayOrder> {
     const txnid = params.receipt
     const amount = this.formatAmount(params.amount)
@@ -297,6 +350,55 @@ export class PayUAdapter implements PaymentGatewayAdapter {
       gatewayRefundId: null,
       rawResponse: data,
       failureReason: String(data.msg ?? data.message ?? 'PayU refund request was rejected'),
+    }
+  }
+
+  /**
+   * Ask PayU what actually happened to a transaction.
+   *
+   * The authority for the mobile-SDK flow. The SDK reports its own outcome to
+   * the device, but that is a claim made by a client we do not control, so
+   * nothing is settled on it — this server-to-server check is what the
+   * settlement acts on. See
+   * app/api/customer/payments/payu/sdk-result/route.ts.
+   */
+  async fetchTransactionStatus(txnid: string): Promise<{
+    found: boolean
+    status: string | null
+    amount: number | null
+    gatewayPaymentId: string | null
+    raw: unknown
+  }> {
+    const command = 'verify_payment'
+    const hash = crypto
+      .createHash('sha512')
+      .update(`${this.config.apiKey}|${command}|${txnid}|${this.config.apiSecret}`)
+      .digest('hex')
+
+    const response = await fetch(this.getInfoApiUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ key: this.config.apiKey, command, var1: txnid, hash }),
+    })
+
+    const data = await response.json().catch(() => ({}))
+    const details = data?.transaction_details?.[txnid]
+
+    if (!details) {
+      return { found: false, status: null, amount: null, gatewayPaymentId: null, raw: data }
+    }
+
+    const rawAmount = details.amt ?? details.amount
+    const amount = rawAmount === undefined || rawAmount === null || rawAmount === ''
+      ? null
+      : Number(rawAmount)
+
+    return {
+      found: true,
+      status: details.status ? String(details.status).toLowerCase() : null,
+      amount: Number.isFinite(amount as number) ? (amount as number) : null,
+      gatewayPaymentId: details.mihpayid ? String(details.mihpayid) : null,
+      raw: data,
     }
   }
 

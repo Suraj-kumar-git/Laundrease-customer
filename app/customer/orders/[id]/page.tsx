@@ -958,10 +958,11 @@ export default function OrderDetailPage() {
   }
 
   // Pay online any time before delivery — eliminates needing a card/scanner
-  // at the door for COD orders. Razorpay's modal stays in-app, so on success
-  // we just refetch the order instead of navigating away; PayU/Cashfree
-  // redirect the whole browser to the gateway and come back via the
-  // existing server-side callback routes.
+  // at the door for COD orders. Razorpay's modal and PayU's native sheet (in
+  // the Android app) both stay in-app, so on success we just refetch the order
+  // instead of navigating away; Cashfree — and PayU in a browser — redirect
+  // the whole browser to the gateway and come back via the existing
+  // server-side callback routes.
   const handlePayOnline = async () => {
     if (!order) return
     setPayLoading(true); setPayError(null)
@@ -972,6 +973,11 @@ export default function OrderDetailPage() {
 
       await launchGatewayCheckout(json.data, {
         orderNumber: order.order_number,
+        orderPublicId: order.id,
+        onNativePayUSettled: () => {
+          toast({ title: 'Payment successful ✓', description: 'Your order is now fully paid.' })
+          fetchOrder()
+        },
         onRazorpaySuccess: async (paymentId, signature, gatewayOrderId) => {
           const vRes  = await fetch('/api/customer/payments/verify', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',

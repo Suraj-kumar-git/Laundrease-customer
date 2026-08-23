@@ -1,4 +1,7 @@
 // lib/payment-client.ts
+import { Capacitor } from '@capacitor/core'
+import type { PayUSettlement, PayUCheckoutFields } from '@/lib/payu-native'
+
 // Client-side helpers for launching a payment-gateway checkout once the
 // server has returned gateway data from POST /api/customer/orders/[id]/pay.
 // Shared between the order-create flow and the payment-failure retry button
@@ -60,9 +63,15 @@ export function redirectToGatewayForm(actionUrl: string, fields: Record<string, 
 /**
  * Launches the right checkout UI for whichever gateway is active.
  *
- * PayU and Cashfree navigate the browser away from the app (form POST /
- * SDK redirect) — control only returns via the server-side callback
- * routes, which redirect to /customer/orders/payment/success|failure.
+ * PayU has two paths. In the Android app it opens the native CheckoutPro
+ * sheet and resolves in place, like Razorpay — `onNativePayUSettled` is
+ * awaited once the *server* has confirmed the payment with PayU. Everywhere
+ * else (and on any build without the native plugin) it falls back to the
+ * form POST below.
+ *
+ * Cashfree — and PayU's fallback — navigate the browser away from the app,
+ * and control only returns via the server-side callback routes, which
+ * redirect to /customer/orders/payment/success|failure.
  *
  * Razorpay opens an in-page modal — on success, `onRazorpaySuccess` is
  * awaited (it should call /api/customer/payments/verify); on dismiss or
@@ -75,13 +84,43 @@ export async function launchGatewayCheckout(
     orderNumber: string
     customerName?: string
     customerEmail?: string
+    /** The order's public id. Required for the native PayU sheet. */
+    orderPublicId?: string
     onRazorpaySuccess: (paymentId: string, signature: string, gatewayOrderId: string) => Promise<void>
+    onNativePayUSettled?: (settlement: PayUSettlement) => Promise<void> | void
   }
 ): Promise<void> {
   if (data.provider === 'payu') {
     if (!data.checkout_url || !data.checkout_form_fields) {
       throw new Error('Missing PayU checkout details')
     }
+
+    // Loaded only when we are actually on a device, so web visitors never pull
+    // the native bridge code into their bundle.
+    if (opts.orderPublicId && Capacitor.isNativePlatform()) {
+      const payu = await import('@/lib/payu-native')
+      if (payu.isNativePayUAvailable()) {
+        const settlement = await payu.payWithNativePayU({
+          orderPublicId: opts.orderPublicId,
+          fields: data.checkout_form_fields as unknown as PayUCheckoutFields,
+          sandbox: Boolean(data.sandbox),
+        })
+
+        if (settlement.settled) {
+          await opts.onNativePayUSettled?.(settlement)
+          return
+        }
+
+        // Rejecting keeps this consistent with the Razorpay branch, so the
+        // callers' existing catch blocks surface it without special-casing.
+        throw new Error(
+          settlement.payment_status === 'pending'
+            ? 'Payment is still being confirmed. We will update your order shortly.'
+            : 'Payment was not completed'
+        )
+      }
+    }
+
     redirectToGatewayForm(data.checkout_url, data.checkout_form_fields)
     return
   }

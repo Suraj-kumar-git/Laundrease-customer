@@ -4,7 +4,21 @@
 *firebase-adminsdk*.json
 # dependencies
 /node_modules
-/package-lock.json
+# package-lock.json is deliberately COMMITTED — CI runs `npm ci` against it so
+# a release APK is built from the exact dependency tree that was tested. Do
+# not add it back here.
 # next.js
 /.next/
 next-env.d.ts
+!.env.example
+
+# typescript incremental build cache (tsconfig.json sets "incremental": true)
+*.tsbuildinfo
+# generated directory-tree dumps
+structure.txt
+# machine-local Claude Code state
+.claude/
+# release signing material — never commit (android/.gitignore leaves these commented out)
+*.keystore
+*.jks
+android/keystore.properties

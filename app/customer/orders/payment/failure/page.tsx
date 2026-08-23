@@ -88,8 +88,12 @@ function PaymentFailureContent() {
 
       await launchGatewayCheckout(json.data, {
         orderNumber:   order.order_number,
+        orderPublicId: order.id,
         customerName:  (user as any)?.full_name ?? (user as any)?.name,
         customerEmail: (user as any)?.email,
+        onNativePayUSettled: () => {
+          router.push(`/customer/orders/payment/success?order_id=${order.id}`)
+        },
         onRazorpaySuccess: async (paymentId, signature, gatewayOrderId) => {
           const vRes  = await fetch('/api/customer/payments/verify', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',

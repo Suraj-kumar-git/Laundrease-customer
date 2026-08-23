@@ -14,6 +14,19 @@ const config: CapacitorConfig = {
     allowNavigation: ['payu.in', '*.payu.in'],
   },
   plugins: {
+    // Only the two providers we actually offer. Left at the plugin's default
+    // (all four on), the APK would also carry the Apple and Twitter SDKs for
+    // sign-in methods this app does not have — dead weight, and third-party
+    // code in the bundle that privacy scanners will ask about. `npx cap sync`
+    // reads this and regenerates the plugin's gradle.properties from it.
+    SocialLogin: {
+      providers: {
+        google: true,
+        facebook: true,
+        apple: false,
+        twitter: false,
+      },
+    },
     StatusBar: {
       overlaysWebView: false,
       style: 'LIGHT',

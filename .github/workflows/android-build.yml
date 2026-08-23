@@ -22,9 +22,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          # Keyed on package-lock.json, which is why this only works now that
+          # the lockfile is committed.
+          cache: npm
 
+      # npm ci, not npm install: it installs the locked tree exactly and fails
+      # if package-lock.json has drifted from package.json, so the artifact is
+      # built from the dependency set that was actually tested.
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4

@@ -1,8 +1,9 @@
 import { NextRequest } from 'next/server'
 import { redirect } from 'next/navigation'
 import crypto from 'crypto'
-import { query, queryOne, transaction } from '@/lib/db'
+import { query } from '@/lib/db'
 import { createSessionAndSetCookies } from '@/lib/auth'
+import { upsertOAuthUser } from '@/lib/oauth-account'
 
 async function exchangeGoogleCode(code: string) {
   const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
@@ -134,125 +135,9 @@ export async function GET(req: NextRequest) {
       redirect('/customer/auth/login?error=no_email')
     }
 
-    // Use transaction to handle user creation/login
-    const result = await transaction(async (client) => {
-      // Check if user exists
-      let user = await client.query(
-        `SELECT 
-          u.id, 
-          u.email, 
-          u.full_name, 
-          u.status,
-          r.name as role_name
-         FROM users u
-         INNER JOIN roles r ON r.id = u.role_id
-         WHERE u.email = $1 AND u.deleted_at IS NULL`,
-        [oauthData.email.toLowerCase()]
-      )
-
-      let userId: string
-      let isNewUser = false
-
-      if (user.rows.length === 0) {
-        // Create new user
-        isNewUser = true
-        const roleResult = await client.query(
-          `SELECT id FROM roles WHERE name = 'customer'`
-        )
-
-        const newUser = await client.query(
-          `INSERT INTO users (
-            email, 
-            password_hash, 
-            full_name, 
-            role_id, 
-            status, 
-            email_verified,
-            email_verified_at,
-            profile_image
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)
-          RETURNING id, email, full_name`,
-          [
-            oauthData.email.toLowerCase(),
-            '', // No password for OAuth users
-            oauthData.name,
-            roleResult.rows[0].id,
-            'active',
-            true, // Email verified via OAuth
-            oauthData.picture,
-          ]
-        )
-
-        userId = newUser.rows[0].id
-
-        // Create customer profile
-        await client.query(
-          `INSERT INTO customer_profiles (user_id, preferences) 
-           VALUES ($1, $2)`,
-          [userId, JSON.stringify({})]
-        )
-
-        user = newUser
-      } else {
-        userId = user.rows[0].id
-
-        // Update last login and profile image
-        await client.query(
-          `UPDATE users 
-           SET last_logged_in = NOW(),
-               profile_image = COALESCE(profile_image, $2),
-               email_verified = true,
-               email_verified_at = COALESCE(email_verified_at, NOW())
-           WHERE id = $1`,
-          [userId, oauthData.picture]
-        )
-      }
-
-      // Check/Create OAuth account link
-      const oauthAccount = await client.query(
-        `SELECT id FROM oauth_accounts 
-         WHERE user_id = $1 AND provider = $2`,
-        [userId, provider]
-      )
-
-      if (oauthAccount.rows.length === 0) {
-        await client.query(
-          `INSERT INTO oauth_accounts (
-            user_id, 
-            provider, 
-            provider_user_id, 
-            access_token, 
-            refresh_token
-          )
-          VALUES ($1, $2, $3, $4, $5)`,
-          [
-            userId,
-            provider,
-            oauthData.provider_user_id,
-            oauthData.access_token,
-            oauthData.refresh_token,
-          ]
-        )
-      } else {
-        // Update tokens
-        await client.query(
-          `UPDATE oauth_accounts 
-           SET access_token = $1,
-               refresh_token = $2,
-               updated_at = NOW()
-           WHERE user_id = $3 AND provider = $4`,
-          [
-            oauthData.access_token,
-            oauthData.refresh_token,
-            userId,
-            provider,
-          ]
-        )
-      }
-
-      return { userId, user: user.rows[0], isNewUser }
-    })
+    // Find-or-create the customer and link the provider account. Shared with
+    // the Android native-token flow — see lib/oauth-account.ts.
+    const result = await upsertOAuthUser(provider, oauthData)
 
     if (isNativeApp) {
       // This request is running inside a Chrome Custom Tab, which has its

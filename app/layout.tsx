@@ -26,16 +26,9 @@ export const metadata: Metadata = {
 // viewportFit: 'cover' is required for env(safe-area-inset-*) to return
 // anything other than 0 on iOS Safari — without it, any safe-area padding
 // anywhere in the app (e.g. clearing the home-indicator bar) silently does
-// nothing on notched/Dynamic-Island iPhones.
-export const viewport: Viewport = {
-  width: 'device-width',
-  initialScale: 1,
-  viewportFit: 'cover',
-}
-
-// viewportFit: 'cover' lets env(safe-area-inset-*) resolve to real values —
-// needed so the Android app (edge-to-edge enforced on API 35+, where native
-// status-bar coloring is ignored by the OS) can paint that inset itself.
+// nothing on notched/Dynamic-Island iPhones. It matters on the Android app
+// too, where edge-to-edge is enforced on API 35+ and native status-bar
+// coloring is ignored by the OS, so the web layer must paint that inset.
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,

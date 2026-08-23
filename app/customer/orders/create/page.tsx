@@ -623,8 +623,13 @@ function PageContent() {
 
     await launchGatewayCheckout(gwData.data, {
       orderNumber,
+      orderPublicId: orderId,
       customerName:  (user as any)?.full_name ?? (user as any)?.name,
       customerEmail: (user as any)?.email,
+      // Native PayU sheet: the server has already confirmed the payment with
+      // PayU by the time this runs, so it lands on the same confirmed state
+      // the Razorpay modal does rather than bouncing through a redirect.
+      onNativePayUSettled: () => { setConfirmed(true) },
       onRazorpaySuccess: async (paymentId, signature, gatewayOrderId) => {
         const vRes  = await fetch('/api/customer/payments/verify', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
