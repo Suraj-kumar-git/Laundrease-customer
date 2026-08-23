@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/AppTheme">
+        android:theme="@style/AppTheme"
+        tools:replace="android:theme">
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
@@ -32,6 +34,26 @@
                 <data android:scheme="laundrease" android:host="oauth-complete" />
             </intent-filter>
         </activity>
+
+        <!-- PayU declares android:theme on its own <application> element,
+             because these two activities carry no theme of their own and
+             inherit one. Two <application> themes cannot merge, so ours wins
+             via tools:replace above — which would otherwise hand PayU's
+             screens our AppTheme, a Light.DarkActionBar. They are built for
+             NoActionBar, so they would come up with a stray action bar over
+             the payment UI. Pinning the theme back onto each activity keeps
+             both sides correct.
+
+             These are the only two themeless activities across the whole PayU
+             dependency tree; every other one sets its own. CBActivity is the
+             custom browser that renders bank 3DS/OTP pages, so it is on the
+             critical path for card payments, not an edge case. -->
+        <activity
+            android:name="com.payu.ui.view.activities.CheckoutActivity"
+            android:theme="@style/OnePayuTheme" />
+        <activity
+            android:name="com.payu.custombrowser.CBActivity"
+            android:theme="@style/OnePayuTheme" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
