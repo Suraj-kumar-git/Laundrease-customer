@@ -89,10 +89,11 @@ dependencies {
     // happens when Capacitor loads a remote server.url (see
     // capacitor.config.ts), so we bind the Android SDK directly instead.
     implementation 'in.payu:payu-checkout-pro:3.3.15'
-    // UPI intent hand-off to the installed GPay / PhonePe apps. Without
-    // these two, UPI stays inside the SDK's own collect flow and the
-    // app-switch customers expect does not happen.
-    implementation 'in.payu:payu-gpay:4.0.4'
+    // UPI intent hand-off to the installed PhonePe app. (GPay needs no entry
+    // here: payu-checkout-pro already depends on in.payu:payu-gpay:4.0.4
+    // transitively, so listing it explicitly only risks the two versions
+    // drifting apart.) Resolving this one needs PhonePe's own maven repo —
+    // see the root build.gradle.
     implementation 'in.payu:phonepe-intent:1.8.11'
 }
 

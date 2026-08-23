@@ -21,6 +21,20 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // PhonePe publishes IntentSDK only to its own repo, and
+        // in.payu:phonepe-intent depends on it transitively, so a Central-only
+        // build fails to resolve it.
+        //
+        // Scoped with includeGroup on purpose: an unscoped third-party repo
+        // gets queried for *every* dependency, which both slows resolution and
+        // means a compromised or typo-squatted artifact there could answer for
+        // a coordinate we meant to fetch from Central.
+        maven {
+            url 'https://phonepe.mycloudrepo.io/public/repositories/phonepe-intentsdk-android'
+            content {
+                includeGroup 'phonepe.intentsdk.android.release'
+            }
+        }
     }
 }
 
