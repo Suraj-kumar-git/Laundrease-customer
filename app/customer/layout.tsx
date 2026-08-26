@@ -19,6 +19,8 @@ import '@/styles/globals.css'
 import { NewsletterForm } from "@/components/forms/newsletter-form"
 import { UserMenuDropdown } from "@/components/header/user-menu-dropdown"
 import { HeaderWithCart } from "@/components/header/HeaderWithCart"
+import { FeatureFlagsProvider } from "@/components/feature-flags"
+import { isQuickPickupEnabled } from "@/lib/quick-pickup-config"
 import { MobileBottomNav } from "@/components/customer/MobileBottomNav"
 import Script from "next/script"
 
@@ -143,6 +145,10 @@ export default async function RootLayout({
     sameAs: [social.instagram, social.facebook, social.x].filter(Boolean),
   }
 
+  // Resolved server-side so the header never flashes a nav item that is
+  // about to vanish, and so logged-out visitors get the same answer.
+  const quickPickupEnabled = await isQuickPickupEnabled()
+
   return (
     <div className={inter.className}>
         <script
@@ -161,6 +167,7 @@ export default async function RootLayout({
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
           <AuthProvider>
             <CartProvider>
+            <FeatureFlagsProvider flags={{ quickPickup: quickPickupEnabled }}>
             <div className="flex min-h-screen flex-col">
               {/* HeaderWithCart is a client component that manages the CartSheet state */}
             <HeaderWithCart />
@@ -318,6 +325,7 @@ export default async function RootLayout({
               <MobileBottomNav />
             </div>
             <Toaster />
+            </FeatureFlagsProvider>
             </CartProvider>
           </AuthProvider>
         </ThemeProvider>

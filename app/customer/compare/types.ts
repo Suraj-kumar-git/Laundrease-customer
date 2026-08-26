@@ -7,6 +7,12 @@ import type { ServiceWithProducts } from '@/types/pricing'
 export interface CompareProvider {
   id: number
   business_name: string
+  /**
+   * Which branch of that business. Two branches are two comparable providers
+   * with their own prices, distance and rating, so this is what keeps the
+   * side-by-side readable when both belong to the same brand.
+   */
+  branch_name: string | null
   business_address: string | null
   city: string | null
   postal_code: string | null

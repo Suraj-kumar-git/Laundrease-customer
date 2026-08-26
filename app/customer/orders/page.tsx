@@ -32,6 +32,7 @@ interface Order {
   payment_method:   string | null
   created_at:       string
   provider_name:    string | null
+  provider_branch:  string | null
   provider_city:    string | null
   item_count:       number
   service_count:    number
@@ -192,7 +193,13 @@ function OrderCard({
             {order.provider_name && (
               <div className="mb-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Store className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{order.provider_name}{order.provider_city ? `, ${order.provider_city}` : ''}</span>
+                {/* The branch, not just the brand: a customer chasing their
+                    laundry needs the shop that actually has it. */}
+                <span className="truncate">
+                  {order.provider_name}
+                  {order.provider_branch ? ` · ${order.provider_branch}` : ''}
+                  {order.provider_city ? `, ${order.provider_city}` : ''}
+                </span>
               </div>
             )}
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

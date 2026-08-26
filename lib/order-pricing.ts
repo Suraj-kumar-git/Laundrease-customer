@@ -17,6 +17,12 @@
 // The client still chooses `is_express` — that is a customer decision, not a
 // price — but it is gated by whether the service actually offers express, and
 // the multiplier comes from the catalogue rather than the request.
+//
+// Three pricing models: per_unit (quantity), per_kg (weight) and per_sqft
+// (measured area, for carpets and anything else charged by size). per_sqft
+// lines are worth nothing until the delivery partner measures them at pickup,
+// which is why the model itself is verified against the catalogue below rather
+// than taken from the request.
 
 import { getGstRate, applyGst } from '@/lib/gst'
 
@@ -24,20 +30,30 @@ import { getGstRate, applyGst } from '@/lib/gst'
 export type Exec = (text: string, params?: any[]) => Promise<{ rows: any[]; rowCount: number | null }>
 
 export interface LineRequest {
-  type:             'per_kg' | 'per_unit'
+  type:             'per_kg' | 'per_unit' | 'per_sqft'
   service_id:       number
   product_type_id?: number | null
   quantity?:        number | null
   weight_kg?:       number | null
+  /**
+   * Measured area, in square feet.
+   *
+   * Deliberately absent at order time — a carpet has no area until the
+   * delivery partner measures it at pickup, so callers leave this null and the
+   * line is worth 0. It exists on the request type only so the same function
+   * can reprice the line once the measurement arrives.
+   */
+  area_sqft?:       number | null
   is_express?:      boolean
 }
 
 export interface PricedLine {
-  type:               'per_kg' | 'per_unit'
+  type:               'per_kg' | 'per_unit' | 'per_sqft'
   service_id:         number
   product_type_id:    number | null
   quantity:           number | null
   weight_kg:          number | null
+  area_sqft:          number | null
   unit_price:         number
   line_total:         number
   is_express:         boolean
@@ -92,6 +108,35 @@ export async function priceLine(
   ctx: PricingContext,
   line: LineRequest
 ): Promise<PricedLine> {
+  // `line.type` arrives from the request body — both callers pass the client's
+  // word for it straight through. That was tolerable while every model priced
+  // from a real catalogue row and a mismatched claim simply failed the lookup.
+  //
+  // per_sqft breaks that safety, because an unmeasured per-sqft line is worth
+  // ZERO. A client that could get a shirt routed down this branch would get it
+  // free. So the per_sqft branch is decided by the DATABASE, never the caller:
+  // a product type is per-area or it is not, and the request does not get a
+  // vote either way.
+  if (line.product_type_id != null) {
+    const modelRes = await exec(
+      `SELECT pricing_model FROM product_types WHERE id = $1`,
+      [line.product_type_id]
+    )
+    const dbModel = modelRes.rows[0]?.pricing_model as string | undefined
+    if (!dbModel) throw new PricingError('SERVICE_UNAVAILABLE')
+
+    // Claiming per_sqft for something that isn't, or claiming something else
+    // for a product that is, are both rejected rather than quietly re-routed:
+    // a caller and the catalogue disagreeing about how a thing is priced is a
+    // bug or an attempt, and neither deserves a price.
+    if ((dbModel === 'per_sqft') !== (line.type === 'per_sqft')) {
+      throw new PricingError('SERVICE_UNAVAILABLE')
+    }
+  } else if (line.type === 'per_sqft') {
+    // A per-area line without a product type has nothing to check against.
+    throw new PricingError('SERVICE_UNAVAILABLE')
+  }
+
   if (line.type === 'per_kg') {
     const res = await exec(
       `SELECT
@@ -101,7 +146,8 @@ export async function priceLine(
        FROM provider_services ps
        JOIN services s ON s.id = ps.service_id
        WHERE ps.provider_id = $1 AND ps.service_id = $2
-         AND s.category IN ('wash_fold', 'wash_iron')`,
+         AND s.pricing_model = 'per_kg'
+         AND s.is_active = TRUE`,
       [ctx.providerId, line.service_id]
     )
     if (res.rowCount === 0) throw new PricingError('SERVICE_UNAVAILABLE')
@@ -120,8 +166,62 @@ export async function priceLine(
       product_type_id: line.product_type_id ?? null,
       quantity:        null,
       weight_kg:       weightKg,
+      area_sqft:       null,
       unit_price:      unitPrice,
       line_total:      round2(unitPrice * (isExpress ? multiplier : 1) * weightKg),
+      is_express:      isExpress,
+      express_multiplier: multiplier,
+    }
+  }
+
+  if (line.type === 'per_sqft') {
+    // Dimension-priced goods (carpets). Unlike per_kg and per_unit, the rate is
+    // resolved from the PRODUCT TYPE's pricing model rather than the service
+    // category: "Carpet Cleaning" is an ordinary service, and what makes the
+    // line per-area is the thing being cleaned.
+    //
+    // The rate must already exist. A provider who offers carpet cleaning but
+    // has not set a per-sq-ft price is SERVICE_UNAVAILABLE rather than free —
+    // silently pricing at zero would let a customer order a carpet that never
+    // becomes billable, and nobody would notice until the partner measured it.
+    const res = await exec(
+      `SELECT
+         COALESCE(ps.price_per_sqft_override, s.price_per_sqft) AS price,
+         COALESCE(ps.is_express_available_override, s.is_express_available) AS effective_express,
+         COALESCE(ps.express_multiplier_override, s.express_multiplier) AS effective_multiplier
+       FROM provider_services ps
+       JOIN services s ON s.id = ps.service_id
+       JOIN product_types pt ON pt.id = $3
+       WHERE ps.provider_id = $1 AND ps.service_id = $2
+         AND pt.is_active = TRUE
+         AND pt.pricing_model = 'per_sqft'
+         AND COALESCE(ps.price_per_sqft_override, s.price_per_sqft) IS NOT NULL`,
+      [ctx.providerId, line.service_id, line.product_type_id]
+    )
+    if (res.rowCount === 0) throw new PricingError('SERVICE_UNAVAILABLE')
+
+    const row        = res.rows[0]
+    const unitPrice  = ctx.gstInclusive
+      ? applyGst(parseFloat(row.price), ctx.gstRate)!
+      : parseFloat(row.price)
+    const multiplier = parseFloat(row.effective_multiplier)
+    const isExpress  = !!line.is_express && !!row.effective_express
+    // Null area (not yet measured) prices to zero, which is the whole point:
+    // the customer is shown the rate and charged nothing until pickup.
+    const areaSqft   = line.area_sqft == null ? null : Number(line.area_sqft)
+
+    return {
+      type: 'per_sqft',
+      service_id:      line.service_id,
+      product_type_id: line.product_type_id ?? null,
+      // One carpet is one item. Quantity stays 1 so the DB's line-total
+      // trigger, which falls back to quantity for other models, can never
+      // multiply an area by anything.
+      quantity:        1,
+      weight_kg:       null,
+      area_sqft:       areaSqft,
+      unit_price:      unitPrice,
+      line_total:      round2(unitPrice * (isExpress ? multiplier : 1) * (areaSqft ?? 0)),
       is_express:      isExpress,
       express_multiplier: multiplier,
     }
@@ -139,7 +239,8 @@ export async function priceLine(
           AND ppsp.service_id = psp.service_id
      INNER JOIN provider_services ps ON ps.provider_id = $1 AND ps.service_id = psp.service_id
      WHERE pt.id = $2 AND s.id = $3 AND pt.is_active = TRUE
-       AND s.category NOT IN ('wash_fold', 'wash_iron')
+       AND s.is_active = TRUE
+       AND s.pricing_model = 'per_unit'
        AND (ppsp.unit_price IS NOT NULL OR psp.unit_price IS NOT NULL)`,
     [ctx.providerId, line.product_type_id, line.service_id]
   )
@@ -159,6 +260,7 @@ export async function priceLine(
     product_type_id: line.product_type_id ?? null,
     quantity,
     weight_kg:       null,
+    area_sqft:       null,
     unit_price:      unitPrice,
     line_total:      round2(unitPrice * (isExpress ? multiplier : 1) * quantity),
     is_express:      isExpress,

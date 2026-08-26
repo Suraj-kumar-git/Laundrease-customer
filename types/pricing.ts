@@ -4,7 +4,10 @@
 
 // ---- Pricing ------------------------------------------------
 
-export type PricingModel = 'per_kg' | 'per_unit'
+// per_sqft: priced by measured area (carpets). The measurement does not exist
+// until the delivery partner takes it at pickup, so a per_sqft line is worth
+// ₹0 in the cart and at checkout — the customer is shown the rate instead.
+export type PricingModel = 'per_kg' | 'per_unit' | 'per_sqft'
 export type DisplayCategory = 'everyday' | 'ethnic_formal' | 'household' | 'specialty'
 export type ServiceCategory =
   | 'wash_fold'

@@ -41,6 +41,14 @@ export interface LaundryProvider {
   id: number
   user_id: number
   business_name: string
+  /**
+   * Which branch of that business, e.g. "Wakad".
+   *
+   * A provider with several branches appears once per branch, each with its
+   * own distance, delivery fee and rating. Null for older rows that never got
+   * a label.
+   */
+  branch_name?: string | null
   business_address: string
   service_area: string
   capacity: number
@@ -88,6 +96,26 @@ export interface UnitProduct {
 }
 
 // A selected per-kg line item
+/**
+ * A product charged by measured area (carpets).
+ *
+ * Carries a RATE, not a price — the amount only exists once the delivery
+ * partner measures the item at pickup, which is why this cannot be folded into
+ * UnitProduct: a per-unit line can be totalled in the cart and this one cannot.
+ */
+export interface SqftProduct {
+  product_type_id: number
+  product_type_name: string
+  display_category: string | null
+  icon: string | null
+  service_id: number
+  service_name: string
+  price_per_sqft: number
+  mrp_per_sqft: number | null
+  is_express_available: boolean
+  express_multiplier: number
+}
+
 export interface SelectedService {
   // null for per_kg items — they aren't tied to a single garment type;
   // the backend resolves the shared "mixed load" product type instead.

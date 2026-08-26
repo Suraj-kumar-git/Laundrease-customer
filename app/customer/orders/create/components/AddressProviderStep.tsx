@@ -1,7 +1,7 @@
 'use client'
 // app/customer/orders/create/components/AddressProviderStep.tsx
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import Image from 'next/image'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
@@ -10,7 +10,8 @@ import {
   Loader2, ChevronDown, Truck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Address, KgService, LaundryProvider, UnitProduct, DeliveryFeePreview } from '@/types/order-types'
+import { duplicateBusinessNames } from '@/lib/provider-label'
+import { Address, KgService, LaundryProvider, UnitProduct, SqftProduct, DeliveryFeePreview } from '@/types/order-types'
 import { formatDistance } from '@/lib/format-distance'
 
 // ---- Types --------------------------------------------------
@@ -30,7 +31,7 @@ interface AddressProviderStepProps {
     address: Address,
     delivery: Address,
     provider: LaundryProvider,
-    prefetchedServices: { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }
+    prefetchedServices: { per_kg_services: KgService[]; per_unit_products: UnitProduct[]; per_sqft_products: SqftProduct[] }
   ) => void
 }
 
@@ -109,7 +110,7 @@ export function AddressProviderStep({
   // Falls back to the normal picker UI if the provider turns out unavailable.
   const [autoAdvancing, setAutoAdvancing]       = useState(!!preferredProviderId && !initialProvider)
   // Prefetched services cache: keyed by provider id
-  const servicesCache = useRef<Map<number, { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }>>(new Map())
+  const servicesCache = useRef<Map<number, { per_kg_services: KgService[]; per_unit_products: UnitProduct[]; per_sqft_products: SqftProduct[] }>>(new Map())
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   // Close dropdown on outside click
@@ -190,7 +191,7 @@ export function AddressProviderStep({
             setSelectedProvider(match)
             prefetchServices(match.id).then(() => {
               const cached = servicesCache.current.get(match.id) ?? {
-                per_kg_services: [], per_unit_products: [],
+                per_kg_services: [], per_unit_products: [], per_sqft_products: [],
               }
               onComplete(selectedAddress, selectedAddress, match, cached)
             })
@@ -222,6 +223,7 @@ export function AddressProviderStep({
         servicesCache.current.set(providerId, {
           per_kg_services:   json.data.per_kg_services   ?? [],
           per_unit_products: json.data.per_unit_products ?? [],
+          per_sqft_products: json.data.per_sqft_products ?? [],
         })
       }
     } catch { /* non-fatal — Step 2 will retry */ }
@@ -233,6 +235,10 @@ export function AddressProviderStep({
     setShowDropdown(false)
   }
 
+  // Business names appearing on more than one card in this result — branches
+  // of one provider are separate rows with their own distance, fee and rating.
+  const duplicateNames = useMemo(() => duplicateBusinessNames(providers), [providers])
+
   const handleSelectProvider = (provider: LaundryProvider) => {
     setSelectedProvider(provider)
     prefetchServices(provider.id)
@@ -241,7 +247,7 @@ export function AddressProviderStep({
   const handleContinue = () => {
     if (!selectedAddress || !selectedProvider) return
     const cached = servicesCache.current.get(selectedProvider.id) ?? {
-      per_kg_services: [], per_unit_products: [],
+      per_kg_services: [], per_unit_products: [], per_sqft_products: [],
     }
     onComplete(selectedAddress, selectedAddress, selectedProvider, cached)
   }
@@ -433,6 +439,11 @@ export function AddressProviderStep({
         {providers.map(provider => {
           const isSelected = selectedProvider?.id === provider.id
           const isPrefetched = servicesCache.current.has(provider.id)
+          // Show the branch only when it is doing work: two cards carrying the
+          // same business name. A single-branch provider would otherwise read
+          // "Fresh Clean Services · Pune" for no reason, since branch_name was
+          // backfilled from the city.
+          const needsBranchLabel = !!provider.branch_name && duplicateNames.has(provider.business_name)
 
           return (
             // Outer is a div — we use a child button only for the "Continue" CTA
@@ -468,6 +479,11 @@ export function AddressProviderStep({
                 <div className="flex-1 min-w-0 pr-6">
                   <p className="truncate text-sm font-bold text-foreground">
                     {provider.business_name}
+                    {needsBranchLabel && (
+                      <span className="ml-1 font-semibold text-muted-foreground">
+                        · {provider.branch_name}
+                      </span>
+                    )}
                   </p>
                   {provider.city && (
                     <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-muted-foreground">
@@ -512,11 +528,17 @@ export function AddressProviderStep({
                 </div>
               )}
 
-              {/* Certifications */}
-              {provider.certifications && provider.certifications.length > 0 && (
+              {/* Admin verification.
+                  Was keyed on provider.certifications — a text[] the PROVIDER
+                  ticks on their own profile page (quality/hygiene certs). Most
+                  providers leave it empty, so the badge appeared on one card
+                  and not the rest, and it implied admin approval while
+                  actually showing a self-declaration. is_verified is the flag
+                  admin sets, which is what the badge was meant to convey. */}
+              {provider.is_verified && (
                 <div className="mt-2 flex items-center gap-1">
                   <ShieldCheck className="h-3.5 w-3.5 text-emerald-500" />
-                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Certified</span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Verified</span>
                 </div>
               )}
 

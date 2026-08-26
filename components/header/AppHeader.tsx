@@ -16,6 +16,7 @@ import {
   LifeBuoy,
 } from 'lucide-react'
 import { useAuth } from '@/components/auth-provider'
+import { useFeatureFlags } from '@/components/feature-flags'
 import { useCart } from '@/components/cart-provider'
 import { cn } from '@/lib/utils'
 import { BrandLogo } from '@/components/brand-logo'
@@ -208,7 +209,16 @@ function DesktopUserMenu({ user, onLogout }: { user: any; onLogout: () => void }
 }
 
 // ---- Main Header --------------------------------------------
+
+// Quick Pickup is admin-switchable (platform_config.quick_pickup_enabled), so
+// the nav lists are filtered at render rather than being static. Everything
+// else in them is unconditional.
+function withoutDisabled<T extends { href: string }>(items: T[], quickPickup: boolean): T[] {
+  return quickPickup ? items : items.filter(i => i.href !== '/customer/quick-pickup')
+}
+
 export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
+  const { quickPickup } = useFeatureFlags()
   const { user, logout, isLoading } = useAuth()
   const pathname = usePathname()
   const router   = useRouter()
@@ -282,7 +292,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
           {/* Desktop nav-items only when logged in */}
           {user && (
             <nav className="hidden items-center gap-1 lg:flex">
-              {NAV_ITEMS_AUTH.map(item => {
+              {withoutDisabled(NAV_ITEMS_AUTH, quickPickup).map(item => {
                 const Icon   = item.icon
                 const active = isActive(item.href)
                 return (
@@ -309,7 +319,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
           )}
           {!user && (
             <nav className="hidden items-center gap-1 lg:flex">
-              {NAV_ITEMS_NOT_AUTH.map(item => {
+              {withoutDisabled(NAV_ITEMS_NOT_AUTH, quickPickup).map(item => {
                 const Icon   = item.icon
                 const active = isActive(item.href)
                 return (
@@ -474,7 +484,7 @@ export function AppHeader({ onCartClick }: { onCartClick: () => void }) {
                   </>
                 ) : (
                   <>
-                    {mobileGuestItems.map(item => {
+                    {withoutDisabled(mobileGuestItems, quickPickup).map(item => {
                       const Icon = item.icon
                       return (
                         <Link

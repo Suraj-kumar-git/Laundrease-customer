@@ -7,12 +7,12 @@ import { useState, useEffect, useMemo, useRef, useCallback, useContext, createCo
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  Droplets, Sparkles, Wind, Zap, Scale, Tag,
+  Droplets, Sparkles, Wind, Zap, Scale, Tag, Ruler,
   Plus, Minus, Trash2, Loader2, ChevronRight,
   Search, X as XIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { KgService, UnitProduct } from '@/types/order-types'
+import { KgService, UnitProduct, SqftProduct } from '@/types/order-types'
 import { LaundryProvider, SelectedService } from '../../types'
 import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveProductIconSrc } from '@/lib/product-icons'
@@ -71,7 +71,7 @@ function FlyToCartLayer({ items, onDone }: { items: FlyItem[]; onDone: (id: numb
 interface ServiceSelectionStepProps {
   provider: LaundryProvider
   initialSelected: SelectedService[]
-  prefetchedServices?: { per_kg_services: KgService[]; per_unit_products: UnitProduct[] }
+  prefetchedServices?: { per_kg_services: KgService[]; per_unit_products: UnitProduct[]; per_sqft_products?: SqftProduct[] }
   onComplete: (services: SelectedService[]) => void
   // Fired (debounced) after every add/remove/quantity change, independent of
   // the "Continue" button — so the cart is saved as the customer builds it,
@@ -754,11 +754,102 @@ function UnitTab({
 }
 
 // ---- Main ---------------------------------------------------
+
+// ─── By Size — dimension-priced products ────────────────────────────────────
+//
+// Carpets and anything else charged by area. The card shows a RATE and no
+// total, because there is no total yet: the delivery partner measures the item
+// at pickup and the amount is calculated then.
+//
+// There is no quantity control. One carpet is one item — two carpets are two
+// separate lines, each measured on its own — so the only choice here is in or
+// out, which keeps the card readable at 320px.
+function SqftTab({
+  products, selected, onToggle,
+}: Readonly<{
+  products: SqftProduct[]
+  selected: Set<string>
+  onToggle: (key: string) => void
+}>) {
+  if (products.length === 0) {
+    return (
+      <div className="rounded-xl border border-border/50 bg-muted/20 p-6 text-center">
+        <p className="text-sm text-muted-foreground">This partner doesn&apos;t take size-priced items.</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2.5">
+        <Ruler className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          These are charged by area. Nothing is added to your bill now — your delivery partner measures
+          the item in front of you at pickup, and the price is calculated then.
+        </p>
+      </div>
+
+      {/* One column on phones, two from sm up. Cards are equal height so a
+          long product name never leaves a ragged row on desktop. */}
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+        {products.map(p => {
+          const key = `${p.product_type_id}_${p.service_id}`
+          const isOn = selected.has(key)
+          return (
+            <button
+              type="button"
+              key={key}
+              onClick={() => onToggle(key)}
+              aria-pressed={isOn}
+              className={cn(
+                'flex h-full w-full items-center gap-3 rounded-xl border p-3 text-left transition-all',
+                isOn
+                  ? 'border-primary bg-primary/5 shadow-sm'
+                  : 'border-border/60 bg-card hover:border-primary/40'
+              )}
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted text-lg">
+                {p.icon ?? '🧶'}
+              </div>
+
+              {/* min-w-0 so long names truncate rather than pushing the price
+                  off the card on a narrow screen. */}
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-foreground">{p.product_type_name}</p>
+                <p className="truncate text-[11px] text-muted-foreground">{p.service_name}</p>
+                <p className="mt-0.5 text-xs font-semibold text-primary">
+                  {p.mrp_per_sqft && p.mrp_per_sqft > p.price_per_sqft && (
+                    <span className="mr-1 font-normal text-muted-foreground line-through">
+                      {formatINR(p.mrp_per_sqft)}
+                    </span>
+                  )}
+                  {formatINR(p.price_per_sqft)}
+                  <span className="font-normal text-muted-foreground">/sq ft</span>
+                </p>
+              </div>
+
+              <span
+                className={cn(
+                  'shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors',
+                  isOn ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground'
+                )}
+              >
+                {isOn ? 'Added' : 'Add'}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export function ServiceSelectionStep({
   provider, initialSelected, prefetchedServices, onComplete, onSelectionsChange,
 }: ServiceSelectionStepProps) {
   const [kgServices,   setKgServices]   = useState<KgService[]>(prefetchedServices?.per_kg_services ?? [])
   const [unitProducts, setUnitProducts] = useState<UnitProduct[]>(prefetchedServices?.per_unit_products ?? [])
+  const [sqftProducts, setSqftProducts] = useState<SqftProduct[]>(prefetchedServices?.per_sqft_products ?? [])
   const [loading,      setLoading]      = useState(!prefetchedServices || (prefetchedServices.per_kg_services.length === 0 && prefetchedServices.per_unit_products.length === 0))
   const [error,        setError]        = useState<string | null>(null)
   const [isExpressGlobal, setIsExpressGlobal] = useState(false)
@@ -804,7 +895,7 @@ export function ServiceSelectionStep({
     ) ? 'per_kg' : 'per_unit' as 'per_kg' | 'per_unit',
     []
   )
-  const [activeTab, setActiveTab] = useState<'per_kg' | 'per_unit'>(defaultTab)
+  const [activeTab, setActiveTab] = useState<'per_kg' | 'per_unit' | 'per_sqft'>(defaultTab)
 
   const [kgSel, setKgSel] = useState<Map<number, { weight_kg: number }>>(() => {
     const m = new Map<number, { weight_kg: number }>()
@@ -818,6 +909,13 @@ export function ServiceSelectionStep({
     return m
   })
 
+  const [sqftSel, setSqftSel] = useState<Set<string>>(() => {
+    const set = new Set<string>()
+    initialSelected.filter(s => s.type === 'per_sqft').forEach(s =>
+      set.add(`${(s as any).product_type_id}_${s.service_id}`))
+    return set
+  })
+
   useEffect(() => {
     if (!loading) return
     fetch(`/api/customer/laundry-providers/${provider.id}/services`)
@@ -828,6 +926,7 @@ export function ServiceSelectionStep({
         const unit = json.data.per_unit_products ?? []
         setKgServices(kg)
         setUnitProducts(unit)
+        setSqftProducts(json.data.per_sqft_products ?? [])
         if (kg.length === 0 && unit.length > 0) setActiveTab('per_unit')
       })
       .catch(e => setError(e.message))
@@ -874,13 +973,30 @@ export function ServiceSelectionStep({
         weight_kg: 0
       })
     })
+    sqftSel.forEach(key => {
+      const [ptId, svcId] = key.split('_').map(Number)
+      const product = sqftProducts.find(p => p.product_type_id === ptId && p.service_id === svcId)
+      if (!product) return
+      result.push({
+        type: 'per_sqft', product_type_id: ptId, product_type_name: product.product_type_name,
+        icon: product.icon, service_id: svcId, service_name: product.service_name,
+        // One carpet, one item. unit_price carries the RATE and line_total is
+        // 0 — the amount does not exist until the partner measures at pickup.
+        quantity: 1,
+        unit_price: product.price_per_sqft, mrp: product.mrp_per_sqft ?? null,
+        is_express: isExpressGlobal && product.is_express_available,
+        express_multiplier: product.express_multiplier,
+        line_total: 0,
+        weight_kg: 0,
+      })
+    })
     return result
   }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const selections = useMemo(buildSelections, [kgSel, unitSel, isExpressGlobal, kgServices, unitProducts])
+  const selections = useMemo(buildSelections, [kgSel, unitSel, sqftSel, isExpressGlobal, kgServices, unitProducts, sqftProducts])
   const subtotal   = selections.reduce((s, i) => s + i.line_total, 0)
-  const totalItems = kgSel.size + unitSel.size
+  const totalItems = kgSel.size + unitSel.size + sqftSel.size
 
   // Autosave — debounced so rapid +/- taps don't fire a request per click.
   // Fires on every settled change (including down to zero items, e.g. the
@@ -909,19 +1025,33 @@ export function ServiceSelectionStep({
     <div className="space-y-5">
       {/* Tabs + Express toggle — single compact row */}
       <div className="flex items-center gap-2">
-        <div className="flex flex-1 gap-1 rounded-xl border border-border/50 bg-muted/30 p-1">
+        {/* The "By Size" tab only appears when this provider actually prices
+            something by area. For everyone else the bar stays exactly two tabs
+            wide — no layout change, and no permanently-greyed third tab. */}
+        <div className="flex min-w-0 flex-1 gap-1 rounded-xl border border-border/50 bg-muted/30 p-1">
           {([
-            { id: 'per_unit' as const, label: 'By Piece', count: unitProducts.length },
-            { id: 'per_kg' as const, label: 'By Weight', count: kgServices.length },
+            { id: 'per_unit' as const, label: 'By Piece',  count: unitProducts.length },
+            { id: 'per_kg'   as const, label: 'By Weight', count: kgServices.length },
+            ...(sqftProducts.length > 0
+              ? [{ id: 'per_sqft' as const, label: 'By Size', count: sqftProducts.length }]
+              : []),
           ]).map(tab => (
             <button type="button" key={tab.id} onClick={() => setActiveTab(tab.id)}
               className={cn(
-                'flex flex-1 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition-all',
+                // min-w-0 lets the label truncate instead of forcing the row
+                // wider than the screen once there are three tabs on mobile.
+                'flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-1 py-2 text-xs font-semibold transition-all sm:gap-1.5',
                 activeTab === tab.id ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
               )}>
-              {tab.id === 'per_kg' ? <Scale className="h-3.5 w-3.5" /> : <Tag className="h-3.5 w-3.5" />}
-              {tab.label}
-              {tab.count === 0 && <span className="text-[9px] text-muted-foreground/60">(N/A)</span>}
+              {tab.id === 'per_kg'
+                ? <Scale className="h-3.5 w-3.5 shrink-0" />
+                : tab.id === 'per_sqft'
+                  ? <Ruler className="h-3.5 w-3.5 shrink-0" />
+                  : <Tag className="h-3.5 w-3.5 shrink-0" />}
+              <span className="truncate">{tab.label}</span>
+              {/* Hidden on the narrowest screens — with three tabs the row has
+                  no room for it, and an empty tab is obvious once opened. */}
+              {tab.count === 0 && <span className="hidden text-[9px] text-muted-foreground/60 sm:inline">(N/A)</span>}
             </button>
           ))}
         </div>
@@ -938,6 +1068,13 @@ export function ServiceSelectionStep({
       {/* Tab content */}
       {activeTab === 'per_kg' ? (
         <KgTab services={kgServices} selections={kgSel} isExpressGlobal={isExpressGlobal} onChange={handleKgChange} />
+      ) : activeTab === 'per_sqft' ? (
+        <SqftTab products={sqftProducts} selected={sqftSel}
+          onToggle={key => setSqftSel(prev => {
+            const next = new Set(prev)
+            if (next.has(key)) next.delete(key); else next.add(key)
+            return next
+          })} />
       ) : (
         <UnitTab products={unitProducts} selections={unitSel} isExpressGlobal={isExpressGlobal}
           onToggleExpress={() => setIsExpressGlobal(v => !v)} onChange={handleUnitChange} />
@@ -954,7 +1091,16 @@ export function ServiceSelectionStep({
                   {totalItems} service{totalItems !== 1 ? 's' : ''} selected
                   {isExpressGlobal && <span className="ml-1 text-amber-200">· Express</span>}
                 </p>
-                <p className="text-lg font-bold text-primary-foreground">{formatINR(subtotal)}</p>
+                {/* A basket of only size-priced items totals ₹0, which reads
+                    as free rather than as "not priced yet". Say which it is. */}
+                <p className="text-lg font-bold text-primary-foreground">
+                  {subtotal === 0 && sqftSel.size > 0 ? 'Priced at pickup' : formatINR(subtotal)}
+                </p>
+                {subtotal > 0 && sqftSel.size > 0 && (
+                  <p className="text-[10px] text-primary-foreground/70">
+                    + {sqftSel.size} item{sqftSel.size !== 1 ? 's' : ''} priced at pickup
+                  </p>
+                )}
               </div>
               <button type="button" onClick={() => onComplete(selections)}
                 className="flex items-center gap-2 rounded-xl bg-white px-5 py-2.5 text-sm font-semibold text-primary shadow-sm hover:bg-white/90">

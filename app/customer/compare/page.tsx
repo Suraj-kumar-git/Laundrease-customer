@@ -19,6 +19,7 @@ import {
   Scale, ArrowLeftRight, Search, TrendingDown, Info, Sparkles, X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { providerLabel } from '@/lib/provider-label'
 import { FooterPageLayout } from '@/components/layout/footer-page-layout'
 import { ProductIcon } from '@/components/customer/ProductIcon'
 import { resolveProductIconSrc } from '@/lib/product-icons'
@@ -292,12 +293,12 @@ export default function ComparePage() {
                     <p className="font-semibold text-emerald-900 dark:text-emerald-200">
                       {summary.aCheaper === summary.bCheaper
                         ? 'Both providers are evenly matched'
-                        : `${(summary.aCheaper > summary.bCheaper ? slotA : slotB)!.provider.business_name} is cheaper on more items`}
+                        : `${providerLabel((summary.aCheaper > summary.bCheaper ? slotA : slotB)!.provider, { always: true })} is cheaper on more items`}
                     </p>
                     <p className="mt-0.5 text-xs leading-relaxed text-emerald-800/90 dark:text-emerald-300/90">
                       Across {summary.comparable} item{summary.comparable !== 1 ? 's' : ''} both offer:{' '}
-                      <span className="font-medium">{slotA!.provider.business_name}</span> wins {summary.aCheaper},{' '}
-                      <span className="font-medium">{slotB!.provider.business_name}</span> wins {summary.bCheaper}
+                      <span className="font-medium">{providerLabel(slotA!.provider, { always: true })}</span> wins {summary.aCheaper},{' '}
+                      <span className="font-medium">{providerLabel(slotB!.provider, { always: true })}</span> wins {summary.bCheaper}
                       {summary.tied > 0 && <>, {summary.tied} tied</>}.
                       {(summary.aOnly > 0 || summary.bOnly > 0) && (
                         <> {summary.aOnly + summary.bOnly} item{summary.aOnly + summary.bOnly !== 1 ? 's are' : ' is'} offered by only one of them.</>
@@ -391,10 +392,10 @@ export default function ComparePage() {
               <div className="sticky top-14 z-20 grid grid-cols-[minmax(0,1fr)_68px_68px] items-center gap-2 rounded-t-2xl border border-border/60 bg-card px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_112px_112px] sm:px-4">
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Item</span>
                 <span className="truncate text-center text-[11px] font-bold text-primary">
-                  {slotA?.provider.business_name ?? '—'}
+                  {slotA ? providerLabel(slotA.provider, { always: true }) : '—'}
                 </span>
                 <span className="truncate text-center text-[11px] font-bold text-violet-600 dark:text-violet-400">
-                  {slotB?.provider.business_name ?? '—'}
+                  {slotB ? providerLabel(slotB.provider, { always: true }) : '—'}
                 </span>
               </div>
 

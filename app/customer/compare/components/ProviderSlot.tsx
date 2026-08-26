@@ -103,7 +103,15 @@ export function ProviderSlot({ slotId, slot, armed, loading, onArm, onClear }: P
           {p.business_name.charAt(0)}
         </div>
         <div className="min-w-0 flex-1">
-          <p className="line-clamp-2 text-sm font-bold leading-snug text-foreground">{p.business_name}</p>
+          <p className="line-clamp-2 text-sm font-bold leading-snug text-foreground">
+            {p.business_name}
+            {/* Always shown here, not just on collision: a customer comparing
+                two branches of one provider is a normal thing to do, and two
+                identical headers would make the table below meaningless. */}
+            {p.branch_name && (
+              <span className="ml-1 font-semibold text-muted-foreground">· {p.branch_name}</span>
+            )}
+          </p>
           {(p.service_area || p.city) && (
             <p className="mt-0.5 flex items-start gap-1 text-[11px] text-muted-foreground">
               <MapPin className="mt-0.5 h-3 w-3 shrink-0" />

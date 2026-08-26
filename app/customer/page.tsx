@@ -15,6 +15,7 @@ import { useAuth } from '@/components/auth-provider'
 import { formatStat } from '@/lib/format-stat'
 import { formatDistance } from '@/lib/format-distance'
 import { useCustomerLocation } from '@/lib/use-customer-location'
+import { useFeatureFlags } from '@/components/feature-flags'
 
 // ---- Types -------------------------------------------------------------------
 interface Provider {
@@ -454,6 +455,7 @@ const BUBBLES = [
 
 // ---- Page --------------------------------------------------------------------
 export default function HomePage() {
+  const { quickPickup } = useFeatureFlags()
   const { user } = useAuth()
   const { coords, permission, asking, request } = useCustomerLocation()
   const [data,    setData]    = useState<HomeData | null>(null)
@@ -534,6 +536,7 @@ export default function HomePage() {
                   </Link>
                 </div>
               )}
+              {quickPickup && (
               <Link href="/customer/quick-pickup" className="w-full sm:w-auto">
                 <button className="group relative w-full overflow-hidden rounded-full border-2 border-white/50 bg-white/10 px-8 py-3.5 text-sm font-semibold text-white shadow-[0_4px_18px_rgba(255,255,255,0.08)] backdrop-blur-sm transition-all duration-300 hover:scale-[1.04] hover:border-white/80 hover:bg-white/20 active:scale-[0.97]">
                   {/* Shimmer sweep */}
@@ -544,6 +547,7 @@ export default function HomePage() {
                   </span>
                 </button>
               </Link>
+              )}
             </div>
 
             <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 md:max-w-md">
@@ -698,6 +702,7 @@ export default function HomePage() {
       </section>
 
       {/* ---- MOBILE FLOATING QUICK PICKUP BUTTON ---- */}
+      {quickPickup && (
       <Link
         href="/customer/quick-pickup"
         className="fixed right-4 top-16 z-30 flex items-center gap-1.5 rounded-full bg-gradient-to-r from-blue-600 to-cyan-600 px-4 py-2.5 text-xs font-semibold text-white shadow-lg shadow-blue-600/30 md:hidden"
@@ -706,6 +711,7 @@ export default function HomePage() {
         <Zap className="h-3.5 w-3.5" />
         Quick Pickup
       </Link>
+      )}
 
     </div>
   )

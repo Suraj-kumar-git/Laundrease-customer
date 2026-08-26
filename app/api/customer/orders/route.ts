@@ -77,6 +77,7 @@ export async function GET(req: NextRequest) {
            o.created_at,
            o.assignment_status,
            lp.business_name  AS provider_name,
+           lp.branch_name    AS provider_branch,
            lp.city           AS provider_city,
            -- Quick item summary.
            --
@@ -131,6 +132,7 @@ export async function GET(req: NextRequest) {
         created_at:       r.created_at,
         assignment_status: r.assignment_status,
         provider_name:    r.provider_name,
+        provider_branch:  r.provider_branch ?? null,
         provider_city:    r.provider_city,
         item_count:       r.item_count,
         service_count:    r.service_count,

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { transaction, query, queryOne } from '@/lib/db'
+import { generateOrderNumber } from '@/lib/order-number'
 import { enqueueOrderConfirmationEmail } from '@/lib/sqs'
 import { sendProviderNewOrderEmail } from '@/lib/notifications/email'
 import { calculateEstimatedDeliveryDate } from '@/lib/delivery-estimate'
@@ -15,7 +16,7 @@ import {
 } from '@/lib/api-response'
 
 interface ServiceItem {
-  type:               'per_kg' | 'per_unit'
+  type:               'per_kg' | 'per_unit' | 'per_sqft'
   service_id:         number
   service_name:       string
   weight_kg?:         number
@@ -98,6 +99,11 @@ export async function POST(req: NextRequest) {
       return errorResponse(`"${svc.service_name}" requires minimum 0.5 kg`, 400)
     if (svc.type === 'per_unit' && (!svc.quantity || svc.quantity < 1))
       return errorResponse(`"${svc.service_name}" requires quantity ≥ 1`, 400)
+    // Dimension-priced lines carry no measurement at order time — that is the
+    // point. All they need is the product type, which priceLine() then checks
+    // really is per-area before it will price anything.
+    if (svc.type === 'per_sqft' && !svc.product_type_id)
+      return errorResponse(`"${svc.service_name}" requires a product`, 400)
   }
 
   const paymentMethod   = body.payment_method.toLowerCase()
@@ -293,6 +299,23 @@ export async function POST(req: NextRequest) {
         resolvedServices.reduce((s, svc) => s + svc.line_total, 0) * 100
       ) / 100
 
+      // ---- Deferred (dimension-priced) lines ---------------------------------
+      // A per-sqft line contributes 0 to the subtotal above, because a carpet
+      // has no area until the delivery partner measures it at pickup.
+      //
+      // When EVERY line is deferred, the order is worth nothing yet, and no
+      // fee should be charged either: quoting a delivery fee on a ₹0 subtotal
+      // would bill the customer at checkout for an order whose price does not
+      // exist. Every fee is recomputed from scratch at measurement anyway
+      // (delivery/orders/[id]/items calls the same calculate_order_fees with
+      // the new subtotal), so skipping them here loses nothing — it just stops
+      // the customer paying before there is anything to pay for.
+      //
+      // A MIXED basket is untouched: the shirts are priced and charged now,
+      // fees and all, and the carpet joins as a balance after measurement.
+      const hasDeferredLines  = resolvedServices.some(svc => svc.type === 'per_sqft')
+      const fullyDeferred     = hasDeferredLines && subtotal === 0
+
       // ---- Pickup pincode + coordinates --------------------------------------
       // Pickup pincode is stored denormalized so the delivery available-orders
       // query can match it directly — it was never being populated before,
@@ -325,18 +348,22 @@ export async function POST(req: NextRequest) {
       // ---- Fees from order_fee_config via DB function ----------------------
       // calculate_order_fees() reads order_fee_config, respects is_active,
       // skips express_surcharge if !is_express, applies free_above_amount cap
-      const feesRes = await client.query(
-        `SELECT calculate_order_fees($1, $2, $3, $4) AS fees`,
-        [subtotal, body.is_express, distanceKm, body.laundry_profile_id]
-      )
-      const feeRows: Array<{
+      type FeeRow = {
         code:          string
         display_name:  string
         charge_type:   string
         amount:        number
         is_free:       boolean
         taxable_base?: number
-      }> = feesRes.rows[0].fees ?? []
+      }
+      let feeRows: FeeRow[] = []
+      if (!fullyDeferred) {
+        const feesRes = await client.query(
+          `SELECT calculate_order_fees($1, $2, $3, $4) AS fees`,
+          [subtotal, body.is_express, distanceKm, body.laundry_profile_id]
+        )
+        feeRows = feesRes.rows[0].fees ?? []
+      }
       const feesTotal = feeRows.reduce((s, f) => s + parseFloat(String(f.amount)), 0)
 
       // ---- Coupon -----------------------------------------------------------
@@ -464,7 +491,12 @@ export async function POST(req: NextRequest) {
       const walletFullyCovered = effectiveWalletAmount > 0 && remainingAfterWallet <= 0
 
       // ---- COD eligibility --------------------------------------------------
-      if (isCodBased) {
+      // Nothing is payable on a fully-deferred order, so there is no amount to
+      // check a COD limit against. The check that matters happens at
+      // MEASUREMENT, once the carpet has an area and therefore a price — see
+      // the delivery items route. Running it here against ₹0 would always pass
+      // and prove nothing.
+      if (isCodBased && !fullyDeferred) {
         const codRes = await client.query(
           `SELECT cod_enabled, cod_max_order_amount FROM payment_gateway_config LIMIT 1`
         )
@@ -478,10 +510,27 @@ export async function POST(req: NextRequest) {
       }
 
       // ---- Insert order -----------------------------------------------------
+      // Adopt the cart's reserved draft number when there is one to adopt;
+      // otherwise mint a new number in the SAME format. This used to fall back
+      // to `ORD${Date.now()}`, which is why some orders read ORD-F0FFB301 and
+      // others ORD1787394257965 — see lib/order-number.ts.
       const orderNumber    = (draftOrderNumber && !staleDraftVoided)
         ? draftOrderNumber
-        : `ORD${Date.now()}`
+        : await generateOrderNumber((text, params) => client.query(text, params))
       const paymentStatus  = walletFullyCovered ? 'paid' : 'pending'
+
+      // A fully-deferred order is recorded as COD regardless of what the
+      // customer picked at checkout, because at checkout there was nothing to
+      // pick between — the amount was zero.
+      //
+      // COD is the right default rather than an arbitrary one: it is the state
+      // that makes payout eligibility WAIT for the cash to be remitted
+      // (lib/laundry-payout-eligibility.ts keys off payment_method ILIKE
+      // '%cod%'). Assuming online here would let a provider be paid out for
+      // money that had not arrived. If the measured amount later exceeds the
+      // COD cap, the measurement step flips this to the online method and the
+      // customer pays before delivery.
+      const storedPaymentMethod = fullyDeferred ? 'cod' : paymentMethod
 
       // Estimated delivery DATE (not a time slot) — based on the slowest
       // service in the order, provider turnaround overrides, and express.
@@ -515,7 +564,7 @@ export async function POST(req: NextRequest) {
           body.pickup_address, body.delivery_address ?? body.pickup_address, pickupPincode,
           body.pickup_date, body.pickup_time_slot, body.special_instructions ?? null,
           body.is_express, subtotal, taxAmount, discountAmount, totalAmount,
-          paymentStatus, paymentMethod, estimatedDeliveryDate, customerGstin,
+          paymentStatus, storedPaymentMethod, estimatedDeliveryDate, customerGstin,
           distanceKm,
         ]
       )
@@ -530,7 +579,13 @@ export async function POST(req: NextRequest) {
       const mixedLoadProductTypeId = hasKgItem ? await getMixedLoadProductTypeId(client) : null
 
       for (const svc of resolvedServices) {
-        const productTypeId = svc.type === 'per_unit' ? (svc.product_type_id ?? 1) : mixedLoadProductTypeId
+        // per_sqft carries a real product type (the carpet) like per_unit does;
+        // only per_kg is garment-agnostic and falls back to the shared
+        // mixed-load type. area_sqft is deliberately left NULL — it is written
+        // at pickup, and NULL is what keeps the line worth ₹0 until then.
+        const productTypeId = svc.type === 'per_kg'
+          ? mixedLoadProductTypeId
+          : (svc.product_type_id ?? 1)
         const weightKg      = svc.type === 'per_kg'   ? svc.weight_kg              : null
         const quantity      = svc.type === 'per_unit' ? (svc.quantity ?? 1)        : 1
         const itemRes = await client.query(
@@ -630,7 +685,7 @@ export async function POST(req: NextRequest) {
           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [orderId, remainingAfterWallet, secondaryMethod, status, provider, merchantTxnId, isOnline ? gatewayInfo!.id : null]
         )
-      } else if (effectiveWalletAmount <= 0) {
+      } else if (effectiveWalletAmount <= 0 && !fullyDeferred) {
         const isOnline = paymentMethod !== 'cod'
         if (isOnline && !gatewayInfo) throw new Error('NO_GATEWAY_CONFIGURED')
 
@@ -647,7 +702,13 @@ export async function POST(req: NextRequest) {
           [orderId, totalAmount, paymentMethod, status, provider, merchantTxnId, isOnline ? gatewayInfo!.id : null]
         )
       }
-      // walletFullyCovered → no second payment row needed
+      // walletFullyCovered → no second payment row needed.
+      //
+      // fullyDeferred → no payment row AT ALL. There is nothing to charge yet,
+      // and a ₹0 attempt is not something any gateway will accept. The row is
+      // created at measurement, when the amount finally exists, by the same
+      // balance-sync the delivery items route already runs for every other
+      // pickup-time price change.
 
       // ---- Customer stats --------------------------------------------------
       await client.query(
@@ -662,7 +723,12 @@ export async function POST(req: NextRequest) {
         walletAmountUsed:    effectiveWalletAmount,
         remainingAmount:     remainingAfterWallet,
         walletFullyCovered,
-        paymentFullyCovered: walletFullyCovered || (isCodBased && effectiveWalletAmount <= 0),
+        // fullyDeferred counts as covered: there is nothing outstanding to
+        // collect. Without it an order whose customer had picked UPI would be
+        // sent to a gateway for ₹0 — the checkout flow reads this flag to
+        // decide whether a payment step is still needed.
+        paymentFullyCovered: walletFullyCovered || fullyDeferred || (isCodBased && effectiveWalletAmount <= 0),
+        fullyDeferred,
         customer, provider, feeRows,
         pickupDate:     body.pickup_date,
         pickupTimeSlot: body.pickup_time_slot,
@@ -675,7 +741,11 @@ export async function POST(req: NextRequest) {
     // (app/api/laundry/orders/[id]/status) so partners are only assigned to
     // orders that are actually going ahead.
 
-    const needsGatewayPayment = !result.paymentFullyCovered && !isCodBased
+    // A fully-deferred order never needs a gateway step at checkout: its price
+    // does not exist yet. paymentFullyCovered already accounts for it, but the
+    // customer's chosen method (which may have been 'upi') must not drag it
+    // back into a payment flow either.
+    const needsGatewayPayment = !result.paymentFullyCovered && !isCodBased && !result.fullyDeferred
 
     // Only clear the cart once the order doesn't need any further online
     // payment step — for COD/wallet-fully-covered orders the purchase is
@@ -736,6 +806,10 @@ export async function POST(req: NextRequest) {
       wallet_amount_used:    result.walletAmountUsed,
       remaining_amount:      result.remainingAmount,
       payment_required:      needsGatewayPayment,
+      // True when nothing was charged because every line is measured at
+      // pickup. The success screen uses this to say so, rather than showing a
+      // ₹0 order and leaving the customer to guess.
+      priced_at_pickup:      result.fullyDeferred,
       payment_fully_covered: result.walletFullyCovered,
       payment_method:        body.payment_method,
       fees:                  result.feeRows,

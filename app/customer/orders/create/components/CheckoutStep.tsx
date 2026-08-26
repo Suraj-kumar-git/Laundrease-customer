@@ -62,6 +62,15 @@ export function CheckoutStep({
     return () => setCartIconHidden(false)
   }, [setCartIconHidden])
 
+  // Lines whose price is decided at pickup (carpets and anything else priced by
+  // measured area). They contribute nothing to the totals below — the amount
+  // does not exist yet — so the summary has to say so explicitly rather than
+  // let the customer read a total that is about to change.
+  const measuredAtPickup = useMemo(
+    () => orderState.selected_services.filter(i => i.type === 'per_sqft'),
+    [orderState.selected_services]
+  )
+
   const subtotal = useMemo(
     () => orderState.selected_services.reduce((s, i) => s + i.line_total, 0),
     [orderState.selected_services]
@@ -560,10 +569,24 @@ export function CheckoutStep({
                   )}
                 </div>
                 <div className="shrink-0 text-right text-xs">
-                  <span className="text-muted-foreground mr-2">
-                    {svc.type === 'per_kg' ? `${(svc as any).weight_kg}kg` : `×${(svc as any).quantity}`}
-                  </span>
-                  <span className="font-semibold text-foreground">{formatINR(svc.line_total)}</span>
+                  {svc.type === 'per_sqft' ? (
+                    /* No amount to show — a carpet has no area until the
+                       delivery partner measures it. Showing the rate is both
+                       the honest thing and all the customer was promised. */
+                    <>
+                      <span className="text-muted-foreground mr-2">
+                        {formatINR(svc.unit_price)}/sq ft
+                      </span>
+                      <span className="font-semibold text-primary">At pickup</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-muted-foreground mr-2">
+                        {svc.type === 'per_kg' ? `${(svc as any).weight_kg}kg` : `×${(svc as any).quantity}`}
+                      </span>
+                      <span className="font-semibold text-foreground">{formatINR(svc.line_total)}</span>
+                    </>
+                  )}
                 </div>
               </div>
             ))}
@@ -731,12 +754,30 @@ export function CheckoutStep({
               )}
               <div className="flex justify-between border-t border-border/40 pt-1.5">
                 <span className="font-bold text-foreground">
-                  {walletContributionRounded > 0 && !walletCoversAll ? 'Remaining to Pay' : 'Total'}
+                  {measuredAtPickup.length > 0
+                    ? 'Pay Now'
+                    : walletContributionRounded > 0 && !walletCoversAll ? 'Remaining to Pay' : 'Total'}
                 </span>
                 <span className="text-lg font-bold text-primary">
                   {formatINR(walletCoversAll ? grossTotal : amountAfterWallet)}
                 </span>
               </div>
+
+              {measuredAtPickup.length > 0 && (
+                <div className="mt-2 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+                  <span className="font-semibold text-foreground">
+                    {measuredAtPickup.length === 1
+                      ? '1 item is priced at pickup'
+                      : `${measuredAtPickup.length} items are priced at pickup`}
+                  </span>
+                  {' — '}
+                  {measuredAtPickup.map(i => i.product_type_name).join(', ')}
+                  {' is charged by area. '}
+                  Your delivery partner measures it in front of you, and the amount
+                  {' '}(plus delivery and any applicable charges) is added to this order then.
+                  You can pay it online or in cash at delivery.
+                </div>
+              )}
             </div>
           )}
         </div>

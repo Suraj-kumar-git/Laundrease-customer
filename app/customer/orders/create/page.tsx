@@ -187,7 +187,11 @@ function toCartLineItems(services: SelectedService[]): CartLineItem[] {
   return services.map(s => ({
     product_type_id:    s.product_type_id ?? 0,
     product_type_name:  s.product_type_name,
-    pricing_model:      s.weight_kg > 0 ? 'per_kg' : 'per_unit',
+    // per_sqft carries no weight AND no meaningful quantity, so it has to be
+    // read from the line's own type rather than inferred from weight_kg.
+    pricing_model:      s.type === 'per_sqft' ? 'per_sqft'
+                        : s.weight_kg > 0     ? 'per_kg'
+                        : 'per_unit',
     icon:               s.icon,
     service_id:         s.service_id,
     service_name:       s.service_name,
@@ -209,7 +213,12 @@ function cartToFlowState(cartData: any, items: any[]): Partial<OrderFlowState> {
 
   // Rebuild selected_services from cart items (for step 2 resume)
   const selected_services: SelectedService[] = items.map((item: any) => ({
-    type:              item.weight_kg != null ? 'per_kg' : 'per_unit',
+    // The cart API labels the line for us (it is the only side that can see
+    // product_types.pricing_model); fall back to the weight heuristic for
+    // responses that predate it.
+    type:              item.pricing_model === 'per_sqft' ? 'per_sqft'
+                       : item.weight_kg != null          ? 'per_kg'
+                       : 'per_unit',
     service_id:        item.service_id,
     service_name:      item.service_name,
     service_category:  item.service_category,

@@ -59,7 +59,15 @@ async function loadPartner(userPublicId: string): Promise<PartnerRow | null> {
       lp.business_name
     FROM users u
     INNER JOIN roles r ON r.id = u.role_id
-    LEFT JOIN laundry_profiles lp ON lp.user_id = u.id
+    -- LATERAL so a multi-branch login yields one row, not one per branch.
+    -- business_name is identical across branches, but the duplication would
+    -- still make queryOne's choice arbitrary.
+    LEFT JOIN LATERAL (
+      SELECT lp2.business_name FROM laundry_profiles lp2
+      WHERE lp2.user_id = u.id
+      ORDER BY (lp2.parent_provider_id IS NULL) DESC, lp2.id ASC
+      LIMIT 1
+    ) lp ON TRUE
     WHERE u.public_id = $1 AND u.deleted_at IS NULL
   `, [userPublicId])
 }

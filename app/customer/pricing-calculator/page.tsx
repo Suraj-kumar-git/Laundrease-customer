@@ -23,6 +23,7 @@ import type {
   CartLineItem, PricingModel, ServiceCategory,
 } from '@/types/pricing'
 import { CATEGORY_LABELS, SERVICE_CATEGORY_LABELS } from '@/types/pricing'
+import { useFeatureFlags } from '@/components/feature-flags'
 
 // ---- Isolated "calculator cart" ------------------------------
 // Deliberately NOT the shared useCart()/CartProvider — items picked here
@@ -550,6 +551,7 @@ function SummaryPanel({
   onPlaceOrder: () => void
   placing: boolean
 }) {
+  const { quickPickup } = useFeatureFlags()
   const total = cartItems.reduce((sum, item) => sum + item.line_total, 0)
   const itemCount = cartItems.reduce(
     (sum, item) =>
@@ -691,13 +693,15 @@ function SummaryPanel({
                 {placing ? 'Placing...' : 'Place Order'}
                 <ArrowRight className="h-4 w-4" />
               </button>
-              <Link
-                href="/customer/quick-pickup"
-                className="flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
-              >
-                <Zap className="h-4 w-4" />
-                Request Quick Pickup Instead
-              </Link>
+              {quickPickup && (
+                <Link
+                  href="/customer/quick-pickup"
+                  className="flex items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 py-2.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/10"
+                >
+                  <Zap className="h-4 w-4" />
+                  Request Quick Pickup Instead
+                </Link>
+              )}
             </div>
           </div>
         </>

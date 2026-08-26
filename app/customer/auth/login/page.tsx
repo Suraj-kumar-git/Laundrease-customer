@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Eye, EyeOff, Mail, Lock, Loader2, ShoppingBag, AlertCircle, Phone } from "lucide-react"
+import { Eye, EyeOff, Mail, Lock, Loader2, ShoppingBag, AlertCircle, Phone, AtSign } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -11,24 +11,57 @@ import { useAuth } from "@/components/auth-provider"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { SearchParamProvider } from "@/components/common/searchParamProvider"
-import { isValidEmail, isValidIndianMobile, toTenDigits } from "@/lib/validation/india"
+import { isValidEmail, normalizeIndianMobile } from "@/lib/validation/india"
 
-function validate(loginWithEmail: boolean, email: string, phone: string, password: string
-): Record<string, string> {
-  const e: Record<string, string> = {}
-  if (loginWithEmail) {
-    if (!email.trim()) {
-      e.email = "Email is required"
-    } else if (!isValidEmail(email)) {
-      e.email = "Enter a valid email address"
-    }
-  } else {
-    if (!phone) {
-      e.phone = "Phone number is required"
-    } else if (!isValidIndianMobile(phone)) {
-      e.phone = "Enter a valid 10-digit mobile number"
-    }
+// One field, two accepted formats — same rule the partner logins use.
+//
+// "Looks like an email" is decided by the presence of "@" rather than by
+// running the full email regex first: someone part-way through typing
+// "me@gmai" should be told their EMAIL is malformed, not that it is not a
+// valid mobile number. Anything without an "@" is judged as a phone.
+function looksLikeEmail(identifier: string): boolean {
+  return identifier.includes("@")
+}
+
+/**
+ * Resolve what the customer typed into the shape the login API expects.
+ *
+ * Returns null when it is neither a valid email nor a valid Indian mobile, so
+ * the caller can show one message instead of guessing which was intended.
+ */
+function resolveIdentifier(
+  identifier: string
+): { email: string } | { phone: string } | null {
+  const value = identifier.trim()
+  if (!value) return null
+
+  if (looksLikeEmail(value)) {
+    return isValidEmail(value) ? { email: value.toLowerCase() } : null
   }
+
+  // normalizeIndianMobile accepts 9876543210, +919876543210, 919876543210 and
+  // 09876543210 alike, and returns the bare ten digits. The API matches
+  // users.phone exactly, and that column stores the +91 form.
+  const ten = normalizeIndianMobile(value)
+  return ten ? { phone: `+91${ten}` } : null
+}
+
+function validate(identifier: string, password: string): Record<string, string> {
+  const e: Record<string, string> = {}
+
+  if (!identifier.trim()) {
+    e.identifier = "Email or phone number is required"
+  } else if (!resolveIdentifier(identifier)) {
+    // Point at whichever format they were evidently aiming for. Text with
+    // neither an "@" nor a digit is not obviously either, so say both rather
+    // than tell someone typing a username that their mobile number is wrong.
+    e.identifier = looksLikeEmail(identifier)
+      ? "Enter a valid email address"
+      : /\d/.test(identifier)
+        ? "Enter a valid 10-digit mobile number"
+        : "Enter a valid email address or 10-digit mobile number"
+  }
+
   if (!password) {
     e.password = "Password is required"
   } else if (password.length < 8) {
@@ -44,9 +77,7 @@ function PageContent() {
   const { toast } = useToast()
 
   const returnTo = searchParams.get("returnTo") || "/customer/dashboard"
-  const [loginWithEmail, setLoginWithEmail] = useState(false)
-  const [email,       setEmail]       = useState("")
-  const [phone,       setPhone]       = useState("")
+  const [identifier,  setIdentifier]  = useState("")
   const [password,    setPassword]    = useState("")
   const [showPwd,     setShowPwd]     = useState(false)
   const [errors,      setErrors]      = useState<Record<string, string>>({})
@@ -66,18 +97,16 @@ function PageContent() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setServerError("")
-    const errs = validate(loginWithEmail, email, phone, password)
+    const errs = validate(identifier, password)
     if (Object.keys(errs).length > 0) {
       setErrors(errs)
       return
     }
+    // validate() already rejected anything unresolvable, so this cannot be null.
+    const credential = resolveIdentifier(identifier)!
     setSubmitting(true)
     try {
-      await login(
-        loginWithEmail
-          ? { email: email.trim().toLowerCase(), password }
-          : { phone: `+91${phone}`, password }
-      )
+      await login({ ...credential, password })
       // Hard navigation, not router.replace: the Next.js Router Cache can
       // hold onto a stale "redirect to login" result for this path from
       // before the user was authenticated, which would bounce them right
@@ -116,61 +145,43 @@ function PageContent() {
           )}
 
           <form onSubmit={handleSubmit} noValidate className="space-y-4">
-            {/* Phone / Email */}
+            {/* Email or phone — one field, same as the partner logins */}
             <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <Label htmlFor={loginWithEmail ? "email" : "phone"}>
-                  {loginWithEmail ? "Email" : "Phone"}
-                </Label>
-                <button
-                  type="button"
-                  className="text-xs text-primary hover:underline"
-                  onClick={() => {
-                    setLoginWithEmail(v => !v)
-                    setServerError("")
-                    setErrors({})
-                  }}
-                >
-                  {loginWithEmail ? "Use phone instead" : "Use email instead"}
-                </button>
-              </div>
+              <Label htmlFor="identifier">Email or phone</Label>
               <div className="relative">
-                {loginWithEmail ? (
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                ) : (
-                  <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
-                )}
+                {/* The icon follows what is being typed: an "@" means they are
+                    writing an email, digits mean a number, and neither yet
+                    means we do not presume. */}
+                {identifier.includes("@")
+                  ? <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                  : /^\d/.test(identifier.trim())
+                    ? <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    : <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />}
                 <Input
-                  id={loginWithEmail ? "email" : "phone"}
-                  type={loginWithEmail ? "email" : "tel"}
-                  autoComplete={loginWithEmail ? "email" : "tel"}
-                  inputMode={loginWithEmail ? "email" : "numeric"}
-                  maxLength={loginWithEmail ? undefined : 10}
-                  placeholder={loginWithEmail ? "name@example.com" : "9876543210"}
+                  id="identifier"
+                  type="text"
+                  // "username" is the correct hint for a combined identifier —
+                  // it lets a password manager offer either saved value. There
+                  // is deliberately no maxLength here: the old field capped
+                  // input at 10 characters for phone numbers, which would
+                  // silently truncate every email address.
+                  autoComplete="username"
+                  placeholder="name@example.com or 9876543210"
                   className={cn(
                     "pl-10",
-                    (errors.email || errors.phone) &&
-                      "border-destructive focus-visible:ring-destructive"
+                    errors.identifier && "border-destructive focus-visible:ring-destructive"
                   )}
-                  value={loginWithEmail ? email : phone}
+                  value={identifier}
                   onChange={e => {
-                    if (loginWithEmail) {
-                      setEmail(e.target.value)
-                      clearError("email")
-                    } else {
-                      setPhone(toTenDigits(e.target.value))
-                      clearError("phone")
-                    }
+                    setIdentifier(e.target.value)
+                    clearError("identifier")
                     setServerError("")
                   }}
                   disabled={submitting}
                 />
               </div>
-              {loginWithEmail && errors.email && (
-                <p className="text-xs text-destructive">{errors.email}</p>
-              )}
-              {!loginWithEmail && errors.phone && (
-                <p className="text-xs text-destructive">{errors.phone}</p>
+              {errors.identifier && (
+                <p className="text-xs text-destructive">{errors.identifier}</p>
               )}
             </div>
 

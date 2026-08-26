@@ -18,6 +18,7 @@ import {
   Loader2, MapPin, Search, LocateFixed, Star, ShieldCheck, X, Store,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { branchSuffix, duplicateBusinessNames } from '@/lib/provider-label'
 import { loadScript } from '@/lib/payment-client'
 import { formatDistance } from '@/lib/format-distance'
 import type { CompareProvider } from '../types'
@@ -62,6 +63,7 @@ function extractAreaTerm(components: any[] | undefined, fallback: string): strin
   const byType = (t: string) =>
     components?.find(c => Array.isArray(c.types) && c.types.includes(t))?.long_name as string | undefined
 
+
   return (
     byType('postal_code')                     // most precise — hits the pincode branch
     ?? byType('locality')                     // "Pune", "Pimpri-Chinchwad"
@@ -78,6 +80,10 @@ export function AreaProviderSearch({
   armed, areaLabel, providers, loadingProviders, searched, takenIds,
   onAreaResolved, onPickProvider, onClearArea, onCancelArming,
 }: Props) {
+  // Branches of one provider appear as separate rows here, each with its own
+  // prices and distance; without a label two of them are indistinguishable.
+  const duplicateNames = duplicateBusinessNames(providers)
+
   const [query, setQuery] = useState('')
   const [predictions, setPredictions] = useState<{ place_id: string; description: string }[]>([])
   const [showDropdown, setShowDropdown] = useState(false)
@@ -380,7 +386,16 @@ export function AreaProviderSearch({
                           {p.business_name.charAt(0)}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-semibold text-foreground">{p.business_name}</p>
+                          <p className="truncate text-sm font-semibold text-foreground">
+                            {p.business_name}
+                            {/* On collision only: this is a list, so the branch
+                                earns its space when two rows share a name. */}
+                            {branchSuffix(p, { duplicates: duplicateNames }) && (
+                              <span className="font-normal text-muted-foreground">
+                                {' · '}{p.branch_name}
+                              </span>
+                            )}
+                          </p>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
                             {Number(p.rating) > 0 && (
                               <span className="flex items-center gap-0.5 font-medium text-foreground">

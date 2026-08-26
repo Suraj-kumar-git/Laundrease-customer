@@ -4,6 +4,8 @@
 
 import { NextRequest } from 'next/server'
 import { query, queryOne, transaction } from '@/lib/db'
+import { orderItemMeasurementsSql } from '@/lib/order-measurements-sql'
+import { dedupedStatusHistory } from '@/lib/order-status-timeline'
 import {
   successResponse, errorResponse, notFoundResponse,
   serverErrorResponse, unauthorizedResponse,
@@ -51,6 +53,9 @@ export async function GET(
          -- Provider
          lp.id            AS provider_id,
          lp.business_name AS provider_name,
+         -- Which branch took the order. A customer chasing their laundry needs
+         -- the shop that has it, not the name over three of them.
+         lp.branch_name   AS provider_branch,
          lp.address_line1 AS provider_address,
          lp.city          AS provider_city,
          lp.contact_person_phone AS provider_phone,
@@ -76,8 +81,11 @@ export async function GET(
          oi.modification_note,
          oi.modified_at,
          oi.product_type_id,
+         oi.area_sqft,
          pt.name          AS product_type_name,
+         pt.pricing_model,
          pt.icon,
+         ${orderItemMeasurementsSql()},
          s.id             AS service_id,
          s.name           AS service_name,
          s.category       AS service_category,
@@ -128,7 +136,7 @@ export async function GET(
                   THEN COALESCE(lp.business_name, 'Laundrease')
                 ELSE u.full_name
               END AS changed_by_name
-       FROM order_status_history osh
+       FROM ${dedupedStatusHistory('osh.order_id = $1')} osh
        LEFT JOIN users u  ON u.id = osh.updated_by
        LEFT JOIN roles r  ON r.id = u.role_id
        LEFT JOIN orders o ON o.id = osh.order_id

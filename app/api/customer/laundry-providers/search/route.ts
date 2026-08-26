@@ -1,6 +1,7 @@
 // app/api/customer/laundry-providers/search/route.ts
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
+import { providerServiceNamesSql } from '@/lib/provider-service-names'
 import { successResponse, errorResponse, serverErrorResponse } from '@/lib/api-response'
 import { PROVIDER_HAS_SUBSCRIPTION_CAPACITY_SQL } from '@/lib/subscription'
 import { resolveProfileImageUrl } from '@/lib/s3'
@@ -134,6 +135,10 @@ export async function GET(req: NextRequest) {
         ? `SELECT
              lp.id,
              lp.business_name,
+             -- Which shop of this business. Two branches are two rows here,
+             -- with their own pin, fee and rating; this is what tells them
+             -- apart on screen.
+             lp.branch_name,
              lp.business_address,
              lp.city,
              lp.postal_code,
@@ -142,7 +147,7 @@ export async function GET(req: NextRequest) {
              lp.rating_count,
              lp.capacity,
              lp.certifications,
-             lp.services_offered,
+             ${providerServiceNamesSql()},
              lp.operating_hours,
              lp.is_verified,
              lp.logo_url,
@@ -164,9 +169,10 @@ export async function GET(req: NextRequest) {
              )
            ORDER BY lp.rating DESC, lp.business_name ASC`
         : `SELECT
-             lp.id, lp.business_name, lp.business_address, lp.city, lp.postal_code,
+             lp.id, lp.business_name, lp.branch_name, lp.business_address, lp.city, lp.postal_code,
              lp.service_area, lp.rating, lp.rating_count, lp.capacity,
-             lp.certifications, lp.services_offered, lp.operating_hours, lp.is_verified,
+             lp.certifications, ${providerServiceNamesSql()},
+             lp.operating_hours, lp.is_verified,
              lp.logo_url,
              ${minPriceKgExpr} AS min_price_kg,
              ${distanceSelectCol}${feeSelectCols}
@@ -194,6 +200,7 @@ export async function GET(req: NextRequest) {
       return {
       id: r.id,
       business_name: r.business_name,
+      branch_name: r.branch_name ?? null,
       business_address: r.business_address,
       city: r.city,
       postal_code: r.postal_code,

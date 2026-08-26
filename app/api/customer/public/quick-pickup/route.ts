@@ -6,6 +6,7 @@ import {
   validationError,
   serverErrorResponse,
 } from '@/lib/api-response'
+import { isQuickPickupEnabled } from '@/lib/quick-pickup-config'
 
 // POST /api/customer/public/quick-pickup
 // Public — no auth required
@@ -20,6 +21,13 @@ const MAX_QUICK_PICKUPS_PER_PHONE = 2
 const QUICK_PICKUP_WINDOW_MINUTES = 60
 
 export async function POST(req: NextRequest) {
+  // The public front door for Quick Pickup. Closed when the feature is
+  // switched off, so a saved link or a replayed request cannot keep filing
+  // leads into a queue nobody is working.
+  if (!(await isQuickPickupEnabled())) {
+    return errorResponse('Quick Pickup is not available right now', 404, 'QUICK_PICKUP_DISABLED')
+  }
+
   let body: Record<string, any>
 
   try {

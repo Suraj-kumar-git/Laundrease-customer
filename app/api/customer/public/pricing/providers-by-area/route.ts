@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server'
 import { query } from '@/lib/db'
+import { providerServiceNamesSql } from '@/lib/provider-service-names'
 import {
   successResponse,
   errorResponse,
@@ -40,6 +41,7 @@ export async function GET(req: NextRequest) {
     const result = await query<{
       id: number
       business_name: string
+      branch_name: string | null
       city: string | null
       postal_code: string | null
       rating: number
@@ -55,7 +57,7 @@ export async function GET(req: NextRequest) {
              lp.city,
              lp.postal_code,
              lp.rating,
-             lp.services_offered,
+             ${providerServiceNamesSql()},
              lp.contact_person_name,
              lp.address_line1,
              lp.landmark
@@ -68,8 +70,8 @@ export async function GET(req: NextRequest) {
              AND psa.postal_code = $1
            ORDER BY lp.rating DESC, lp.business_name ASC`
         : `SELECT
-             lp.id, lp.business_name, lp.city, lp.postal_code, lp.rating,
-             lp.services_offered, lp.contact_person_name,
+             lp.id, lp.business_name, lp.branch_name, lp.city, lp.postal_code, lp.rating,
+             ${providerServiceNamesSql()}, lp.contact_person_name,
              lp.address_line1, lp.landmark
            FROM laundry_profiles lp
            WHERE lp.status = 'active'

@@ -78,7 +78,18 @@ export async function GET(req: NextRequest) {
          -- catalog entry was (incorrectly) marked per_kg, which undercounts
          -- it in the header badge/cart-drawer total (both sum by quantity
          -- only for lines they believe are per_unit).
-         CASE WHEN ci.weight_kg IS NOT NULL THEN 'per_kg' ELSE 'per_unit' END AS pricing_model,
+         -- per_sqft is the one case that MUST come from the catalog flag:
+         -- cart_items has no area column (a carpet has no area until the
+         -- delivery partner measures it), so there is no per-line signal to
+         -- read. It is safe here in a way it isn't above, because priceLine()
+         -- now verifies the model against product_types before a line can be
+         -- added at all — a per-sqft product cannot be added as anything else,
+         -- and nothing else can be added as per-sqft.
+         CASE
+           WHEN pt.pricing_model = 'per_sqft' THEN 'per_sqft'
+           WHEN ci.weight_kg IS NOT NULL      THEN 'per_kg'
+           ELSE 'per_unit'
+         END AS pricing_model,
          pt.icon,
          cis.id            AS service_item_id,
          cis.service_id,

@@ -19,6 +19,7 @@ import { getPreferredAddressId, setPreferredAddressId } from '@/lib/dashboard-ad
 import { formatDistance } from '@/lib/format-distance'
 import { useCustomerLocation } from '@/lib/use-customer-location'
 import { DeliveryFeePreview } from '@/types/order-types'
+import { useFeatureFlags } from '@/components/feature-flags'
 
 // ---- Types --------------------------------------------------
 
@@ -1189,6 +1190,7 @@ function ActiveOrdersSection({ orders }: { orders: ActiveOrder[] }) {
   // ---- Main page ----------------------------------------------
 
 export default function CustomerDashboard() {
+  const { quickPickup } = useFeatureFlags()
   const { markUnauthorized } = useAuth()
   const router   = useRouter()
 
@@ -1489,7 +1491,9 @@ export default function CustomerDashboard() {
                 <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quick Access</p>
                 <div className="space-y-1">
                   {[
-                    { key: 'qp',  href: '/customer/quick-pickup',           icon: Zap,    label: 'Quick Pickup',      sub: 'No account needed',     onClick: null },
+                    // Quick Pickup is admin-switchable — see
+                    // platform_config.quick_pickup_enabled.
+                    ...(quickPickup ? [{ key: 'qp', href: '/customer/quick-pickup', icon: Zap, label: 'Quick Pickup', sub: 'No account needed', onClick: null }] : []),
                     { key: 'wal', href: null,                       icon: Wallet, label: 'Wallet',             sub: formatINR(displayWallet), onClick: () => setWalletOpen(true) },
                     { key: 'ref', href: '/customer/refer-and-earn', icon: Gift,   label: 'Refer & Earn',       sub: 'Earn wallet credits',   onClick: null },
                     { key: 'cal', href: '/customer/pricing-calculator',      icon: Star,   label: 'Pricing Calculator', sub: 'Estimate your cost',    onClick: null },

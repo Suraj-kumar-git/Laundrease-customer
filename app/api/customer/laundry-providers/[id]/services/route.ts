@@ -8,6 +8,9 @@ import { getProviderCatalog } from '@/lib/provider-catalog'
 // Returns:
 //   per_kg_services: KgService[]   — services priced per kg (wash_fold, wash_iron)
 //   per_unit_products: UnitProduct[] — product types priced per unit (dry_clean, steam_iron per garment)
+//   per_sqft_products: SqftProduct[] — product types priced by measured area
+//     (carpets). These carry a RATE, not a price: the amount is calculated
+//     once the delivery partner measures the item at pickup.
 // Pricing resolution (see lib/provider-catalog.ts): provider override > platform base price
 
 export async function GET(

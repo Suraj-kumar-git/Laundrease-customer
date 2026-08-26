@@ -1,21 +1,19 @@
 // app/customer/quick-pickup/layout.tsx
-// page.tsx in this segment is 'use client' (interactive booking flow) and
-// can't export metadata itself — this sibling server layout carries it.
+//
+// Server-side gate for the Quick Pickup page.
+//
+// Hiding the nav item is presentation, not enforcement — the URL is short,
+// guessable, and already shared in emails and old links. This layout is a
+// server component, so the switch is checked before any of the page ships,
+// and a customer who types the address while the feature is off gets the
+// normal 404 rather than a working form whose submissions nobody is watching.
 
-import type { Metadata } from 'next'
+import { notFound } from 'next/navigation'
+import { isQuickPickupEnabled } from '@/lib/quick-pickup-config'
 
-export const metadata: Metadata = {
-  title: 'Quick Laundry Pickup | Laundrease',
-  description: 'Book a same-day laundry pickup in Pune in under a minute — no account setup needed to get started.',
-  keywords: ['same day laundry pickup', 'quick laundry pickup Pune', 'laundry pickup app'],
-  alternates: { canonical: '/customer/quick-pickup' },
-  openGraph: {
-    title: 'Quick Laundry Pickup | Laundrease', type: 'website', url: '/customer/quick-pickup',
-    description: 'Book a same-day laundry pickup in Pune in under a minute.',
-  },
-  twitter: { card: 'summary_large_image', title: 'Quick Laundry Pickup | Laundrease' },
-}
-
-export default function QuickPickupLayout({ children }: { children: React.ReactNode }) {
-  return children
+export default async function QuickPickupLayout({
+  children,
+}: { children: React.ReactNode }) {
+  if (!(await isQuickPickupEnabled())) notFound()
+  return <>{children}</>
 }

@@ -21,6 +21,7 @@ import { resolveProductIconSrc } from '@/lib/product-icons'
 import { ConditionEvidence } from '@/components/condition/ConditionEvidence'
 import type { ConditionPhoto } from '@/lib/condition-photo-types'
 import { useMaskedCall, type MaskedCallState } from '@/hooks/use-masked-call'
+import { MeasurementSummary, type MeasurementSection } from '@/components/orders/MeasurementSummary'
 
 // ---- Types --------------------------------------------------
 interface OrderDetail {
@@ -78,6 +79,11 @@ interface OrderItem {
   id: number; quantity: number; weight_kg: number | null; garment_label: string | null
   item_status: string | null; modification_note: string | null
   product_type_name: string; icon: string
+  // Dimension-priced items (carpets). area_sqft is null until the delivery
+  // partner measures at pickup.
+  pricing_model?: string | null
+  area_sqft?: string | number | null
+  measurements?: MeasurementSection[]
   service_id: number; service_name: string; service_category: string
   unit_price: number; line_total: number; is_express: boolean; express_multiplier: number
 }
@@ -1406,9 +1412,19 @@ export default function OrderDetailPage() {
                               {item.product_type_name}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {item.weight_kg ? `${item.weight_kg} kg` : `×${item.quantity}`}
+                              {item.pricing_model === 'per_sqft'
+                                ? `₹${item.unit_price}/sq ft`
+                                : item.weight_kg ? `${item.weight_kg} kg` : `×${item.quantity}`}
                               {item.is_express && <span className="ml-1 text-amber-600">· Express</span>}
                             </p>
+                            {item.pricing_model === 'per_sqft' && (
+                              <MeasurementSummary
+                                className="mt-1.5"
+                                sections={item.measurements}
+                                areaSqft={item.area_sqft ?? null}
+                                ratePerSqft={Number(item.unit_price)}
+                              />
+                            )}
                             {item.item_status === 'not_picked_up' && (
                               <span className="mt-1 inline-block rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-950/40 dark:text-red-400"
                                 title={item.modification_note || undefined}>

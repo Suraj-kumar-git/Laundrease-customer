@@ -4,6 +4,7 @@ import { query } from '@/lib/db'
 import { customerVisibleOrderSql } from '@/lib/customer-order-visibility'
 import { successResponse, errorResponse } from '@/lib/api-response'
 import { resolveProfileImageUrl } from '@/lib/s3'
+import { dedupedStatusHistory } from '@/lib/order-status-timeline'
 
 export async function GET(req: NextRequest) {
   try {
@@ -100,7 +101,7 @@ export async function GET(req: NextRequest) {
           osh.notes,
           osh.location,
           osh.created_at AS timestamp
-        FROM order_status_history osh
+        FROM ${dedupedStatusHistory('osh.order_id = ANY($1)')} osh
         WHERE osh.order_id = ANY($1)
         ORDER BY osh.created_at ASC
       `, [activeOrderRows.map(o => o.id)])
